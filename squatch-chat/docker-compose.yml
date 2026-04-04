@@ -1,0 +1,20 @@
+# SquatchChat — PostgreSQL via Docker
+# Run: docker compose up -d
+# This only starts the database. The app itself runs natively.
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: squatch-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: squatchchat
+    ports:
+      - "5432:5432"
+    volumes:
+      - squatch-data:/var/lib/postgresql/data
+
+volumes:
+  squatch-data:
