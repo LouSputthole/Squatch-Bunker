@@ -14,6 +14,7 @@ interface ServerListProps {
   activeServerId?: string;
   onServerSelect: (server: Server) => void;
   onServerCreated: (server: Server) => void;
+  onServerJoined: (server: Server) => void;
 }
 
 export default function ServerList({
@@ -21,70 +22,204 @@ export default function ServerList({
   activeServerId,
   onServerSelect,
   onServerCreated,
+  onServerJoined,
 }: ServerListProps) {
-  const [creating, setCreating] = useState(false);
+  const [showPanel, setShowPanel] = useState<"create" | "join" | null>(null);
   const [newName, setNewName] = useState("");
+  const [joinCode, setJoinCode] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
-    if (!newName.trim()) return;
+    if (!newName.trim() || loading) return;
+    setError("");
+    setLoading(true);
 
-    const res = await fetch("/api/servers", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: newName.trim() }),
-    });
+    try {
+      const res = await fetch("/api/servers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: newName.trim() }),
+      });
 
-    if (res.ok) {
-      const { server } = await res.json();
-      onServerCreated(server);
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Failed to create server");
+        return;
+      }
+
+      onServerCreated(data.server);
       setNewName("");
-      setCreating(false);
+      setShowPanel(null);
+    } catch {
+      setError("Something went wrong");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleJoin(e: React.FormEvent) {
+    e.preventDefault();
+    if (!joinCode.trim() || loading) return;
+    setError("");
+    setLoading(true);
+
+    try {
+      // Extract code from URL or use raw
+      let code = joinCode.trim();
+      const match = code.match(/\/join\/(.+)$/);
+      if (match) code = match[1];
+
+      const res = await fetch("/api/servers/join", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ inviteCode: code }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Failed to join server");
+        return;
+      }
+
+      onServerJoined(data.server);
+      setJoinCode("");
+      setShowPanel(null);
+    } catch {
+      setError("Something went wrong");
+    } finally {
+      setLoading(false);
     }
   }
 
   return (
-    <div className="w-[72px] bg-[var(--bg)] flex flex-col items-center py-3 gap-2 border-r border-[var(--accent-2)]/30">
-      {servers.map((server) => (
+    <>
+      <div className="w-[72px] bg-[var(--bg)] flex flex-col items-center py-3 gap-2 border-r border-[var(--accent-2)]/30 shrink-0">
+        {servers.map((server) => (
+          <button
+            key={server.id}
+            onClick={() => onServerSelect(server)}
+            className={`w-12 h-12 rounded-2xl flex items-center justify-center text-sm font-bold transition-all hover:rounded-xl ${
+              activeServerId === server.id
+                ? "bg-[var(--accent-2)] text-[var(--text)] rounded-xl"
+                : "bg-[var(--panel-2)] text-[var(--muted)] hover:bg-[var(--accent-2)] hover:text-[var(--text)]"
+            }`}
+            title={server.name}
+          >
+            {server.name.slice(0, 2).toUpperCase()}
+          </button>
+        ))}
+
+        <div className="w-8 h-[1px] bg-[var(--accent-2)]/30 my-1" />
+
+        {/* Create server button */}
         <button
-          key={server.id}
-          onClick={() => onServerSelect(server)}
-          className={`w-12 h-12 rounded-2xl flex items-center justify-center text-sm font-bold transition-all hover:rounded-xl ${
-            activeServerId === server.id
+          onClick={() => { setShowPanel(showPanel === "create" ? null : "create"); setError(""); }}
+          className={`w-12 h-12 rounded-2xl flex items-center justify-center text-2xl transition-all hover:rounded-xl ${
+            showPanel === "create"
               ? "bg-[var(--accent-2)] text-[var(--text)] rounded-xl"
-              : "bg-[var(--panel-2)] text-[var(--muted)] hover:bg-[var(--accent-2)] hover:text-[var(--text)]"
+              : "bg-[var(--panel-2)] text-[var(--accent-2)] hover:bg-[var(--accent-2)] hover:text-[var(--text)]"
           }`}
-          title={server.name}
-        >
-          {server.name.slice(0, 2).toUpperCase()}
-        </button>
-      ))}
-
-      <div className="w-8 h-[1px] bg-[var(--accent-2)]/30 my-1" />
-
-      {creating ? (
-        <form onSubmit={handleCreate} className="px-1">
-          <input
-            type="text"
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            placeholder="Name"
-            className="w-12 text-xs px-1 py-2 bg-[var(--panel-2)] text-[var(--text)] border border-[var(--accent-2)] rounded text-center focus:outline-none"
-            autoFocus
-            onBlur={() => {
-              if (!newName.trim()) setCreating(false);
-            }}
-          />
-        </form>
-      ) : (
-        <button
-          onClick={() => setCreating(true)}
-          className="w-12 h-12 rounded-2xl bg-[var(--panel-2)] text-[var(--accent-2)] hover:bg-[var(--accent-2)] hover:text-[var(--text)] hover:rounded-xl transition-all flex items-center justify-center text-2xl"
           title="Create Server"
         >
           +
         </button>
+
+        {/* Join server button */}
+        <button
+          onClick={() => { setShowPanel(showPanel === "join" ? null : "join"); setError(""); }}
+          className={`w-12 h-12 rounded-2xl flex items-center justify-center text-lg transition-all hover:rounded-xl ${
+            showPanel === "join"
+              ? "bg-[var(--accent-2)] text-[var(--text)] rounded-xl"
+              : "bg-[var(--panel-2)] text-[var(--accent-2)] hover:bg-[var(--accent-2)] hover:text-[var(--text)]"
+          }`}
+          title="Join Server"
+        >
+          &#8618;
+        </button>
+      </div>
+
+      {/* Slide-out panel for create/join */}
+      {showPanel && (
+        <div className="w-72 bg-[var(--panel)] border-r border-[var(--accent-2)]/30 flex flex-col shrink-0">
+          <div className="h-12 px-4 flex items-center justify-between border-b border-[var(--accent-2)]/30">
+            <h2 className="font-bold text-[var(--text)] text-sm">
+              {showPanel === "create" ? "Create a Server" : "Join a Server"}
+            </h2>
+            <button
+              onClick={() => setShowPanel(null)}
+              className="text-[var(--muted)] hover:text-[var(--text)] text-lg"
+            >
+              &times;
+            </button>
+          </div>
+
+          <div className="p-4">
+            {error && (
+              <div className="p-2 mb-3 bg-[var(--danger)] text-[var(--text)] rounded text-xs">
+                {error}
+              </div>
+            )}
+
+            {showPanel === "create" ? (
+              <form onSubmit={handleCreate} className="space-y-3">
+                <div>
+                  <label className="block text-xs text-[var(--muted)] mb-1 uppercase tracking-wide">
+                    Server Name
+                  </label>
+                  <input
+                    type="text"
+                    value={newName}
+                    onChange={(e) => setNewName(e.target.value)}
+                    placeholder="My Squatch Den"
+                    className="w-full px-3 py-2 bg-[var(--panel-2)] text-[var(--text)] border border-[var(--accent-2)] rounded focus:outline-none focus:border-[var(--accent)] text-sm"
+                    autoFocus
+                    required
+                  />
+                </div>
+                <p className="text-xs text-[var(--muted)]">
+                  Your server is where you and your friends hang out. A #campfire channel will be created automatically.
+                </p>
+                <button
+                  type="submit"
+                  disabled={loading || !newName.trim()}
+                  className="w-full py-2 bg-[var(--accent-2)] text-[var(--text)] rounded hover:bg-[var(--accent)] hover:text-[var(--bg)] transition-colors disabled:opacity-50 font-medium text-sm"
+                >
+                  {loading ? "Creating..." : "Create Server"}
+                </button>
+              </form>
+            ) : (
+              <form onSubmit={handleJoin} className="space-y-3">
+                <div>
+                  <label className="block text-xs text-[var(--muted)] mb-1 uppercase tracking-wide">
+                    Invite Link or Code
+                  </label>
+                  <input
+                    type="text"
+                    value={joinCode}
+                    onChange={(e) => setJoinCode(e.target.value)}
+                    placeholder="Paste invite link or code"
+                    className="w-full px-3 py-2 bg-[var(--panel-2)] text-[var(--text)] border border-[var(--accent-2)] rounded focus:outline-none focus:border-[var(--accent)] text-sm"
+                    autoFocus
+                    required
+                  />
+                </div>
+                <p className="text-xs text-[var(--muted)]">
+                  Enter an invite link or code from a friend to join their server.
+                </p>
+                <button
+                  type="submit"
+                  disabled={loading || !joinCode.trim()}
+                  className="w-full py-2 bg-[var(--accent-2)] text-[var(--text)] rounded hover:bg-[var(--accent)] hover:text-[var(--bg)] transition-colors disabled:opacity-50 font-medium text-sm"
+                >
+                  {loading ? "Joining..." : "Join Server"}
+                </button>
+              </form>
+            )}
+          </div>
+        </div>
       )}
-    </div>
+    </>
   );
 }

@@ -110,13 +110,25 @@ export default function ChatPage() {
     setOnlineMembers(new Set());
   }, []);
 
-  const handleServerCreated = useCallback((server: Server) => {
-    setServers((prev) => [...prev, server]);
+  const activateServer = useCallback((server: Server) => {
+    setServers((prev) => {
+      // Add if not already in list
+      if (prev.some((s) => s.id === server.id)) return prev;
+      return [...prev, server];
+    });
     setActiveServer(server);
     if (server.channels.length > 0) {
       setActiveChannel(server.channels[0]);
     }
   }, []);
+
+  const handleServerCreated = useCallback((server: Server) => {
+    activateServer(server);
+  }, [activateServer]);
+
+  const handleServerJoined = useCallback((server: Server) => {
+    activateServer(server);
+  }, [activateServer]);
 
   const handleChannelSelect = useCallback((channel: Channel) => {
     setActiveChannel(channel);
@@ -150,12 +162,13 @@ export default function ChatPage() {
 
   return (
     <div className="h-screen flex bg-[var(--bg)]">
-      {/* Server rail */}
+      {/* Server rail + slide-out create/join panel */}
       <ServerList
         servers={servers}
         activeServerId={activeServer?.id}
         onServerSelect={handleServerSelect}
         onServerCreated={handleServerCreated}
+        onServerJoined={handleServerJoined}
       />
 
       {/* Channel sidebar */}
@@ -169,8 +182,12 @@ export default function ChatPage() {
           onChannelCreated={handleChannelCreated}
         />
       ) : (
-        <div className="w-60 bg-[var(--panel)] flex items-center justify-center text-[var(--muted)] text-sm border-r border-[var(--accent-2)]/30">
-          Create a server to get started
+        <div className="w-60 bg-[var(--panel)] flex flex-col items-center justify-center text-[var(--muted)] text-sm border-r border-[var(--accent-2)]/30 px-4 text-center gap-3">
+          <p className="text-base text-[var(--text)]">No servers yet</p>
+          <p className="text-xs">
+            Use the <span className="text-[var(--accent)] font-bold">+</span> button to create a server
+            or the <span className="text-[var(--accent)] font-bold">&#8618;</span> button to join one
+          </p>
         </div>
       )}
 
@@ -184,9 +201,16 @@ export default function ChatPage() {
         />
       ) : (
         <div className="flex-1 flex items-center justify-center bg-[var(--panel-2)] text-[var(--muted)]">
-          <div className="text-center">
-            <p className="text-2xl mb-2">Welcome to SquatchChat</p>
-            <p className="text-sm">Select a channel or create a server</p>
+          <div className="text-center max-w-sm">
+            <p className="text-2xl mb-2 text-[var(--text)]">Welcome to SquatchChat</p>
+            {servers.length === 0 ? (
+              <p className="text-sm">
+                Hit the <span className="text-[var(--accent)] font-bold">+</span> in the left rail to create your first server,
+                or <span className="text-[var(--accent)] font-bold">&#8618;</span> to join one with an invite code.
+              </p>
+            ) : (
+              <p className="text-sm">Select a channel to start chatting</p>
+            )}
           </div>
         </div>
       )}
