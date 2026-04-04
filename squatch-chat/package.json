@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "dev:realtime": "tsx watch realtime/server.ts",
-    "postinstall": "prisma generate",
+    "postinstall": "bash scripts/postinstall.sh || prisma generate",
     "build": "prisma generate && next build",
     "start": "next start",
     "lint": "eslint",
@@ -19,6 +19,7 @@
     "@prisma/client": "^7.6.0",
     "bcryptjs": "^3.0.3",
     "cookie": "^1.1.1",
+    "dotenv": "^17.4.0",
     "jsonwebtoken": "^9.0.3",
     "next": "16.2.2",
     "react": "19.2.4",
