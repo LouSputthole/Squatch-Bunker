@@ -26,6 +26,8 @@ model Server {
   ownerId   String
   createdAt DateTime @default(now())
 
+  inviteCode String   @unique @default(uuid())
+
   owner    User           @relation(fields: [ownerId], references: [id])
   members  ServerMember[]
   channels Channel[]

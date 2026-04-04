@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import ServerList from "@/components/ServerList";
 import ChannelList from "@/components/ChannelList";
 import ChatPanel from "@/components/ChatPanel";
-import { connectSocket, disconnectSocket } from "@/lib/socket";
+import MemberList from "@/components/MemberList";
+import { connectSocket, disconnectSocket, getSocket } from "@/lib/socket";
 
 interface Channel {
   id: string;
@@ -31,6 +32,7 @@ export default function ChatPage() {
   const [servers, setServers] = useState<Server[]>([]);
   const [activeServer, setActiveServer] = useState<Server | null>(null);
   const [activeChannel, setActiveChannel] = useState<Channel | null>(null);
+  const [onlineMembers, setOnlineMembers] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
 
   // Fetch user and servers on mount
@@ -54,7 +56,18 @@ export default function ChatPage() {
         setServers(serversData.servers || []);
 
         // Connect socket
-        connectSocket("");
+        const socket = connectSocket();
+
+        // Identify to socket server
+        socket.emit("auth:identify", {
+          userId: userData.user.id,
+          username: userData.user.username,
+        });
+
+        // Listen for presence updates
+        socket.on("presence:update", (data: { serverId: string; members: { userId: string; username: string }[] }) => {
+          setOnlineMembers(new Set(data.members.map((m) => m.userId)));
+        });
 
         setLoading(false);
       } catch {
@@ -80,36 +93,46 @@ export default function ChatPage() {
     }
   }, [servers, activeServer]);
 
-  function handleServerSelect(server: Server) {
+  // Join server room for presence when active server changes
+  useEffect(() => {
+    if (!activeServer) return;
+    const socket = getSocket();
+    socket.emit("server:join", activeServer.id);
+
+    return () => {
+      socket.emit("server:leave", activeServer.id);
+    };
+  }, [activeServer]);
+
+  const handleServerSelect = useCallback((server: Server) => {
     setActiveServer(server);
     setActiveChannel(server.channels[0] || null);
-  }
+    setOnlineMembers(new Set());
+  }, []);
 
-  function handleServerCreated(server: Server) {
+  const handleServerCreated = useCallback((server: Server) => {
     setServers((prev) => [...prev, server]);
     setActiveServer(server);
     if (server.channels.length > 0) {
       setActiveChannel(server.channels[0]);
     }
-  }
+  }, []);
 
-  function handleChannelSelect(channel: Channel) {
+  const handleChannelSelect = useCallback((channel: Channel) => {
     setActiveChannel(channel);
-  }
+  }, []);
 
-  function handleChannelCreated(channel: Channel) {
-    if (activeServer) {
-      const updated = {
-        ...activeServer,
-        channels: [...activeServer.channels, channel],
-      };
-      setActiveServer(updated);
-      setServers((prev) =>
-        prev.map((s) => (s.id === updated.id ? updated : s))
+  const handleChannelCreated = useCallback((channel: Channel) => {
+    setActiveServer((prev) => {
+      if (!prev) return prev;
+      const updated = { ...prev, channels: [...prev.channels, channel] };
+      setServers((servers) =>
+        servers.map((s) => (s.id === updated.id ? updated : s))
       );
-      setActiveChannel(channel);
-    }
-  }
+      return updated;
+    });
+    setActiveChannel(channel);
+  }, []);
 
   async function handleLogout() {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -157,6 +180,7 @@ export default function ChatPage() {
           channelId={activeChannel.id}
           channelName={activeChannel.name}
           currentUserId={user.id}
+          currentUsername={user.username}
         />
       ) : (
         <div className="flex-1 flex items-center justify-center bg-[var(--panel-2)] text-[var(--muted)]">
@@ -165,6 +189,14 @@ export default function ChatPage() {
             <p className="text-sm">Select a channel or create a server</p>
           </div>
         </div>
+      )}
+
+      {/* Member list */}
+      {activeServer && (
+        <MemberList
+          serverId={activeServer.id}
+          onlineMemberIds={onlineMembers}
+        />
       )}
 
       {/* User bar */}

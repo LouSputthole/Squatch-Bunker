@@ -16,18 +16,23 @@ interface ChatPanelProps {
   channelId: string;
   channelName: string;
   currentUserId: string;
+  currentUsername: string;
 }
 
 export default function ChatPanel({
   channelId,
   channelName,
   currentUserId,
+  currentUsername,
 }: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState("");
   const [loading, setLoading] = useState(true);
+  const [typingUsers, setTypingUsers] = useState<Map<string, string>>(new Map());
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const prevChannelRef = useRef<string | null>(null);
+  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isTypingRef = useRef(false);
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -37,6 +42,7 @@ export default function ChatPanel({
   useEffect(() => {
     setLoading(true);
     setMessages([]);
+    setTypingUsers(new Map());
 
     fetch(`/api/messages?channelId=${channelId}`)
       .then((res) => res.json())
@@ -61,27 +67,65 @@ export default function ChatPanel({
     socket.emit("channel:join", channelId);
     prevChannelRef.current = channelId;
 
-    function handleNewMessage(message: Message) {
-      if (message.channelId === channelId) return; // handled below
-      // Messages for other channels are ignored
-    }
-
     function handleChannelMessage(message: Message) {
       setMessages((prev) => {
         if (prev.some((m) => m.id === message.id)) return prev;
         return [...prev, message];
       });
+      // Clear typing for this user when their message arrives
+      setTypingUsers((prev) => {
+        const next = new Map(prev);
+        next.delete(message.author.id);
+        return next;
+      });
       setTimeout(scrollToBottom, 100);
     }
 
-    socket.on("message:new", handleNewMessage);
+    function handleTyping(data: {
+      channelId: string;
+      userId: string;
+      username: string;
+      isTyping: boolean;
+    }) {
+      if (data.channelId !== channelId) return;
+      if (data.userId === currentUserId) return;
+
+      setTypingUsers((prev) => {
+        const next = new Map(prev);
+        if (data.isTyping) {
+          next.set(data.userId, data.username);
+        } else {
+          next.delete(data.userId);
+        }
+        return next;
+      });
+    }
+
     socket.on(`message:channel:${channelId}`, handleChannelMessage);
+    socket.on("typing:update", handleTyping);
 
     return () => {
-      socket.off("message:new", handleNewMessage);
       socket.off(`message:channel:${channelId}`, handleChannelMessage);
+      socket.off("typing:update", handleTyping);
     };
-  }, [channelId, scrollToBottom]);
+  }, [channelId, scrollToBottom, currentUserId]);
+
+  function handleInputChange(e: React.ChangeEvent<HTMLInputElement>) {
+    setNewMessage(e.target.value);
+
+    const socket = getSocket();
+    if (!isTypingRef.current && e.target.value.length > 0) {
+      isTypingRef.current = true;
+      socket.emit("typing:start", channelId);
+    }
+
+    // Reset typing timeout
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    typingTimeoutRef.current = setTimeout(() => {
+      isTypingRef.current = false;
+      socket.emit("typing:stop", channelId);
+    }, 2000);
+  }
 
   async function handleSend(e: React.FormEvent) {
     e.preventDefault();
@@ -89,6 +133,12 @@ export default function ChatPanel({
 
     const content = newMessage.trim();
     setNewMessage("");
+
+    // Stop typing indicator
+    isTypingRef.current = false;
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    const socket = getSocket();
+    socket.emit("typing:stop", channelId);
 
     const res = await fetch("/api/messages", {
       method: "POST",
@@ -104,11 +154,20 @@ export default function ChatPanel({
       });
       setTimeout(scrollToBottom, 100);
 
-      // Also emit to socket for other clients
-      const socket = getSocket();
+      // Broadcast to other clients
       socket.emit("message:send", { channelId, message });
     }
   }
+
+  const typingNames = Array.from(typingUsers.values());
+  const typingText =
+    typingNames.length === 1
+      ? `${typingNames[0]} is typing...`
+      : typingNames.length === 2
+        ? `${typingNames[0]} and ${typingNames[1]} are typing...`
+        : typingNames.length > 2
+          ? `${typingNames[0]} and ${typingNames.length - 1} others are typing...`
+          : null;
 
   return (
     <div className="flex-1 flex flex-col bg-[var(--panel-2)]">
@@ -145,16 +204,20 @@ export default function ChatPanel({
         <div ref={messagesEndRef} />
       </div>
 
+      {/* Typing indicator */}
+      <div className="h-6 px-4">
+        {typingText && (
+          <span className="text-xs text-[var(--muted)] italic">{typingText}</span>
+        )}
+      </div>
+
       {/* Message composer */}
-      <form
-        onSubmit={handleSend}
-        className="px-4 pb-4 pt-2"
-      >
+      <form onSubmit={handleSend} className="px-4 pb-4 pt-1">
         <div className="flex items-center bg-[var(--panel)] rounded-lg border border-[var(--accent-2)]/30">
           <input
             type="text"
             value={newMessage}
-            onChange={(e) => setNewMessage(e.target.value)}
+            onChange={handleInputChange}
             placeholder={`Message #${channelName}`}
             className="flex-1 px-4 py-3 bg-transparent text-[var(--text)] focus:outline-none placeholder:text-[var(--muted)]"
           />
