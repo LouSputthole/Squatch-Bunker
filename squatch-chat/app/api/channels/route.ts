@@ -1,0 +1,37 @@
+import { NextResponse } from "next/server";
+import { prisma } from "@/lib/db";
+import { getSession } from "@/lib/auth";
+
+export async function POST(request: Request) {
+  const session = await getSession();
+  if (!session) {
+    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  }
+
+  const { serverId, name } = await request.json();
+  if (!serverId || !name || !name.trim()) {
+    return NextResponse.json(
+      { error: "Server ID and channel name are required" },
+      { status: 400 }
+    );
+  }
+
+  // Verify user is a member of this server
+  const membership = await prisma.serverMember.findUnique({
+    where: { serverId_userId: { serverId, userId: session.userId } },
+  });
+
+  if (!membership) {
+    return NextResponse.json({ error: "Not a server member" }, { status: 403 });
+  }
+
+  const channel = await prisma.channel.create({
+    data: {
+      serverId,
+      name: name.trim().toLowerCase().replace(/\s+/g, "-"),
+      type: "text",
+    },
+  });
+
+  return NextResponse.json({ channel }, { status: 201 });
+}
