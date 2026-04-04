@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
 import { getSession } from "@/lib/auth";
 
 export async function GET(request: Request) {
@@ -20,40 +19,46 @@ export async function GET(request: Request) {
     );
   }
 
-  // Verify user has access to this channel's server
-  const channel = await prisma.channel.findUnique({
-    where: { id: channelId },
-    select: { serverId: true },
-  });
+  try {
+    const { prisma } = await import("@/lib/db");
 
-  if (!channel) {
-    return NextResponse.json({ error: "Channel not found" }, { status: 404 });
+    const channel = await prisma.channel.findUnique({
+      where: { id: channelId },
+      select: { serverId: true },
+    });
+
+    if (!channel) {
+      return NextResponse.json({ error: "Channel not found" }, { status: 404 });
+    }
+
+    const membership = await prisma.serverMember.findUnique({
+      where: {
+        serverId_userId: { serverId: channel.serverId, userId: session.userId },
+      },
+    });
+
+    if (!membership) {
+      return NextResponse.json({ error: "Not a server member" }, { status: 403 });
+    }
+
+    const messages = await prisma.message.findMany({
+      where: { channelId },
+      include: {
+        author: { select: { id: true, username: true } },
+      },
+      orderBy: { createdAt: "desc" },
+      take: limit,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+    });
+
+    return NextResponse.json({
+      messages: messages.reverse(),
+      nextCursor: messages.length === limit ? messages[0]?.id : null,
+    });
+  } catch (err) {
+    console.error("[SquatchChat] Failed to fetch messages:", err);
+    return NextResponse.json({ messages: [], nextCursor: null });
   }
-
-  const membership = await prisma.serverMember.findUnique({
-    where: {
-      serverId_userId: { serverId: channel.serverId, userId: session.userId },
-    },
-  });
-
-  if (!membership) {
-    return NextResponse.json({ error: "Not a server member" }, { status: 403 });
-  }
-
-  const messages = await prisma.message.findMany({
-    where: { channelId },
-    include: {
-      author: { select: { id: true, username: true } },
-    },
-    orderBy: { createdAt: "desc" },
-    take: limit,
-    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-  });
-
-  return NextResponse.json({
-    messages: messages.reverse(),
-    nextCursor: messages.length === limit ? messages[0]?.id : null,
-  });
 }
 
 export async function POST(request: Request) {
@@ -70,36 +75,45 @@ export async function POST(request: Request) {
     );
   }
 
-  // Verify membership
-  const channel = await prisma.channel.findUnique({
-    where: { id: channelId },
-    select: { serverId: true },
-  });
+  try {
+    const { prisma } = await import("@/lib/db");
 
-  if (!channel) {
-    return NextResponse.json({ error: "Channel not found" }, { status: 404 });
+    const channel = await prisma.channel.findUnique({
+      where: { id: channelId },
+      select: { serverId: true },
+    });
+
+    if (!channel) {
+      return NextResponse.json({ error: "Channel not found" }, { status: 404 });
+    }
+
+    const membership = await prisma.serverMember.findUnique({
+      where: {
+        serverId_userId: { serverId: channel.serverId, userId: session.userId },
+      },
+    });
+
+    if (!membership) {
+      return NextResponse.json({ error: "Not a server member" }, { status: 403 });
+    }
+
+    const message = await prisma.message.create({
+      data: {
+        channelId,
+        authorId: session.userId,
+        content: content.trim(),
+      },
+      include: {
+        author: { select: { id: true, username: true } },
+      },
+    });
+
+    return NextResponse.json({ message }, { status: 201 });
+  } catch (err) {
+    console.error("[SquatchChat] Failed to save message:", err);
+    return NextResponse.json(
+      { error: "Database not available. Messages require PostgreSQL." },
+      { status: 503 }
+    );
   }
-
-  const membership = await prisma.serverMember.findUnique({
-    where: {
-      serverId_userId: { serverId: channel.serverId, userId: session.userId },
-    },
-  });
-
-  if (!membership) {
-    return NextResponse.json({ error: "Not a server member" }, { status: 403 });
-  }
-
-  const message = await prisma.message.create({
-    data: {
-      channelId,
-      authorId: session.userId,
-      content: content.trim(),
-    },
-    include: {
-      author: { select: { id: true, username: true } },
-    },
-  });
-
-  return NextResponse.json({ message }, { status: 201 });
 }

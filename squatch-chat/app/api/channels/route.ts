@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
 import { getSession } from "@/lib/auth";
 
 export async function POST(request: Request) {
@@ -16,22 +15,31 @@ export async function POST(request: Request) {
     );
   }
 
-  // Verify user is a member of this server
-  const membership = await prisma.serverMember.findUnique({
-    where: { serverId_userId: { serverId, userId: session.userId } },
-  });
+  try {
+    const { prisma } = await import("@/lib/db");
 
-  if (!membership) {
-    return NextResponse.json({ error: "Not a server member" }, { status: 403 });
+    const membership = await prisma.serverMember.findUnique({
+      where: { serverId_userId: { serverId, userId: session.userId } },
+    });
+
+    if (!membership) {
+      return NextResponse.json({ error: "Not a server member" }, { status: 403 });
+    }
+
+    const channel = await prisma.channel.create({
+      data: {
+        serverId,
+        name: name.trim().toLowerCase().replace(/\s+/g, "-"),
+        type: "text",
+      },
+    });
+
+    return NextResponse.json({ channel }, { status: 201 });
+  } catch (err) {
+    console.error("[SquatchChat] Failed to create channel:", err);
+    return NextResponse.json(
+      { error: "Database not available. Please check your PostgreSQL connection." },
+      { status: 503 }
+    );
   }
-
-  const channel = await prisma.channel.create({
-    data: {
-      serverId,
-      name: name.trim().toLowerCase().replace(/\s+/g, "-"),
-      type: "text",
-    },
-  });
-
-  return NextResponse.json({ channel }, { status: 201 });
 }

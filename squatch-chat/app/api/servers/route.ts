@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
 import { getSession } from "@/lib/auth";
 
 export async function GET() {
@@ -8,18 +7,24 @@ export async function GET() {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
 
-  const servers = await prisma.server.findMany({
-    where: {
-      members: { some: { userId: session.userId } },
-    },
-    include: {
-      channels: { orderBy: { createdAt: "asc" } },
-      _count: { select: { members: true } },
-    },
-    orderBy: { createdAt: "asc" },
-  });
+  try {
+    const { prisma } = await import("@/lib/db");
+    const servers = await prisma.server.findMany({
+      where: {
+        members: { some: { userId: session.userId } },
+      },
+      include: {
+        channels: { orderBy: { createdAt: "asc" } },
+        _count: { select: { members: true } },
+      },
+      orderBy: { createdAt: "asc" },
+    });
 
-  return NextResponse.json({ servers });
+    return NextResponse.json({ servers });
+  } catch (err) {
+    console.error("[SquatchChat] Failed to fetch servers:", err);
+    return NextResponse.json({ servers: [] });
+  }
 }
 
 export async function POST(request: Request) {
@@ -36,22 +41,31 @@ export async function POST(request: Request) {
     );
   }
 
-  const server = await prisma.server.create({
-    data: {
-      name: name.trim(),
-      ownerId: session.userId,
-      members: {
-        create: { userId: session.userId },
+  try {
+    const { prisma } = await import("@/lib/db");
+    const server = await prisma.server.create({
+      data: {
+        name: name.trim(),
+        ownerId: session.userId,
+        members: {
+          create: { userId: session.userId },
+        },
+        channels: {
+          create: { name: "campfire", type: "text" },
+        },
       },
-      channels: {
-        create: { name: "campfire", type: "text" },
+      include: {
+        channels: true,
+        _count: { select: { members: true } },
       },
-    },
-    include: {
-      channels: true,
-      _count: { select: { members: true } },
-    },
-  });
+    });
 
-  return NextResponse.json({ server }, { status: 201 });
+    return NextResponse.json({ server }, { status: 201 });
+  } catch (err) {
+    console.error("[SquatchChat] Failed to create server:", err);
+    return NextResponse.json(
+      { error: "Database not available. Please check your PostgreSQL connection." },
+      { status: 503 }
+    );
+  }
 }
