@@ -104,6 +104,19 @@ export default function RegisterPage() {
           </button>
         </form>
 
+        <div className="my-6 flex items-center gap-3">
+          <div className="flex-1 h-px bg-[var(--accent-2)]/30" />
+          <span className="text-xs text-[var(--muted)]">or</span>
+          <div className="flex-1 h-px bg-[var(--accent-2)]/30" />
+        </div>
+
+        <Link
+          href="/login"
+          className="block w-full py-2 text-center bg-[var(--panel-2)] text-[var(--text)] rounded border border-[var(--accent-2)]/50 hover:border-[var(--accent-2)] transition-colors font-medium"
+        >
+          Continue as Guest
+        </Link>
+
         <p className="mt-6 text-center text-sm text-[var(--muted)]">
           Already have an account?{" "}
           <Link href="/login" className="text-[var(--accent)] hover:underline">
