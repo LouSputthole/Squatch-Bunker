@@ -12,6 +12,7 @@ interface ChannelListProps {
   channels: Channel[];
   activeChannelId?: string;
   serverId: string;
+  unreadCounts?: Map<string, number>;
   onChannelSelect: (channel: Channel) => void;
   onChannelCreated: (channel: Channel) => void;
 }
@@ -21,6 +22,7 @@ export default function ChannelList({
   channels,
   activeChannelId,
   serverId,
+  unreadCounts,
   onChannelSelect,
   onChannelCreated,
 }: ChannelListProps) {
@@ -81,20 +83,30 @@ export default function ChannelList({
           </form>
         )}
 
-        {channels.map((channel) => (
-          <button
-            key={channel.id}
-            onClick={() => onChannelSelect(channel)}
-            className={`w-full text-left px-2 py-1 mx-0 rounded text-sm flex items-center gap-1 ${
-              activeChannelId === channel.id
-                ? "bg-[var(--panel-2)] text-[var(--text)]"
-                : "text-[var(--muted)] hover:bg-[var(--panel-2)]/50 hover:text-[var(--text)]"
-            }`}
-          >
-            <span className="text-[var(--accent-2)]">#</span>
-            {channel.name}
-          </button>
-        ))}
+        {channels.map((channel) => {
+          const unread = unreadCounts?.get(channel.id) || 0;
+          return (
+            <button
+              key={channel.id}
+              onClick={() => onChannelSelect(channel)}
+              className={`w-full text-left px-2 py-1 mx-0 rounded text-sm flex items-center gap-1 ${
+                activeChannelId === channel.id
+                  ? "bg-[var(--panel-2)] text-[var(--text)]"
+                  : unread > 0
+                    ? "text-[var(--text)] font-semibold hover:bg-[var(--panel-2)]/50"
+                    : "text-[var(--muted)] hover:bg-[var(--panel-2)]/50 hover:text-[var(--text)]"
+              }`}
+            >
+              <span className="text-[var(--accent-2)]">#</span>
+              <span className="flex-1 truncate">{channel.name}</span>
+              {unread > 0 && (
+                <span className="ml-auto bg-[var(--accent)] text-[var(--bg)] text-xs font-bold rounded-full min-w-[1.25rem] h-5 flex items-center justify-center px-1">
+                  {unread > 99 ? "99+" : unread}
+                </span>
+              )}
+            </button>
+          );
+        })}
       </div>
     </div>
   );

@@ -49,8 +49,10 @@ function ChatPageInner() {
   const [activeServer, setActiveServer] = useState<Server | null>(null);
   const [activeChannel, setActiveChannel] = useState<Channel | null>(null);
   const [onlineMembers, setOnlineMembers] = useState<Set<string>>(new Set());
+  const [unreadCounts, setUnreadCounts] = useState<Map<string, number>>(new Map());
   const [loading, setLoading] = useState(true);
   const activeServerIdRef = useRef<string | null>(null);
+  const activeChannelIdRef = useRef<string | null>(null);
 
   // Read server/channel IDs from URL on mount
   const urlServerId = searchParams.get("s");
@@ -143,6 +145,19 @@ function ChatPageInner() {
     activeServerIdRef.current = activeServer?.id ?? null;
   }, [activeServer]);
 
+  // Track active channel for unread logic, clear unread when switching
+  useEffect(() => {
+    activeChannelIdRef.current = activeChannel?.id ?? null;
+    if (activeChannel) {
+      setUnreadCounts((prev) => {
+        if (!prev.has(activeChannel.id)) return prev;
+        const next = new Map(prev);
+        next.delete(activeChannel.id);
+        return next;
+      });
+    }
+  }, [activeChannel]);
+
   // Update URL when active server/channel changes
   useEffect(() => {
     if (activeServer || activeChannel) {
@@ -161,10 +176,45 @@ function ChatPageInner() {
     };
   }, [activeServer]);
 
+  // Join all channel rooms for unread tracking
+  useEffect(() => {
+    if (!activeServer || activeServer.channels.length === 0) return;
+    const socket = getSocket();
+    const channelIds = activeServer.channels.map((c) => c.id);
+
+    // Join all channel rooms (ChatPanel also joins the active one — that's fine, Socket.IO dedupes)
+    channelIds.forEach((id) => socket.emit("channel:join", id));
+
+    // Listen for messages on all channels
+    function handleMessage(channelId: string) {
+      return () => {
+        // Only count as unread if this channel isn't currently active
+        if (channelId === activeChannelIdRef.current) return;
+        setUnreadCounts((prev) => {
+          const next = new Map(prev);
+          next.set(channelId, (next.get(channelId) || 0) + 1);
+          return next;
+        });
+      };
+    }
+
+    const handlers = channelIds.map((id) => ({
+      event: `message:channel:${id}`,
+      handler: handleMessage(id),
+    }));
+    handlers.forEach(({ event, handler }) => socket.on(event, handler));
+
+    return () => {
+      handlers.forEach(({ event, handler }) => socket.off(event, handler));
+      channelIds.forEach((id) => socket.emit("channel:leave", id));
+    };
+  }, [activeServer]);
+
   const handleServerSelect = useCallback((server: Server) => {
     setActiveServer(server);
     setActiveChannel(server.channels[0] || null);
     setOnlineMembers(new Set());
+    setUnreadCounts(new Map());
   }, []);
 
   const activateServer = useCallback((server: Server) => {
@@ -232,6 +282,7 @@ function ChatPageInner() {
           channels={activeServer.channels}
           activeChannelId={activeChannel?.id}
           serverId={activeServer.id}
+          unreadCounts={unreadCounts}
           onChannelSelect={handleChannelSelect}
           onChannelCreated={handleChannelCreated}
         />
