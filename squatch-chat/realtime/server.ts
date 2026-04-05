@@ -1,8 +1,12 @@
 import { createServer } from "http";
 import { Server } from "socket.io";
+import jwt from "jsonwebtoken";
+import { parse } from "cookie";
 
 const PORT = parseInt(process.env.SOCKET_PORT || "3001", 10);
 const CLIENT_ORIGIN = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+const JWT_SECRET = process.env.JWT_SECRET || "squatch-secret-change-me";
+const COOKIE_NAME = "squatch-token";
 
 const httpServer = createServer();
 const io = new Server(httpServer, {
@@ -16,16 +20,33 @@ const io = new Server(httpServer, {
 // Track online users per server: serverId -> Set<{userId, username, socketId}>
 const onlineUsers = new Map<string, Map<string, { username: string; socketId: string }>>();
 
-io.on("connection", (socket) => {
-  let currentUserId = "anonymous";
-  let currentUsername = "anonymous";
+interface TokenPayload {
+  userId: string;
+  username: string;
+}
 
-  // Client identifies itself after connecting
-  socket.on("auth:identify", (data: { userId: string; username: string }) => {
-    currentUserId = data.userId;
-    currentUsername = data.username;
-    console.log(`[SquatchChat] Identified: ${currentUsername}`);
-  });
+io.use((socket, next) => {
+  const rawCookie = socket.handshake.headers.cookie;
+  if (!rawCookie) return next(new Error("Unauthorized"));
+
+  const parsed = parse(rawCookie);
+  const token = parsed[COOKIE_NAME];
+  if (!token) return next(new Error("Unauthorized"));
+
+  try {
+    const payload = jwt.verify(token, JWT_SECRET) as TokenPayload;
+    socket.data.userId = payload.userId;
+    socket.data.username = payload.username;
+    next();
+  } catch {
+    next(new Error("Unauthorized"));
+  }
+});
+
+io.on("connection", (socket) => {
+  const currentUserId = socket.data.userId as string;
+  const currentUsername = socket.data.username as string;
+  console.log(`[SquatchChat] Authenticated socket: ${currentUsername}`);
 
   // Join a channel room
   socket.on("channel:join", (channelId: string) => {

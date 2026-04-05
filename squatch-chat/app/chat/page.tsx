@@ -91,10 +91,6 @@ function ChatPageInner() {
 
         // Connect socket
         const socket = connectSocket();
-        socket.emit("auth:identify", {
-          userId: userData.user.id,
-          username: userData.user.username,
-        });
 
         // Listen for presence updates
         presenceHandler = (data: { serverId: string; members: { userId: string; username: string }[] }) => {

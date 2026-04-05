@@ -11,6 +11,7 @@ export function getSocket(): Socket {
     socket = io(SOCKET_URL, {
       path: "/api/socketio",
       autoConnect: false,
+      withCredentials: true,
     });
   }
   return socket;
