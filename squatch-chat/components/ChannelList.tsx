@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { getSocket } from "@/lib/socket";
+import { displayName } from "@/lib/utils";
 
 interface Channel {
   id: string;
@@ -265,7 +266,7 @@ export default function ChannelList({
                       <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${
                         p.muted ? "bg-red-400" : "bg-green-500"
                       }`} />
-                      <span className="truncate">{p.username}</span>
+                      <span className="truncate">{displayName(p.username)}</span>
                       {p.muted && <MicOffIcon />}
                       {p.deafened && <HeadphonesOffIcon />}
                     </div>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { displayName, initials, truncateName } from "@/lib/utils";
 
 interface MessageBubbleProps {
   message: {
@@ -20,10 +21,7 @@ export default function MessageBubble({ message, isOwn, onEdit, onDelete }: Mess
   const [editContent, setEditContent] = useState(message.content);
   const [showActions, setShowActions] = useState(false);
 
-  const displayUsername =
-    message.author.username.length > 20
-      ? `${message.author.username.slice(0, 20)}…`
-      : message.author.username;
+  const shown = truncateName(message.author.username, 20);
 
   const time = new Date(message.createdAt).toLocaleTimeString([], {
     hour: "2-digit",
@@ -57,13 +55,13 @@ export default function MessageBubble({ message, isOwn, onEdit, onDelete }: Mess
       onMouseLeave={() => setShowActions(false)}
     >
       <div className="w-10 h-10 rounded-full bg-[var(--accent-2)] flex items-center justify-center text-sm font-bold text-[var(--text)] shrink-0 mt-0.5">
-        {message.author.username.slice(0, 2).toUpperCase()}
+        {initials(message.author.username)}
       </div>
 
       <div className="flex-1 min-w-0">
         <div className="flex items-baseline gap-2">
           <span className={`font-semibold text-sm ${isOwn ? "text-[var(--accent)]" : "text-[var(--text)]"}`}>
-            <span title={message.author.username}>{displayUsername}</span>
+            <span title={displayName(message.author.username)}>{shown}</span>
           </span>
           <span className="text-xs text-[var(--muted)]">{time}</span>
           {wasEdited && <span className="text-xs text-[var(--muted)] italic">(edited)</span>}

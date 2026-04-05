@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { getSocket } from "@/lib/socket";
+import { truncateName, initials, displayName } from "@/lib/utils";
 
 interface Member {
   id: string;
@@ -11,10 +12,6 @@ interface Member {
 interface MemberListProps {
   serverId: string;
   onlineMemberIds: Set<string>;
-}
-
-function truncateUsername(username: string, maxChars = 18) {
-  return username.length > maxChars ? `${username.slice(0, maxChars)}…` : username;
 }
 
 export default function MemberList({ serverId, onlineMemberIds }: MemberListProps) {
@@ -119,12 +116,12 @@ export default function MemberList({ serverId, onlineMemberIds }: MemberListProp
             {onlineMembers.map((m) => (
               <div key={m.id} className="flex items-center gap-2 px-3 py-1">
                 <div className="w-8 h-8 rounded-full bg-[var(--accent-2)] flex items-center justify-center text-xs font-bold text-[var(--text)]">
-                  {m.username.slice(0, 2).toUpperCase()}
+                  {initials(m.username)}
                 </div>
                 <div className="flex items-center gap-1.5">
                   <div className="w-2 h-2 rounded-full bg-green-500" />
-                  <span className="text-sm text-[var(--text)]" title={m.username}>
-                    {truncateUsername(m.username)}
+                  <span className="text-sm text-[var(--text)]" title={displayName(m.username)}>
+                    {truncateName(m.username)}
                   </span>
                 </div>
               </div>
@@ -142,12 +139,12 @@ export default function MemberList({ serverId, onlineMemberIds }: MemberListProp
             {offlineMembers.map((m) => (
               <div key={m.id} className="flex items-center gap-2 px-3 py-1 opacity-50">
                 <div className="w-8 h-8 rounded-full bg-[var(--panel-2)] flex items-center justify-center text-xs font-bold text-[var(--muted)]">
-                  {m.username.slice(0, 2).toUpperCase()}
+                  {initials(m.username)}
                 </div>
                 <div className="flex items-center gap-1.5">
                   <div className="w-2 h-2 rounded-full bg-[var(--muted)]" />
-                  <span className="text-sm text-[var(--muted)]" title={m.username}>
-                    {truncateUsername(m.username)}
+                  <span className="text-sm text-[var(--muted)]" title={displayName(m.username)}>
+                    {truncateName(m.username)}
                   </span>
                 </div>
               </div>

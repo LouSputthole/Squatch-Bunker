@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { getSocket } from "@/lib/socket";
+import { truncateName } from "@/lib/utils";
 import MessageBubble from "./MessageBubble";
 
 interface Message {
@@ -27,12 +28,6 @@ export default function ChatPanel({
   currentUserId,
   currentUsername,
 }: ChatPanelProps) {
-  const truncateUsername = useCallback(
-    (username: string, maxChars = 18) =>
-      username.length > maxChars ? `${username.slice(0, maxChars)}…` : username,
-    []
-  );
-
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState("");
   const [loading, setLoading] = useState(true);
@@ -230,7 +225,7 @@ export default function ChatPanel({
     }
   }
 
-  const typingNames = Array.from(typingUsers.values()).map((name) => truncateUsername(name));
+  const typingNames = Array.from(typingUsers.values()).map((name) => truncateName(name));
   const typingText =
     typingNames.length === 1
       ? `${typingNames[0]} is typing...`

@@ -6,10 +6,12 @@ import ServerList from "@/components/ServerList";
 import ChannelList from "@/components/ChannelList";
 import ChatPanel from "@/components/ChatPanel";
 import MemberList from "@/components/MemberList";
-import VoicePanel from "@/components/VoicePanel";
+import VoicePanel, { VoicePanelHandle } from "@/components/VoicePanel";
+import VoiceRoom from "@/components/VoiceRoom";
 import SettingsModal from "@/components/SettingsModal";
 import { SettingsIcon } from "@/components/VoicePanel";
 import { connectSocket, disconnectSocket, getSocket } from "@/lib/socket";
+import { displayName } from "@/lib/utils";
 
 interface Channel {
   id: string;
@@ -67,9 +69,11 @@ function ChatPageInner() {
   // Voice state
   const [activeVoiceChannel, setActiveVoiceChannel] = useState<Channel | null>(null);
   const [voiceParticipants, setVoiceParticipants] = useState<Map<string, VoiceParticipant[]>>(new Map());
+  const [voiceState, setVoiceState] = useState({ muted: false, deafened: false, participants: [] as VoiceParticipant[] });
 
   const activeServerIdRef = useRef<string | null>(null);
   const activeChannelIdRef = useRef<string | null>(null);
+  const voicePanelRef = useRef<VoicePanelHandle>(null);
 
   const urlServerId = searchParams.get("s");
   const urlChannelId = searchParams.get("c");
@@ -332,7 +336,19 @@ function ChatPageInner() {
         </div>
       )}
 
-      {activeChannel && user ? (
+      {/* Main panel: Voice Room takes over when in voice, otherwise show text chat */}
+      {activeVoiceChannel && user ? (
+        <VoiceRoom
+          channelName={activeVoiceChannel.name}
+          participants={voiceState.participants}
+          currentUserId={user.id}
+          muted={voiceState.muted}
+          deafened={voiceState.deafened}
+          onToggleMute={() => voicePanelRef.current?.toggleMute()}
+          onToggleDeafen={() => voicePanelRef.current?.toggleDeafen()}
+          onDisconnect={() => voicePanelRef.current?.disconnect()}
+        />
+      ) : activeChannel && user ? (
         <ChatPanel
           channelId={activeChannel.id}
           channelName={activeChannel.name}
@@ -363,20 +379,23 @@ function ChatPageInner() {
       )}
 
       {/* Voice Panel — floating bar above user bar */}
+      {/* VoicePanel handles WebRTC — hidden but active when in voice */}
       {activeVoiceChannel && user && (
         <VoicePanel
+          ref={voicePanelRef}
           channelId={activeVoiceChannel.id}
           channelName={activeVoiceChannel.name}
           currentUserId={user.id}
           onParticipantsChange={handleVoiceParticipantsChange}
           onDisconnect={handleVoiceLeave}
+          onStateChange={setVoiceState}
         />
       )}
 
       {/* User bar with settings gear */}
       <div className="absolute bottom-0 left-[72px] w-60 h-12 bg-[var(--bg)] border-t border-r border-[var(--accent-2)]/30 flex items-center px-3 justify-between z-10">
         <span className="text-sm text-[var(--text)] truncate">
-          {user?.username}
+          {user ? displayName(user.username) : ""}
         </span>
         <div className="flex items-center gap-2">
           <button
