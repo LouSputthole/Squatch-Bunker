@@ -5,14 +5,21 @@
   "scripts": {
     "dev": "next dev",
     "dev:realtime": "tsx watch realtime/server.ts",
+    "dev:full": "bash ./scripts/dev-full.sh",
     "postinstall": "bash scripts/postinstall.sh || prisma generate",
     "build": "prisma generate && next build",
     "start": "next start",
     "lint": "eslint",
-    "db:migrate": "prisma migrate dev",
+    "setup": "bash ./scripts/setup.sh",
+    "db:up": "bash ./scripts/db-up.sh",
+    "db:down": "bash ./scripts/db-down.sh",
+    "db:wait": "bash ./scripts/db-wait.sh",
+    "db:migrate": "dotenv -e .env -- prisma migrate deploy",
+    "db:migrate:dev": "dotenv -e .env -- prisma migrate dev",
     "db:generate": "prisma generate",
-    "db:push": "prisma db push",
-    "db:studio": "prisma studio"
+    "db:push": "dotenv -e .env -- prisma db push",
+    "db:studio": "dotenv -e .env -- prisma studio",
+    "db:reset": "dotenv -e .env -- prisma migrate reset --force"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.6.0",
@@ -42,6 +49,7 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "dotenv-cli": "^11.0.0",
     "eslint": "^9",
     "eslint-config-next": "16.2.2",
     "prisma": "^7.6.0",
