@@ -78,6 +78,30 @@ io.on("connection", (socket) => {
     socket.to(`channel:${channelId}`).emit(`message:channel:${channelId}`, message);
   });
 
+  // Handle message edit - broadcast to channel room
+  socket.on("message:edit", (data: {
+    channelId: string;
+    messageId: string;
+    content: string;
+    updatedAt: string;
+  }) => {
+    socket.to(`channel:${data.channelId}`).emit(`message:edited:${data.channelId}`, {
+      messageId: data.messageId,
+      content: data.content,
+      updatedAt: data.updatedAt,
+    });
+  });
+
+  // Handle message delete - broadcast to channel room
+  socket.on("message:delete", (data: {
+    channelId: string;
+    messageId: string;
+  }) => {
+    socket.to(`channel:${data.channelId}`).emit(`message:deleted:${data.channelId}`, {
+      messageId: data.messageId,
+    });
+  });
+
   // Typing indicator
   socket.on("typing:start", (channelId: string) => {
     socket.to(`channel:${channelId}`).emit("typing:update", {

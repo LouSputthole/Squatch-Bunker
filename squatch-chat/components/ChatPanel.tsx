@@ -9,7 +9,9 @@ interface Message {
   channelId?: string;
   content: string;
   createdAt: string;
+  updatedAt?: string;
   author: { id: string; username: string };
+  pending?: boolean;
 }
 
 interface ChatPanelProps {
@@ -39,6 +41,7 @@ export default function ChatPanel({
   const prevChannelRef = useRef<string | null>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isTypingRef = useRef(false);
+  let pendingIdCounter = useRef(0);
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -64,12 +67,10 @@ export default function ChatPanel({
   useEffect(() => {
     const socket = getSocket();
 
-    // Leave previous channel room
     if (prevChannelRef.current) {
       socket.emit("channel:leave", prevChannelRef.current);
     }
 
-    // Join new channel room
     socket.emit("channel:join", channelId);
     prevChannelRef.current = channelId;
 
@@ -78,13 +79,26 @@ export default function ChatPanel({
         if (prev.some((m) => m.id === message.id)) return prev;
         return [...prev, message];
       });
-      // Clear typing for this user when their message arrives
       setTypingUsers((prev) => {
         const next = new Map(prev);
         next.delete(message.author.id);
         return next;
       });
       setTimeout(scrollToBottom, 100);
+    }
+
+    function handleMessageEdited(data: { messageId: string; content: string; updatedAt: string }) {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === data.messageId
+            ? { ...m, content: data.content, updatedAt: data.updatedAt }
+            : m
+        )
+      );
+    }
+
+    function handleMessageDeleted(data: { messageId: string }) {
+      setMessages((prev) => prev.filter((m) => m.id !== data.messageId));
     }
 
     function handleTyping(data: {
@@ -108,10 +122,14 @@ export default function ChatPanel({
     }
 
     socket.on(`message:channel:${channelId}`, handleChannelMessage);
+    socket.on(`message:edited:${channelId}`, handleMessageEdited);
+    socket.on(`message:deleted:${channelId}`, handleMessageDeleted);
     socket.on("typing:update", handleTyping);
 
     return () => {
       socket.off(`message:channel:${channelId}`, handleChannelMessage);
+      socket.off(`message:edited:${channelId}`, handleMessageEdited);
+      socket.off(`message:deleted:${channelId}`, handleMessageDeleted);
       socket.off("typing:update", handleTyping);
     };
   }, [channelId, scrollToBottom, currentUserId]);
@@ -125,7 +143,6 @@ export default function ChatPanel({
       socket.emit("typing:start", channelId);
     }
 
-    // Reset typing timeout
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     typingTimeoutRef.current = setTimeout(() => {
       isTypingRef.current = false;
@@ -140,11 +157,23 @@ export default function ChatPanel({
     const content = newMessage.trim();
     setNewMessage("");
 
-    // Stop typing indicator
+    // Stop typing
     isTypingRef.current = false;
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     const socket = getSocket();
     socket.emit("typing:stop", channelId);
+
+    // Optimistic: show message immediately
+    const tempId = `pending-${Date.now()}-${pendingIdCounter.current++}`;
+    const optimisticMsg: Message = {
+      id: tempId,
+      content,
+      createdAt: new Date().toISOString(),
+      author: { id: currentUserId, username: currentUsername },
+      pending: true,
+    };
+    setMessages((prev) => [...prev, optimisticMsg]);
+    setTimeout(scrollToBottom, 50);
 
     const res = await fetch("/api/messages", {
       method: "POST",
@@ -154,14 +183,50 @@ export default function ChatPanel({
 
     if (res.ok) {
       const { message } = await res.json();
-      setMessages((prev) => {
-        if (prev.some((m) => m.id === message.id)) return prev;
-        return [...prev, message];
-      });
-      setTimeout(scrollToBottom, 100);
-
-      // Broadcast to other clients
+      // Replace optimistic with real message
+      setMessages((prev) =>
+        prev.map((m) => (m.id === tempId ? message : m))
+      );
       socket.emit("message:send", { channelId, message });
+    } else {
+      // Remove failed optimistic message
+      setMessages((prev) => prev.filter((m) => m.id !== tempId));
+    }
+  }
+
+  async function handleEdit(messageId: string, newContent: string) {
+    const res = await fetch(`/api/messages/${messageId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: newContent }),
+    });
+
+    if (res.ok) {
+      const { message } = await res.json();
+      setMessages((prev) =>
+        prev.map((m) => (m.id === messageId ? message : m))
+      );
+      // Broadcast edit
+      const socket = getSocket();
+      socket.emit("message:edit", {
+        channelId,
+        messageId,
+        content: newContent,
+        updatedAt: message.updatedAt,
+      });
+    }
+  }
+
+  async function handleDelete(messageId: string) {
+    const res = await fetch(`/api/messages/${messageId}`, {
+      method: "DELETE",
+    });
+
+    if (res.ok) {
+      setMessages((prev) => prev.filter((m) => m.id !== messageId));
+      // Broadcast delete
+      const socket = getSocket();
+      socket.emit("message:delete", { channelId, messageId });
     }
   }
 
@@ -177,13 +242,11 @@ export default function ChatPanel({
 
   return (
     <div className="flex-1 flex flex-col bg-[var(--panel-2)]">
-      {/* Channel header */}
-      <div className="h-12 px-4 flex items-center border-b border-[var(--accent-2)]/30 bg-[var(--panel-2)]">
+      <div className="h-12 px-4 flex items-center border-b border-[var(--accent-2)]/30 bg-[var(--panel-2)] shrink-0">
         <span className="text-[var(--accent-2)] mr-1">#</span>
         <h3 className="font-bold text-[var(--text)]">{channelName}</h3>
       </div>
 
-      {/* Messages area */}
       <div className="flex-1 overflow-y-auto px-4 py-2">
         {loading ? (
           <div className="flex items-center justify-center h-full text-[var(--muted)]">
@@ -193,9 +256,7 @@ export default function ChatPanel({
           <div className="flex items-center justify-center h-full text-[var(--muted)]">
             <div className="text-center">
               <p className="text-lg mb-1">No messages yet</p>
-              <p className="text-sm">
-                Be the first to howl in #{channelName}
-              </p>
+              <p className="text-sm">Be the first to howl in #{channelName}</p>
             </div>
           </div>
         ) : (
@@ -204,21 +265,21 @@ export default function ChatPanel({
               key={msg.id}
               message={msg}
               isOwn={msg.author.id === currentUserId}
+              onEdit={handleEdit}
+              onDelete={handleDelete}
             />
           ))
         )}
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Typing indicator */}
-      <div className="h-6 px-4">
+      <div className="h-6 px-4 shrink-0">
         {typingText && (
           <span className="text-xs text-[var(--muted)] italic">{typingText}</span>
         )}
       </div>
 
-      {/* Message composer */}
-      <form onSubmit={handleSend} className="px-4 pb-4 pt-1">
+      <form onSubmit={handleSend} className="px-4 pb-4 pt-1 shrink-0">
         <div className="flex items-center bg-[var(--panel)] rounded-lg border border-[var(--accent-2)]/30">
           <input
             type="text"

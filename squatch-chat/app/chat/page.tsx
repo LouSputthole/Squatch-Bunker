@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useEffect, useState, useCallback, useRef } from "react";
+import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import ServerList from "@/components/ServerList";
 import ChannelList from "@/components/ChannelList";
 import ChatPanel from "@/components/ChatPanel";
@@ -27,8 +27,23 @@ interface User {
 }
 
 export default function ChatPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center bg-[var(--bg)] text-[var(--muted)]">
+        Following tracks into the woods...
+      </div>
+    }>
+      <ChatPageInner />
+    </Suspense>
+  );
+}
+
+function ChatPageInner() {
   const APP_VERSION = "v0.0.2";
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
   const [user, setUser] = useState<User | null>(null);
   const [servers, setServers] = useState<Server[]>([]);
   const [activeServer, setActiveServer] = useState<Server | null>(null);
@@ -36,6 +51,20 @@ export default function ChatPage() {
   const [onlineMembers, setOnlineMembers] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const activeServerIdRef = useRef<string | null>(null);
+
+  // Read server/channel IDs from URL on mount
+  const urlServerId = searchParams.get("s");
+  const urlChannelId = searchParams.get("c");
+
+  // Update URL when selection changes (without navigation)
+  const updateUrl = useCallback((serverId?: string, channelId?: string) => {
+    const params = new URLSearchParams();
+    if (serverId) params.set("s", serverId);
+    if (channelId) params.set("c", channelId);
+    const query = params.toString();
+    const newUrl = query ? `${pathname}?${query}` : pathname;
+    window.history.replaceState(null, "", newUrl);
+  }, [pathname]);
 
   // Fetch user and servers on mount
   useEffect(() => {
@@ -57,12 +86,11 @@ export default function ChatPage() {
         const serversData = await serversRes.json();
 
         setUser(userData.user);
-        setServers(serversData.servers || []);
+        const serverList: Server[] = serversData.servers || [];
+        setServers(serverList);
 
         // Connect socket
         const socket = connectSocket();
-
-        // Identify to socket server
         socket.emit("auth:identify", {
           userId: userData.user.id,
           username: userData.user.username,
@@ -74,6 +102,29 @@ export default function ChatPage() {
           setOnlineMembers(new Set(data.members.map((m) => m.userId)));
         };
         socket.on("presence:update", presenceHandler);
+
+        // Restore selection from URL
+        if (urlServerId && serverList.length > 0) {
+          const savedServer = serverList.find((s) => s.id === urlServerId);
+          if (savedServer) {
+            setActiveServer(savedServer);
+            const savedChannel = urlChannelId
+              ? savedServer.channels.find((c) => c.id === urlChannelId)
+              : savedServer.channels[0];
+            if (savedChannel) setActiveChannel(savedChannel);
+          } else {
+            // URL server not found, fall back to first
+            setActiveServer(serverList[0]);
+            if (serverList[0].channels.length > 0) {
+              setActiveChannel(serverList[0].channels[0]);
+            }
+          }
+        } else if (serverList.length > 0) {
+          setActiveServer(serverList[0]);
+          if (serverList[0].channels.length > 0) {
+            setActiveChannel(serverList[0].channels[0]);
+          }
+        }
 
         setLoading(false);
       } catch {
@@ -89,22 +140,19 @@ export default function ChatPage() {
       }
       disconnectSocket();
     };
-  }, [router]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     activeServerIdRef.current = activeServer?.id ?? null;
   }, [activeServer]);
 
-  // Auto-select first server and channel
+  // Update URL when active server/channel changes
   useEffect(() => {
-    if (servers.length > 0 && !activeServer) {
-      const first = servers[0];
-      setActiveServer(first);
-      if (first.channels.length > 0) {
-        setActiveChannel(first.channels[0]);
-      }
+    if (activeServer || activeChannel) {
+      updateUrl(activeServer?.id, activeChannel?.id);
     }
-  }, [servers, activeServer]);
+  }, [activeServer, activeChannel, updateUrl]);
 
   // Join server room for presence when active server changes
   useEffect(() => {
@@ -125,7 +173,6 @@ export default function ChatPage() {
 
   const activateServer = useCallback((server: Server) => {
     setServers((prev) => {
-      // Add if not already in list
       if (prev.some((s) => s.id === server.id)) return prev;
       return [...prev, server];
     });
@@ -175,7 +222,6 @@ export default function ChatPage() {
 
   return (
     <div className="h-screen flex bg-[var(--bg)]">
-      {/* Server rail + slide-out create/join panel */}
       <ServerList
         servers={servers}
         activeServerId={activeServer?.id}
@@ -184,7 +230,6 @@ export default function ChatPage() {
         onServerJoined={handleServerJoined}
       />
 
-      {/* Channel sidebar */}
       {activeServer ? (
         <ChannelList
           serverName={activeServer.name}
@@ -195,7 +240,7 @@ export default function ChatPage() {
           onChannelCreated={handleChannelCreated}
         />
       ) : (
-        <div className="w-60 bg-[var(--panel)] flex flex-col items-center justify-center text-[var(--muted)] text-sm border-r border-[var(--accent-2)]/30 px-4 text-center gap-3">
+        <div className="w-60 bg-[var(--panel)] flex flex-col items-center justify-center text-[var(--muted)] text-sm border-r border-[var(--accent-2)]/30 px-4 text-center gap-3 shrink-0">
           <p className="text-base text-[var(--text)]">No servers yet</p>
           <p className="text-xs">
             Use the <span className="text-[var(--accent)] font-bold">+</span> button to create a server
@@ -204,7 +249,6 @@ export default function ChatPage() {
         </div>
       )}
 
-      {/* Main chat area */}
       {activeChannel && user ? (
         <ChatPanel
           channelId={activeChannel.id}
@@ -228,7 +272,6 @@ export default function ChatPage() {
         </div>
       )}
 
-      {/* Member list */}
       {activeServer && (
         <MemberList
           serverId={activeServer.id}
@@ -236,8 +279,7 @@ export default function ChatPage() {
         />
       )}
 
-      {/* User bar */}
-      <div className="absolute bottom-0 left-[72px] w-60 h-12 bg-[var(--bg)] border-t border-r border-[var(--accent-2)]/30 flex items-center px-3 justify-between">
+      <div className="absolute bottom-0 left-[72px] w-60 h-12 bg-[var(--bg)] border-t border-r border-[var(--accent-2)]/30 flex items-center px-3 justify-between z-10">
         <span className="text-sm text-[var(--text)] truncate">
           {user?.username}
         </span>
