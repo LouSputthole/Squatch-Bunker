@@ -37,7 +37,7 @@ export async function PATCH(
       where: { id: messageId },
       data: { content: content.trim() },
       include: {
-        author: { select: { id: true, username: true } },
+        author: { select: { id: true, username: true, avatar: true } },
       },
     });
 

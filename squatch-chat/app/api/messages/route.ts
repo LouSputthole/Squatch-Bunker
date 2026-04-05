@@ -44,7 +44,7 @@ export async function GET(request: Request) {
     const messages = await prisma.message.findMany({
       where: { channelId },
       include: {
-        author: { select: { id: true, username: true } },
+        author: { select: { id: true, username: true, avatar: true } },
       },
       orderBy: { createdAt: "desc" },
       take: limit,
@@ -104,7 +104,7 @@ export async function POST(request: Request) {
         content: content.trim(),
       },
       include: {
-        author: { select: { id: true, username: true } },
+        author: { select: { id: true, username: true, avatar: true } },
       },
     });
 

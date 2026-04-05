@@ -12,6 +12,7 @@ import SettingsModal from "@/components/SettingsModal";
 import { SettingsIcon } from "@/components/VoicePanel";
 import { connectSocket, disconnectSocket, getSocket } from "@/lib/socket";
 import { displayName } from "@/lib/utils";
+import Avatar from "@/components/Avatar";
 
 interface Channel {
   id: string;
@@ -30,6 +31,7 @@ interface User {
   id: string;
   username: string;
   email: string;
+  avatar?: string | null;
 }
 
 interface VoiceParticipant {
@@ -37,6 +39,7 @@ interface VoiceParticipant {
   username: string;
   muted: boolean;
   deafened?: boolean;
+  avatar?: string | null;
 }
 
 export default function ChatPage() {
@@ -354,6 +357,7 @@ function ChatPageInner() {
           channelName={activeChannel.name}
           currentUserId={user.id}
           currentUsername={user.username}
+          currentAvatar={user.avatar}
         />
       ) : (
         <div className="flex-1 flex items-center justify-center bg-[var(--panel-2)] text-[var(--muted)]">
@@ -394,9 +398,19 @@ function ChatPageInner() {
 
       {/* User bar with settings gear */}
       <div className="absolute bottom-0 left-[72px] w-60 h-12 bg-[var(--bg)] border-t border-r border-[var(--accent-2)]/30 flex items-center px-3 justify-between z-10">
-        <span className="text-sm text-[var(--text)] truncate">
-          {user ? displayName(user.username) : ""}
-        </span>
+        <div className="flex items-center gap-2 min-w-0">
+          {user && (
+            <Avatar
+              username={user.username}
+              avatarUrl={user.avatar}
+              size={28}
+              className="bg-[var(--accent-2)] text-[var(--text)]"
+            />
+          )}
+          <span className="text-sm text-[var(--text)] truncate">
+            {user ? displayName(user.username) : ""}
+          </span>
+        </div>
         <div className="flex items-center gap-2">
           <button
             onClick={() => setSettingsOpen(true)}
@@ -415,7 +429,13 @@ function ChatPageInner() {
       </div>
 
       {/* Settings Modal */}
-      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <SettingsModal
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        username={user?.username}
+        currentAvatar={user?.avatar}
+        onAvatarChange={(avatar) => setUser((prev) => prev ? { ...prev, avatar } : prev)}
+      />
 
       {/* App version */}
       <div className="absolute bottom-3 right-3 text-xs text-[var(--muted)]">

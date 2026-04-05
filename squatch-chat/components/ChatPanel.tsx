@@ -11,7 +11,7 @@ interface Message {
   content: string;
   createdAt: string;
   updatedAt?: string;
-  author: { id: string; username: string };
+  author: { id: string; username: string; avatar?: string | null };
   pending?: boolean;
 }
 
@@ -20,6 +20,7 @@ interface ChatPanelProps {
   channelName: string;
   currentUserId: string;
   currentUsername: string;
+  currentAvatar?: string | null;
 }
 
 export default function ChatPanel({
@@ -27,6 +28,7 @@ export default function ChatPanel({
   channelName,
   currentUserId,
   currentUsername,
+  currentAvatar,
 }: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState("");
@@ -164,7 +166,7 @@ export default function ChatPanel({
       id: tempId,
       content,
       createdAt: new Date().toISOString(),
-      author: { id: currentUserId, username: currentUsername },
+      author: { id: currentUserId, username: currentUsername, avatar: currentAvatar },
       pending: true,
     };
     setMessages((prev) => [...prev, optimisticMsg]);

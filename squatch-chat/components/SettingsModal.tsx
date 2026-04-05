@@ -1,13 +1,17 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import Avatar from "@/components/Avatar";
 
 interface SettingsModalProps {
   open: boolean;
   onClose: () => void;
+  username?: string;
+  currentAvatar?: string | null;
+  onAvatarChange?: (avatar: string | null) => void;
 }
 
-export default function SettingsModal({ open, onClose }: SettingsModalProps) {
+export default function SettingsModal({ open, onClose, username, currentAvatar, onAvatarChange }: SettingsModalProps) {
   const [tab, setTab] = useState<"audio" | "account">("audio");
   const [inputDevices, setInputDevices] = useState<MediaDeviceInfo[]>([]);
   const [outputDevices, setOutputDevices] = useState<MediaDeviceInfo[]>([]);
@@ -315,13 +319,171 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
           )}
 
           {tab === "account" && (
-            <div className="space-y-4">
-              <p className="text-sm text-[var(--muted)]">
-                Account settings coming soon. This will include profile editing, password changes, and display preferences.
-              </p>
-            </div>
+            <AccountTab
+              username={username}
+              currentAvatar={currentAvatar}
+              onAvatarChange={onAvatarChange}
+            />
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+function AccountTab({
+  username,
+  currentAvatar,
+  onAvatarChange,
+}: {
+  username?: string;
+  currentAvatar?: string | null;
+  onAvatarChange?: (avatar: string | null) => void;
+}) {
+  const [avatar, setAvatar] = useState<string | null>(currentAvatar ?? null);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState("");
+  const [preview, setPreview] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setAvatar(currentAvatar ?? null);
+  }, [currentAvatar]);
+
+  async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setError("");
+
+    if (file.size > 2 * 1024 * 1024) {
+      setError("File too large. Maximum size is 2MB.");
+      return;
+    }
+
+    if (!["image/jpeg", "image/png", "image/gif", "image/webp"].includes(file.type)) {
+      setError("Invalid file type. Use JPEG, PNG, GIF, or WebP.");
+      return;
+    }
+
+    // Show preview
+    const reader = new FileReader();
+    reader.onload = () => setPreview(reader.result as string);
+    reader.readAsDataURL(file);
+
+    // Upload
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("avatar", file);
+      const res = await fetch("/api/auth/avatar", { method: "POST", body: formData });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Upload failed");
+        setPreview(null);
+        return;
+      }
+      setAvatar(data.avatar);
+      setPreview(null);
+      onAvatarChange?.(data.avatar);
+    } catch {
+      setError("Upload failed. Please try again.");
+      setPreview(null);
+    } finally {
+      setUploading(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  }
+
+  async function handleRemove() {
+    setUploading(true);
+    setError("");
+    try {
+      const res = await fetch("/api/auth/avatar", { method: "DELETE" });
+      if (res.ok) {
+        setAvatar(null);
+        setPreview(null);
+        onAvatarChange?.(null);
+      }
+    } catch {
+      setError("Failed to remove avatar.");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  const displaySrc = preview || avatar;
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <label className="block text-sm font-semibold text-[var(--text)] mb-3">
+          Profile Picture
+        </label>
+        <div className="flex items-center gap-4">
+          <div className="relative group">
+            {displaySrc ? (
+              <img
+                src={displaySrc}
+                alt="Avatar"
+                className="w-20 h-20 rounded-full object-cover border-2 border-[var(--accent-2)]/30"
+              />
+            ) : (
+              <Avatar
+                username={username || "?"}
+                size={80}
+                className="bg-[var(--accent-2)] text-[var(--text)] border-2 border-[var(--accent-2)]/30"
+              />
+            )}
+            {uploading && (
+              <div className="absolute inset-0 rounded-full bg-black/50 flex items-center justify-center">
+                <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              </div>
+            )}
+          </div>
+          <div className="flex flex-col gap-2">
+            <button
+              onClick={() => fileRef.current?.click()}
+              disabled={uploading}
+              className="px-4 py-2 bg-[var(--accent)] text-[var(--bg)] text-sm font-semibold rounded hover:opacity-90 transition-opacity disabled:opacity-50"
+            >
+              {avatar ? "Change Avatar" : "Upload Avatar"}
+            </button>
+            {avatar && (
+              <button
+                onClick={handleRemove}
+                disabled={uploading}
+                className="px-4 py-2 bg-red-600/20 text-red-400 text-sm font-semibold rounded hover:bg-red-600/30 transition-colors disabled:opacity-50"
+              >
+                Remove
+              </button>
+            )}
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/jpeg,image/png,image/gif,image/webp"
+              onChange={handleFileSelect}
+              className="hidden"
+            />
+          </div>
+        </div>
+        {error && <p className="text-xs text-[var(--danger)] mt-2">{error}</p>}
+        <p className="text-xs text-[var(--muted)] mt-2">
+          Recommended: Square image, at least 128x128px. Max 2MB. JPEG, PNG, GIF, or WebP.
+        </p>
+      </div>
+
+      <hr className="border-[var(--accent-2)]/20" />
+
+      <div>
+        <label className="block text-sm font-semibold text-[var(--text)] mb-2">
+          Username
+        </label>
+        <p className="text-sm text-[var(--text)] bg-[var(--panel-2)] px-3 py-2 rounded border border-[var(--accent-2)]/30">
+          {username || "Unknown"}
+        </p>
+        <p className="text-xs text-[var(--muted)] mt-1">
+          Username changes coming soon.
+        </p>
       </div>
     </div>
   );

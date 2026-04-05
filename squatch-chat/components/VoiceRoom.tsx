@@ -1,12 +1,14 @@
 "use client";
 
-import { displayName, initials } from "@/lib/utils";
+import { displayName } from "@/lib/utils";
+import Avatar from "@/components/Avatar";
 
 interface VoiceParticipant {
   userId: string;
   username: string;
   muted: boolean;
   deafened?: boolean;
+  avatar?: string | null;
 }
 
 interface VoiceRoomProps {
@@ -139,15 +141,16 @@ export default function VoiceRoom({
                 >
                   {/* Avatar */}
                   <div className="relative">
-                    <div
-                      className={`w-16 h-16 rounded-full flex items-center justify-center text-xl font-bold ${
+                    <Avatar
+                      username={p.username}
+                      avatarUrl={p.avatar}
+                      size={64}
+                      className={`${
                         isSelf
                           ? "bg-[var(--accent)] text-[var(--bg)]"
                           : "bg-[var(--accent-2)] text-[var(--text)]"
                       } ${p.muted ? "opacity-60" : ""}`}
-                    >
-                      {initials(p.username)}
-                    </div>
+                    />
                     {/* Speaking ring — shows when not muted */}
                     {!p.muted && (
                       <div className="absolute inset-0 rounded-full border-2 border-green-500/50 animate-pulse" />

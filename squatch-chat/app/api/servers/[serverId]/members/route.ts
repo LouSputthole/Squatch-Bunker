@@ -27,7 +27,7 @@ export async function GET(
   const members = await prisma.serverMember.findMany({
     where: { serverId },
     include: {
-      user: { select: { id: true, username: true } },
+      user: { select: { id: true, username: true, avatar: true } },
     },
     orderBy: { createdAt: "asc" },
   });
@@ -42,6 +42,7 @@ export async function GET(
     members: members.map((m) => ({
       id: m.user.id,
       username: m.user.username,
+      avatar: m.user.avatar,
       joinedAt: m.createdAt,
     })),
     inviteCode: server?.inviteCode,

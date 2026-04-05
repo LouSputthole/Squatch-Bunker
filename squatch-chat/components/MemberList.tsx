@@ -2,11 +2,13 @@
 
 import { useState, useEffect } from "react";
 import { getSocket } from "@/lib/socket";
-import { truncateName, initials, displayName } from "@/lib/utils";
+import { truncateName, displayName } from "@/lib/utils";
+import Avatar from "@/components/Avatar";
 
 interface Member {
   id: string;
   username: string;
+  avatar?: string | null;
 }
 
 interface MemberListProps {
@@ -115,9 +117,7 @@ export default function MemberList({ serverId, onlineMemberIds }: MemberListProp
             </div>
             {onlineMembers.map((m) => (
               <div key={m.id} className="flex items-center gap-2 px-3 py-1">
-                <div className="w-8 h-8 rounded-full bg-[var(--accent-2)] flex items-center justify-center text-xs font-bold text-[var(--text)]">
-                  {initials(m.username)}
-                </div>
+                <Avatar username={m.username} avatarUrl={m.avatar} size={32} className="bg-[var(--accent-2)] text-[var(--text)]" />
                 <div className="flex items-center gap-1.5">
                   <div className="w-2 h-2 rounded-full bg-green-500" />
                   <span className="text-sm text-[var(--text)]" title={displayName(m.username)}>
@@ -138,9 +138,7 @@ export default function MemberList({ serverId, onlineMemberIds }: MemberListProp
             </div>
             {offlineMembers.map((m) => (
               <div key={m.id} className="flex items-center gap-2 px-3 py-1 opacity-50">
-                <div className="w-8 h-8 rounded-full bg-[var(--panel-2)] flex items-center justify-center text-xs font-bold text-[var(--muted)]">
-                  {initials(m.username)}
-                </div>
+                <Avatar username={m.username} avatarUrl={m.avatar} size={32} className="bg-[var(--panel-2)] text-[var(--muted)]" />
                 <div className="flex items-center gap-1.5">
                   <div className="w-2 h-2 rounded-full bg-[var(--muted)]" />
                   <span className="text-sm text-[var(--muted)]" title={displayName(m.username)}>

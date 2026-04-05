@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { displayName, initials, truncateName } from "@/lib/utils";
+import { displayName, truncateName } from "@/lib/utils";
+import Avatar from "@/components/Avatar";
 
 interface MessageBubbleProps {
   message: {
@@ -9,7 +10,7 @@ interface MessageBubbleProps {
     content: string;
     createdAt: string;
     updatedAt?: string;
-    author: { id: string; username: string };
+    author: { id: string; username: string; avatar?: string | null };
   };
   isOwn: boolean;
   onEdit?: (messageId: string, newContent: string) => void;
@@ -54,9 +55,12 @@ export default function MessageBubble({ message, isOwn, onEdit, onDelete }: Mess
       onMouseEnter={() => setShowActions(true)}
       onMouseLeave={() => setShowActions(false)}
     >
-      <div className="w-10 h-10 rounded-full bg-[var(--accent-2)] flex items-center justify-center text-sm font-bold text-[var(--text)] shrink-0 mt-0.5">
-        {initials(message.author.username)}
-      </div>
+      <Avatar
+        username={message.author.username}
+        avatarUrl={message.author.avatar}
+        size={40}
+        className="bg-[var(--accent-2)] text-[var(--text)] mt-0.5"
+      />
 
       <div className="flex-1 min-w-0">
         <div className="flex items-baseline gap-2">
