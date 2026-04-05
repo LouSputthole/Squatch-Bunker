@@ -23,6 +23,9 @@ const onlineUsers = new Map<string, Map<string, { username: string; socketId: st
 // Track voice channel participants: channelId -> Map<userId, {username, socketId, muted, deafened}>
 const voiceRooms = new Map<string, Map<string, { username: string; socketId: string; muted: boolean; deafened: boolean }>>();
 
+// Track which server each voice channel belongs to: channelId -> serverId
+const voiceChannelServer = new Map<string, string>();
+
 interface TokenPayload {
   userId: string;
   username: string;
@@ -148,8 +151,16 @@ io.on("connection", (socket) => {
   // ─── Voice Chat (WebRTC Signaling) ───
 
   // Join a voice channel
-  socket.on("voice:join", (channelId: string) => {
+  socket.on("voice:join", (data: string | { channelId: string; serverId?: string }) => {
+    // Support both old format (just channelId string) and new format ({channelId, serverId})
+    const channelId = typeof data === "string" ? data : data.channelId;
+    const serverId = typeof data === "string" ? undefined : data.serverId;
+
     socket.join(`voice:${channelId}`);
+
+    if (serverId) {
+      voiceChannelServer.set(channelId, serverId);
+    }
 
     if (!voiceRooms.has(channelId)) {
       voiceRooms.set(channelId, new Map());
@@ -260,9 +271,14 @@ io.on("connection", (socket) => {
           deafened: info.deafened,
         }))
       : [];
-    io.to(`voice:${channelId}`).emit("voice:participants-update", { channelId, participants });
-    // Also emit to the channel text room so the channel list can show voice indicators
-    io.to(`channel:${channelId}`).emit("voice:participants-update", { channelId, participants });
+    const payload = { channelId, participants };
+    // Emit to voice room members
+    io.to(`voice:${channelId}`).emit("voice:participants-update", payload);
+    // Emit to the server room so ALL server members see voice indicators in sidebar
+    const serverId = voiceChannelServer.get(channelId);
+    if (serverId) {
+      io.to(`server:${serverId}`).emit("voice:participants-update", payload);
+    }
   }
 
   // ─── Disconnect ───

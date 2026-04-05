@@ -13,6 +13,7 @@ interface VoiceParticipant {
 interface VoicePanelProps {
   channelId: string;
   channelName: string;
+  serverId: string;
   currentUserId: string;
   onParticipantsChange?: (channelId: string, participants: VoiceParticipant[]) => void;
   onDisconnect?: () => void;
@@ -76,6 +77,7 @@ export { SettingsIcon };
 const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoicePanel({
   channelId,
   channelName,
+  serverId,
   currentUserId,
   onParticipantsChange,
   onDisconnect,
@@ -154,7 +156,7 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
         if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return; }
         localStreamRef.current = stream;
         const socket = getSocket();
-        socket.emit("voice:join", channelId);
+        socket.emit("voice:join", { channelId, serverId });
         joinedChannelRef.current = channelId;
         setJoined(true);
         playNotificationSound("join");

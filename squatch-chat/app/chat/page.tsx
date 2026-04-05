@@ -188,6 +188,33 @@ function ChatPageInner() {
     return () => { socket.emit("server:leave", activeServer.id); };
   }, [activeServer]);
 
+  // Global voice participants listener — receives updates via server room broadcast
+  useEffect(() => {
+    if (!activeServer) return;
+    const socket = getSocket();
+
+    function handleVoiceUpdate(data: { channelId: string; participants: VoiceParticipant[] }) {
+      // Only update for voice channels in this server
+      const voiceChannelIds = activeServer!.channels
+        .filter((c) => c.type === "voice")
+        .map((c) => c.id);
+      if (!voiceChannelIds.includes(data.channelId)) return;
+
+      setVoiceParticipants((prev) => {
+        const next = new Map(prev);
+        if (data.participants.length > 0) {
+          next.set(data.channelId, data.participants);
+        } else {
+          next.delete(data.channelId);
+        }
+        return next;
+      });
+    }
+
+    socket.on("voice:participants-update", handleVoiceUpdate);
+    return () => { socket.off("voice:participants-update", handleVoiceUpdate); };
+  }, [activeServer]);
+
   // Unread tracking — only for text channels
   useEffect(() => {
     if (!activeServer || activeServer.channels.length === 0) return;
@@ -389,6 +416,7 @@ function ChatPageInner() {
           ref={voicePanelRef}
           channelId={activeVoiceChannel.id}
           channelName={activeVoiceChannel.name}
+          serverId={activeServer?.id || ""}
           currentUserId={user.id}
           onParticipantsChange={handleVoiceParticipantsChange}
           onDisconnect={handleVoiceLeave}
