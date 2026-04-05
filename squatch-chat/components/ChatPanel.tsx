@@ -25,6 +25,12 @@ export default function ChatPanel({
   currentUserId,
   currentUsername,
 }: ChatPanelProps) {
+  const truncateUsername = useCallback(
+    (username: string, maxChars = 18) =>
+      username.length > maxChars ? `${username.slice(0, maxChars)}…` : username,
+    []
+  );
+
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState("");
   const [loading, setLoading] = useState(true);
@@ -159,7 +165,7 @@ export default function ChatPanel({
     }
   }
 
-  const typingNames = Array.from(typingUsers.values());
+  const typingNames = Array.from(typingUsers.values()).map((name) => truncateUsername(name));
   const typingText =
     typingNames.length === 1
       ? `${typingNames[0]} is typing...`

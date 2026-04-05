@@ -13,6 +13,10 @@ interface MemberListProps {
   onlineMemberIds: Set<string>;
 }
 
+function truncateUsername(username: string, maxChars = 18) {
+  return username.length > maxChars ? `${username.slice(0, maxChars)}…` : username;
+}
+
 export default function MemberList({ serverId, onlineMemberIds }: MemberListProps) {
   const [members, setMembers] = useState<Member[]>([]);
   const [inviteCode, setInviteCode] = useState("");
@@ -119,7 +123,9 @@ export default function MemberList({ serverId, onlineMemberIds }: MemberListProp
                 </div>
                 <div className="flex items-center gap-1.5">
                   <div className="w-2 h-2 rounded-full bg-green-500" />
-                  <span className="text-sm text-[var(--text)]">{m.username}</span>
+                  <span className="text-sm text-[var(--text)]" title={m.username}>
+                    {truncateUsername(m.username)}
+                  </span>
                 </div>
               </div>
             ))}
@@ -140,7 +146,9 @@ export default function MemberList({ serverId, onlineMemberIds }: MemberListProp
                 </div>
                 <div className="flex items-center gap-1.5">
                   <div className="w-2 h-2 rounded-full bg-[var(--muted)]" />
-                  <span className="text-sm text-[var(--muted)]">{m.username}</span>
+                  <span className="text-sm text-[var(--muted)]" title={m.username}>
+                    {truncateUsername(m.username)}
+                  </span>
                 </div>
               </div>
             ))}
