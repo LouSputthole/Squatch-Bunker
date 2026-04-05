@@ -7,13 +7,15 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
 
-  const { serverId, name } = await request.json();
+  const { serverId, name, type } = await request.json();
   if (!serverId || !name || !name.trim()) {
     return NextResponse.json(
       { error: "Server ID and channel name are required" },
       { status: 400 }
     );
   }
+
+  const channelType = type === "voice" ? "voice" : "text";
 
   try {
     const { prisma } = await import("@/lib/db");
@@ -30,7 +32,7 @@ export async function POST(request: Request) {
       data: {
         serverId,
         name: name.trim().toLowerCase().replace(/\s+/g, "-"),
-        type: "text",
+        type: channelType,
       },
     });
 

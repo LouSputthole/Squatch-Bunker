@@ -20,8 +20,8 @@ const io = new Server(httpServer, {
 // Track online users per server: serverId -> Map<userId, {username, socketId}>
 const onlineUsers = new Map<string, Map<string, { username: string; socketId: string }>>();
 
-// Track voice channel participants: channelId -> Map<userId, {username, socketId, muted}>
-const voiceRooms = new Map<string, Map<string, { username: string; socketId: string; muted: boolean }>>();
+// Track voice channel participants: channelId -> Map<userId, {username, socketId, muted, deafened}>
+const voiceRooms = new Map<string, Map<string, { username: string; socketId: string; muted: boolean; deafened: boolean }>>();
 
 interface TokenPayload {
   userId: string;
@@ -157,7 +157,7 @@ io.on("connection", (socket) => {
 
     // Tell the new user about existing participants (so they can create offers)
     const existing = Array.from(voiceRooms.get(channelId)!.entries()).map(
-      ([userId, info]) => ({ userId, username: info.username, socketId: info.socketId, muted: info.muted })
+      ([userId, info]) => ({ userId, username: info.username, socketId: info.socketId, muted: info.muted, deafened: info.deafened })
     );
     socket.emit("voice:participants", { channelId, participants: existing });
 
@@ -166,6 +166,7 @@ io.on("connection", (socket) => {
       username: currentUsername,
       socketId: socket.id,
       muted: false,
+      deafened: false,
     });
 
     // Notify others that someone joined
@@ -190,11 +191,17 @@ io.on("connection", (socket) => {
     const room = voiceRooms.get(data.channelId);
     if (room && room.has(currentUserId)) {
       room.get(currentUserId)!.muted = data.muted;
-      io.to(`voice:${data.channelId}`).emit("voice:mute-update", {
-        channelId: data.channelId,
-        userId: currentUserId,
-        muted: data.muted,
-      });
+      broadcastVoiceParticipants(data.channelId);
+    }
+  });
+
+  // Toggle deafen
+  socket.on("voice:deafen", (data: { channelId: string; deafened: boolean }) => {
+    const room = voiceRooms.get(data.channelId);
+    if (room && room.has(currentUserId)) {
+      room.get(currentUserId)!.deafened = data.deafened;
+      if (data.deafened) room.get(currentUserId)!.muted = true;
+      broadcastVoiceParticipants(data.channelId);
     }
   });
 
@@ -250,6 +257,7 @@ io.on("connection", (socket) => {
           userId,
           username: info.username,
           muted: info.muted,
+          deafened: info.deafened,
         }))
       : [];
     io.to(`voice:${channelId}`).emit("voice:participants-update", { channelId, participants });

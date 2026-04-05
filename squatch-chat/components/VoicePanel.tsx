@@ -7,15 +7,17 @@ interface VoiceParticipant {
   userId: string;
   username: string;
   muted: boolean;
+  deafened?: boolean;
 }
 
 interface VoicePanelProps {
   channelId: string;
   channelName: string;
   currentUserId: string;
+  onParticipantsChange?: (channelId: string, participants: VoiceParticipant[]) => void;
+  onDisconnect?: () => void;
 }
 
-// ICE servers for NAT traversal
 const ICE_SERVERS: RTCConfiguration = {
   iceServers: [
     { urls: "stun:stun.l.google.com:19302" },
@@ -23,10 +25,105 @@ const ICE_SERVERS: RTCConfiguration = {
   ],
 };
 
+// Generate a short notification tone using Web Audio API
+function playNotificationSound(type: "join" | "leave") {
+  try {
+    const ctx = new AudioContext();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    if (type === "join") {
+      osc.frequency.setValueAtTime(600, ctx.currentTime);
+      osc.frequency.setValueAtTime(800, ctx.currentTime + 0.1);
+      gain.gain.setValueAtTime(0.15, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.25);
+    } else {
+      osc.frequency.setValueAtTime(500, ctx.currentTime);
+      osc.frequency.setValueAtTime(350, ctx.currentTime + 0.1);
+      gain.gain.setValueAtTime(0.15, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.2);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.2);
+    }
+    setTimeout(() => ctx.close(), 500);
+  } catch {
+    // Audio not available
+  }
+}
+
+// SVG Icons
+function MicIcon({ muted }: { muted: boolean }) {
+  if (muted) {
+    return (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <line x1="1" y1="1" x2="23" y2="23" />
+        <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6" />
+        <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2c0 .76-.13 1.49-.35 2.17" />
+        <line x1="12" y1="19" x2="12" y2="23" />
+        <line x1="8" y1="23" x2="16" y2="23" />
+      </svg>
+    );
+  }
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+      <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+      <line x1="12" y1="19" x2="12" y2="23" />
+      <line x1="8" y1="23" x2="16" y2="23" />
+    </svg>
+  );
+}
+
+function HeadphonesIcon({ deafened }: { deafened: boolean }) {
+  if (deafened) {
+    return (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <line x1="1" y1="1" x2="23" y2="23" />
+        <path d="M3 18v-6a9 9 0 0 1 14.12-7.41" />
+        <path d="M21 12v6" />
+        <path d="M3 18a3 3 0 0 0 3 3h0a3 3 0 0 0 3-3v-1" />
+        <path d="M15 17v1a3 3 0 0 0 3 3h0a3 3 0 0 0 3-3" />
+      </svg>
+    );
+  }
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 18v-6a9 9 0 0 1 18 0v6" />
+      <path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z" />
+    </svg>
+  );
+}
+
+function PhoneOffIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-3.33-2.67m-2.67-3.34a19.79 19.79 0 0 1-3.07-8.63A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91" />
+      <line x1="23" y1="1" x2="1" y2="23" />
+    </svg>
+  );
+}
+
+function SettingsIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    </svg>
+  );
+}
+
+export { SettingsIcon };
+
 export default function VoicePanel({
   channelId,
   channelName,
   currentUserId,
+  onParticipantsChange,
+  onDisconnect,
 }: VoicePanelProps) {
   const [joined, setJoined] = useState(false);
   const [muted, setMuted] = useState(false);
@@ -39,31 +136,24 @@ export default function VoicePanel({
   const audioElementsRef = useRef<Map<string, HTMLAudioElement>>(new Map());
   const joinedChannelRef = useRef<string | null>(null);
 
-  // Cleanup all peer connections
   const cleanupPeers = useCallback(() => {
     peersRef.current.forEach((pc) => pc.close());
     peersRef.current.clear();
-    audioElementsRef.current.forEach((el) => {
-      el.srcObject = null;
-      el.remove();
-    });
+    audioElementsRef.current.forEach((el) => { el.srcObject = null; el.remove(); });
     audioElementsRef.current.clear();
   }, []);
 
-  // Create a peer connection for a remote user
   const createPeer = useCallback(
     (remoteSocketId: string, initiator: boolean) => {
       const pc = new RTCPeerConnection(ICE_SERVERS);
       const socket = getSocket();
 
-      // Add local audio tracks
       if (localStreamRef.current) {
         localStreamRef.current.getTracks().forEach((track) => {
           pc.addTrack(track, localStreamRef.current!);
         });
       }
 
-      // Handle incoming remote audio
       pc.ontrack = (event) => {
         const [stream] = event.streams;
         if (!stream) return;
@@ -76,26 +166,16 @@ export default function VoicePanel({
         audio.srcObject = stream;
       };
 
-      // Send ICE candidates to the remote peer
       pc.onicecandidate = (event) => {
         if (event.candidate) {
-          socket.emit("voice:ice-candidate", {
-            to: remoteSocketId,
-            candidate: event.candidate.toJSON(),
-          });
+          socket.emit("voice:ice-candidate", { to: remoteSocketId, candidate: event.candidate.toJSON() });
         }
       };
 
-      // If we're the initiator, create and send an offer
       if (initiator) {
         pc.createOffer()
           .then((offer) => pc.setLocalDescription(offer))
-          .then(() => {
-            socket.emit("voice:offer", {
-              to: remoteSocketId,
-              offer: pc.localDescription!,
-            });
-          });
+          .then(() => { socket.emit("voice:offer", { to: remoteSocketId, offer: pc.localDescription! }); });
       }
 
       peersRef.current.set(remoteSocketId, pc);
@@ -104,165 +184,130 @@ export default function VoicePanel({
     []
   );
 
-  // Join voice channel
-  const joinVoice = useCallback(async () => {
-    setConnecting(true);
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-        video: false,
-      });
-      localStreamRef.current = stream;
+  // Auto-join when mounted (parent mounts us when user clicks a voice channel)
+  useEffect(() => {
+    let cancelled = false;
 
-      const socket = getSocket();
-      socket.emit("voice:join", channelId);
-      joinedChannelRef.current = channelId;
-      setJoined(true);
-    } catch (err) {
-      console.error("[Voice] Failed to get microphone:", err);
-      alert("Could not access microphone. Please check permissions.");
-    } finally {
-      setConnecting(false);
+    async function autoJoin() {
+      setConnecting(true);
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+          video: false,
+        });
+        if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return; }
+        localStreamRef.current = stream;
+        const socket = getSocket();
+        socket.emit("voice:join", channelId);
+        joinedChannelRef.current = channelId;
+        setJoined(true);
+        playNotificationSound("join");
+      } catch (err) {
+        console.error("[Voice] Mic access failed:", err);
+        alert("Could not access microphone. Check browser permissions.");
+        onDisconnect?.();
+      } finally {
+        setConnecting(false);
+      }
     }
+
+    autoJoin();
+
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [channelId]);
 
-  // Leave voice channel
   const leaveVoice = useCallback(() => {
     const socket = getSocket();
     if (joinedChannelRef.current) {
       socket.emit("voice:leave", joinedChannelRef.current);
     }
-
-    // Stop local mic
     localStreamRef.current?.getTracks().forEach((t) => t.stop());
     localStreamRef.current = null;
-
     cleanupPeers();
     joinedChannelRef.current = null;
     setJoined(false);
     setMuted(false);
     setDeafened(false);
     setParticipants([]);
-  }, [cleanupPeers]);
+    playNotificationSound("leave");
+    onDisconnect?.();
+  }, [cleanupPeers, onDisconnect]);
 
-  // Toggle mute
   const toggleMute = useCallback(() => {
     if (!localStreamRef.current) return;
     const newMuted = !muted;
-    localStreamRef.current.getAudioTracks().forEach((t) => {
-      t.enabled = !newMuted;
-    });
+    localStreamRef.current.getAudioTracks().forEach((t) => { t.enabled = !newMuted; });
     setMuted(newMuted);
     const socket = getSocket();
     socket.emit("voice:mute", { channelId, muted: newMuted });
   }, [muted, channelId]);
 
-  // Toggle deafen
   const toggleDeafen = useCallback(() => {
     const newDeafened = !deafened;
     setDeafened(newDeafened);
-    // Mute all remote audio elements
-    audioElementsRef.current.forEach((audio) => {
-      audio.muted = newDeafened;
-    });
-    // Also mute self when deafening
+    audioElementsRef.current.forEach((audio) => { audio.muted = newDeafened; });
+    const socket = getSocket();
+    socket.emit("voice:deafen", { channelId, deafened: newDeafened });
     if (newDeafened && !muted) {
-      toggleMute();
+      if (!localStreamRef.current) return;
+      localStreamRef.current.getAudioTracks().forEach((t) => { t.enabled = false; });
+      setMuted(true);
+      socket.emit("voice:mute", { channelId, muted: true });
     }
-  }, [deafened, muted, toggleMute]);
+  }, [deafened, muted, channelId]);
 
-  // Socket event handlers for voice
+  // Socket event handlers
   useEffect(() => {
     if (!joined) return;
     const socket = getSocket();
 
-    // When we get the list of existing participants, create peer connections to each
     function handleParticipants(data: {
       channelId: string;
       participants: { userId: string; username: string; socketId: string; muted: boolean }[];
     }) {
       if (data.channelId !== channelId) return;
-      // Create offers to all existing participants
       data.participants.forEach((p) => {
-        if (p.userId !== currentUserId) {
-          createPeer(p.socketId, true);
-        }
+        if (p.userId !== currentUserId) createPeer(p.socketId, true);
       });
     }
 
-    // When a new user joins, they'll send us an offer — we wait for it
-    function handleUserJoined(data: {
-      channelId: string;
-      userId: string;
-      username: string;
-      socketId: string;
-    }) {
+    function handleUserJoined(data: { channelId: string; userId: string; socketId: string }) {
       if (data.channelId !== channelId || data.userId === currentUserId) return;
-      // The new joiner will send offers to us (they initiate), so we just prepare
+      playNotificationSound("join");
     }
 
-    // When a user leaves, close their peer connection
-    function handleUserLeft(data: { channelId: string; userId: string; socketId: string }) {
+    function handleUserLeft(data: { channelId: string; socketId: string }) {
       if (data.channelId !== channelId) return;
+      playNotificationSound("leave");
       const pc = peersRef.current.get(data.socketId);
-      if (pc) {
-        pc.close();
-        peersRef.current.delete(data.socketId);
-      }
+      if (pc) { pc.close(); peersRef.current.delete(data.socketId); }
       const audio = audioElementsRef.current.get(data.socketId);
-      if (audio) {
-        audio.srcObject = null;
-        audio.remove();
-        audioElementsRef.current.delete(data.socketId);
-      }
+      if (audio) { audio.srcObject = null; audio.remove(); audioElementsRef.current.delete(data.socketId); }
     }
 
-    // Handle incoming WebRTC offer
-    function handleOffer(data: {
-      from: string;
-      fromUserId: string;
-      fromUsername: string;
-      offer: RTCSessionDescriptionInit;
-    }) {
+    function handleOffer(data: { from: string; offer: RTCSessionDescriptionInit }) {
       const pc = createPeer(data.from, false);
       pc.setRemoteDescription(new RTCSessionDescription(data.offer))
         .then(() => pc.createAnswer())
         .then((answer) => pc.setLocalDescription(answer))
-        .then(() => {
-          socket.emit("voice:answer", {
-            to: data.from,
-            answer: pc.localDescription!,
-          });
-        });
+        .then(() => { socket.emit("voice:answer", { to: data.from, answer: pc.localDescription! }); });
     }
 
-    // Handle incoming WebRTC answer
     function handleAnswer(data: { from: string; answer: RTCSessionDescriptionInit }) {
       const pc = peersRef.current.get(data.from);
-      if (pc) {
-        pc.setRemoteDescription(new RTCSessionDescription(data.answer));
-      }
+      if (pc) pc.setRemoteDescription(new RTCSessionDescription(data.answer));
     }
 
-    // Handle incoming ICE candidate
     function handleIceCandidate(data: { from: string; candidate: RTCIceCandidateInit }) {
       const pc = peersRef.current.get(data.from);
-      if (pc) {
-        pc.addIceCandidate(new RTCIceCandidate(data.candidate));
-      }
+      if (pc) pc.addIceCandidate(new RTCIceCandidate(data.candidate));
     }
 
-    // Participant list updates (for UI display)
-    function handleParticipantsUpdate(data: {
-      channelId: string;
-      participants: VoiceParticipant[];
-    }) {
+    function handleParticipantsUpdate(data: { channelId: string; participants: VoiceParticipant[] }) {
       if (data.channelId !== channelId) return;
       setParticipants(data.participants);
+      onParticipantsChange?.(data.channelId, data.participants);
     }
 
     socket.on("voice:participants", handleParticipants);
@@ -282,9 +327,9 @@ export default function VoicePanel({
       socket.off("voice:ice-candidate", handleIceCandidate);
       socket.off("voice:participants-update", handleParticipantsUpdate);
     };
-  }, [joined, channelId, currentUserId, createPeer]);
+  }, [joined, channelId, currentUserId, createPeer, onParticipantsChange]);
 
-  // Cleanup on unmount or channel change
+  // Cleanup on unmount
   useEffect(() => {
     return () => {
       if (joinedChannelRef.current) {
@@ -293,106 +338,58 @@ export default function VoicePanel({
         localStreamRef.current?.getTracks().forEach((t) => t.stop());
         localStreamRef.current = null;
         cleanupPeers();
-        joinedChannelRef.current = null;
       }
     };
-  }, [channelId, cleanupPeers]);
+  }, [cleanupPeers]);
 
-  // Listen for participant updates even when not joined (to show who's in voice)
-  useEffect(() => {
-    if (joined) return; // Already handled above
-    const socket = getSocket();
+  if (connecting) {
+    return (
+      <div className="absolute bottom-0 left-[72px] w-60 bg-[var(--panel)] border-t border-r border-[var(--accent-2)]/30 px-3 py-3 z-20">
+        <div className="text-sm text-[var(--muted)] animate-pulse">Connecting to voice...</div>
+      </div>
+    );
+  }
 
-    function handleParticipantsUpdate(data: {
-      channelId: string;
-      participants: VoiceParticipant[];
-    }) {
-      if (data.channelId !== channelId) return;
-      setParticipants(data.participants);
-    }
-
-    socket.on("voice:participants-update", handleParticipantsUpdate);
-    return () => {
-      socket.off("voice:participants-update", handleParticipantsUpdate);
-    };
-  }, [joined, channelId]);
+  if (!joined) return null;
 
   return (
-    <div className="border-t border-[var(--accent-2)]/30 bg-[var(--panel)]">
-      {/* Participant list */}
-      {participants.length > 0 && (
-        <div className="px-3 py-2 border-b border-[var(--accent-2)]/20">
-          <div className="text-xs font-semibold text-[var(--muted)] uppercase tracking-wide mb-1">
-            Voice Connected — {participants.length}
-          </div>
-          {participants.map((p) => (
-            <div key={p.userId} className="flex items-center gap-2 py-0.5">
-              <div
-                className={`w-2 h-2 rounded-full ${
-                  p.muted ? "bg-[var(--muted)]" : "bg-green-500"
-                }`}
-              />
-              <span
-                className={`text-sm truncate ${
-                  p.userId === currentUserId
-                    ? "text-[var(--accent)]"
-                    : "text-[var(--text)]"
-                }`}
-              >
-                {p.username}
-              </span>
-              {p.muted && (
-                <span className="text-xs text-[var(--muted)]" title="Muted">
-                  [muted]
-                </span>
-              )}
-            </div>
-          ))}
+    <div className="absolute bottom-12 left-[72px] w-60 bg-[var(--panel)] border-t border-r border-[var(--accent-2)]/30 z-20">
+      {/* Voice status */}
+      <div className="px-3 py-2 border-b border-[var(--accent-2)]/20">
+        <div className="flex items-center gap-1.5">
+          <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+          <span className="text-xs font-semibold text-green-400">Voice Connected</span>
         </div>
-      )}
+        <div className="text-xs text-[var(--muted)] truncate mt-0.5">{channelName}</div>
+      </div>
 
       {/* Controls */}
-      <div className="px-3 py-2 flex items-center gap-2">
-        {!joined ? (
-          <button
-            onClick={joinVoice}
-            disabled={connecting}
-            className="flex-1 px-3 py-2 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white text-sm font-semibold rounded transition-colors"
-          >
-            {connecting ? "Connecting..." : `Join Voice`}
-          </button>
-        ) : (
-          <>
-            <button
-              onClick={toggleMute}
-              className={`px-3 py-2 text-sm font-semibold rounded transition-colors ${
-                muted
-                  ? "bg-red-600/20 text-red-400 hover:bg-red-600/30"
-                  : "bg-[var(--panel-2)] text-[var(--text)] hover:bg-[var(--accent-2)]/30"
-              }`}
-              title={muted ? "Unmute" : "Mute"}
-            >
-              {muted ? "Unmute" : "Mute"}
-            </button>
-            <button
-              onClick={toggleDeafen}
-              className={`px-3 py-2 text-sm font-semibold rounded transition-colors ${
-                deafened
-                  ? "bg-red-600/20 text-red-400 hover:bg-red-600/30"
-                  : "bg-[var(--panel-2)] text-[var(--text)] hover:bg-[var(--accent-2)]/30"
-              }`}
-              title={deafened ? "Undeafen" : "Deafen"}
-            >
-              {deafened ? "Undeafen" : "Deafen"}
-            </button>
-            <button
-              onClick={leaveVoice}
-              className="px-3 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded transition-colors ml-auto"
-            >
-              Disconnect
-            </button>
-          </>
-        )}
+      <div className="px-3 py-2 flex items-center gap-1">
+        <button
+          onClick={toggleMute}
+          className={`p-2 rounded transition-colors ${
+            muted ? "bg-red-600/20 text-red-400 hover:bg-red-600/30" : "text-[var(--text)] hover:bg-[var(--panel-2)]"
+          }`}
+          title={muted ? "Unmute" : "Mute"}
+        >
+          <MicIcon muted={muted} />
+        </button>
+        <button
+          onClick={toggleDeafen}
+          className={`p-2 rounded transition-colors ${
+            deafened ? "bg-red-600/20 text-red-400 hover:bg-red-600/30" : "text-[var(--text)] hover:bg-[var(--panel-2)]"
+          }`}
+          title={deafened ? "Undeafen" : "Deafen"}
+        >
+          <HeadphonesIcon deafened={deafened} />
+        </button>
+        <button
+          onClick={leaveVoice}
+          className="p-2 rounded text-red-400 hover:bg-red-600/20 transition-colors ml-auto"
+          title="Disconnect"
+        >
+          <PhoneOffIcon />
+        </button>
       </div>
     </div>
   );

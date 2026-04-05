@@ -6,11 +6,15 @@ import ServerList from "@/components/ServerList";
 import ChannelList from "@/components/ChannelList";
 import ChatPanel from "@/components/ChatPanel";
 import MemberList from "@/components/MemberList";
+import VoicePanel from "@/components/VoicePanel";
+import SettingsModal from "@/components/SettingsModal";
+import { SettingsIcon } from "@/components/VoicePanel";
 import { connectSocket, disconnectSocket, getSocket } from "@/lib/socket";
 
 interface Channel {
   id: string;
   name: string;
+  type?: string;
 }
 
 interface Server {
@@ -26,6 +30,13 @@ interface User {
   email: string;
 }
 
+interface VoiceParticipant {
+  userId: string;
+  username: string;
+  muted: boolean;
+  deafened?: boolean;
+}
+
 export default function ChatPage() {
   return (
     <Suspense fallback={
@@ -39,7 +50,7 @@ export default function ChatPage() {
 }
 
 function ChatPageInner() {
-  const APP_VERSION = "v0.0.2";
+  const APP_VERSION = "v0.0.3";
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -51,14 +62,18 @@ function ChatPageInner() {
   const [onlineMembers, setOnlineMembers] = useState<Set<string>>(new Set());
   const [unreadCounts, setUnreadCounts] = useState<Map<string, number>>(new Map());
   const [loading, setLoading] = useState(true);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
+  // Voice state
+  const [activeVoiceChannel, setActiveVoiceChannel] = useState<Channel | null>(null);
+  const [voiceParticipants, setVoiceParticipants] = useState<Map<string, VoiceParticipant[]>>(new Map());
+
   const activeServerIdRef = useRef<string | null>(null);
   const activeChannelIdRef = useRef<string | null>(null);
 
-  // Read server/channel IDs from URL on mount
   const urlServerId = searchParams.get("s");
   const urlChannelId = searchParams.get("c");
 
-  // Update URL when selection changes (without navigation)
   const updateUrl = useCallback((serverId?: string, channelId?: string) => {
     const params = new URLSearchParams();
     if (serverId) params.set("s", serverId);
@@ -91,37 +106,33 @@ function ChatPageInner() {
         const serverList: Server[] = serversData.servers || [];
         setServers(serverList);
 
-        // Connect socket
         const socket = connectSocket();
 
-        // Listen for presence updates
         presenceHandler = (data: { serverId: string; members: { userId: string; username: string }[] }) => {
           if (data.serverId !== activeServerIdRef.current) return;
           setOnlineMembers(new Set(data.members.map((m) => m.userId)));
         };
         socket.on("presence:update", presenceHandler);
 
-        // Restore selection from URL
+        // Restore selection from URL — only select text channels as active
         if (urlServerId && serverList.length > 0) {
           const savedServer = serverList.find((s) => s.id === urlServerId);
           if (savedServer) {
             setActiveServer(savedServer);
+            const textChannels = savedServer.channels.filter((c) => !c.type || c.type === "text");
             const savedChannel = urlChannelId
-              ? savedServer.channels.find((c) => c.id === urlChannelId)
-              : savedServer.channels[0];
+              ? textChannels.find((c) => c.id === urlChannelId)
+              : textChannels[0];
             if (savedChannel) setActiveChannel(savedChannel);
           } else {
-            // URL server not found, fall back to first
             setActiveServer(serverList[0]);
-            if (serverList[0].channels.length > 0) {
-              setActiveChannel(serverList[0].channels[0]);
-            }
+            const textChannels = serverList[0].channels.filter((c) => !c.type || c.type === "text");
+            if (textChannels.length > 0) setActiveChannel(textChannels[0]);
           }
         } else if (serverList.length > 0) {
           setActiveServer(serverList[0]);
-          if (serverList[0].channels.length > 0) {
-            setActiveChannel(serverList[0].channels[0]);
-          }
+          const textChannels = serverList[0].channels.filter((c) => !c.type || c.type === "text");
+          if (textChannels.length > 0) setActiveChannel(textChannels[0]);
         }
 
         setLoading(false);
@@ -145,7 +156,6 @@ function ChatPageInner() {
     activeServerIdRef.current = activeServer?.id ?? null;
   }, [activeServer]);
 
-  // Track active channel for unread logic, clear unread when switching
   useEffect(() => {
     activeChannelIdRef.current = activeChannel?.id ?? null;
     if (activeChannel) {
@@ -158,37 +168,31 @@ function ChatPageInner() {
     }
   }, [activeChannel]);
 
-  // Update URL when active server/channel changes
   useEffect(() => {
     if (activeServer || activeChannel) {
       updateUrl(activeServer?.id, activeChannel?.id);
     }
   }, [activeServer, activeChannel, updateUrl]);
 
-  // Join server room for presence when active server changes
   useEffect(() => {
     if (!activeServer) return;
     const socket = getSocket();
     socket.emit("server:join", activeServer.id);
-
-    return () => {
-      socket.emit("server:leave", activeServer.id);
-    };
+    return () => { socket.emit("server:leave", activeServer.id); };
   }, [activeServer]);
 
-  // Join all channel rooms for unread tracking
+  // Unread tracking — only for text channels
   useEffect(() => {
     if (!activeServer || activeServer.channels.length === 0) return;
     const socket = getSocket();
-    const channelIds = activeServer.channels.map((c) => c.id);
+    const textChannelIds = activeServer.channels
+      .filter((c) => !c.type || c.type === "text")
+      .map((c) => c.id);
 
-    // Join all channel rooms (ChatPanel also joins the active one — that's fine, Socket.IO dedupes)
-    channelIds.forEach((id) => socket.emit("channel:join", id));
+    textChannelIds.forEach((id) => socket.emit("channel:join", id));
 
-    // Listen for messages on all channels
     function handleMessage(channelId: string) {
       return () => {
-        // Only count as unread if this channel isn't currently active
         if (channelId === activeChannelIdRef.current) return;
         setUnreadCounts((prev) => {
           const next = new Map(prev);
@@ -198,7 +202,7 @@ function ChatPageInner() {
       };
     }
 
-    const handlers = channelIds.map((id) => ({
+    const handlers = textChannelIds.map((id) => ({
       event: `message:channel:${id}`,
       handler: handleMessage(id),
     }));
@@ -206,13 +210,14 @@ function ChatPageInner() {
 
     return () => {
       handlers.forEach(({ event, handler }) => socket.off(event, handler));
-      channelIds.forEach((id) => socket.emit("channel:leave", id));
+      textChannelIds.forEach((id) => socket.emit("channel:leave", id));
     };
   }, [activeServer]);
 
   const handleServerSelect = useCallback((server: Server) => {
     setActiveServer(server);
-    setActiveChannel(server.channels[0] || null);
+    const textChannels = server.channels.filter((c) => !c.type || c.type === "text");
+    setActiveChannel(textChannels[0] || null);
     setOnlineMembers(new Set());
     setUnreadCounts(new Map());
   }, []);
@@ -223,9 +228,8 @@ function ChatPageInner() {
       return [...prev, server];
     });
     setActiveServer(server);
-    if (server.channels.length > 0) {
-      setActiveChannel(server.channels[0]);
-    }
+    const textChannels = server.channels.filter((c) => !c.type || c.type === "text");
+    if (textChannels.length > 0) setActiveChannel(textChannels[0]);
   }, []);
 
   const handleServerCreated = useCallback((server: Server) => {
@@ -237,7 +241,10 @@ function ChatPageInner() {
   }, [activateServer]);
 
   const handleChannelSelect = useCallback((channel: Channel) => {
-    setActiveChannel(channel);
+    // Only text channels become the active text channel
+    if (!channel.type || channel.type === "text") {
+      setActiveChannel(channel);
+    }
   }, []);
 
   const handleChannelCreated = useCallback((channel: Channel) => {
@@ -249,7 +256,31 @@ function ChatPageInner() {
       );
       return updated;
     });
-    setActiveChannel(channel);
+    // Only auto-select text channels
+    if (!channel.type || channel.type === "text") {
+      setActiveChannel(channel);
+    }
+  }, []);
+
+  const handleVoiceJoin = useCallback((channel: Channel) => {
+    // If already in a voice channel, leave it first (VoicePanel unmount handles cleanup)
+    setActiveVoiceChannel(channel);
+  }, []);
+
+  const handleVoiceLeave = useCallback(() => {
+    setActiveVoiceChannel(null);
+  }, []);
+
+  const handleVoiceParticipantsChange = useCallback((channelId: string, participants: VoiceParticipant[]) => {
+    setVoiceParticipants((prev) => {
+      const next = new Map(prev);
+      if (participants.length > 0) {
+        next.set(channelId, participants);
+      } else {
+        next.delete(channelId);
+      }
+      return next;
+    });
   }, []);
 
   async function handleLogout() {
@@ -283,8 +314,13 @@ function ChatPageInner() {
           activeChannelId={activeChannel?.id}
           serverId={activeServer.id}
           unreadCounts={unreadCounts}
+          currentUserId={user?.id}
+          activeVoiceChannelId={activeVoiceChannel?.id}
+          voiceParticipants={voiceParticipants}
           onChannelSelect={handleChannelSelect}
           onChannelCreated={handleChannelCreated}
+          onVoiceJoin={handleVoiceJoin}
+          onVoiceLeave={handleVoiceLeave}
         />
       ) : (
         <div className="w-60 bg-[var(--panel)] flex flex-col items-center justify-center text-[var(--muted)] text-sm border-r border-[var(--accent-2)]/30 px-4 text-center gap-3 shrink-0">
@@ -326,17 +362,41 @@ function ChatPageInner() {
         />
       )}
 
+      {/* Voice Panel — floating bar above user bar */}
+      {activeVoiceChannel && user && (
+        <VoicePanel
+          channelId={activeVoiceChannel.id}
+          channelName={activeVoiceChannel.name}
+          currentUserId={user.id}
+          onParticipantsChange={handleVoiceParticipantsChange}
+          onDisconnect={handleVoiceLeave}
+        />
+      )}
+
+      {/* User bar with settings gear */}
       <div className="absolute bottom-0 left-[72px] w-60 h-12 bg-[var(--bg)] border-t border-r border-[var(--accent-2)]/30 flex items-center px-3 justify-between z-10">
         <span className="text-sm text-[var(--text)] truncate">
           {user?.username}
         </span>
-        <button
-          onClick={handleLogout}
-          className="text-xs text-[var(--muted)] hover:text-[var(--danger)] transition-colors"
-        >
-          Logout
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setSettingsOpen(true)}
+            className="text-[var(--muted)] hover:text-[var(--text)] transition-colors"
+            title="Settings"
+          >
+            <SettingsIcon />
+          </button>
+          <button
+            onClick={handleLogout}
+            className="text-xs text-[var(--muted)] hover:text-[var(--danger)] transition-colors"
+          >
+            Logout
+          </button>
+        </div>
       </div>
+
+      {/* Settings Modal */}
+      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
 
       {/* App version */}
       <div className="absolute bottom-3 right-3 text-xs text-[var(--muted)]">
