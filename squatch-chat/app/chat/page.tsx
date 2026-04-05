@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import ServerList from "@/components/ServerList";
 import ChannelList from "@/components/ChannelList";
@@ -35,9 +35,12 @@ export default function ChatPage() {
   const [activeChannel, setActiveChannel] = useState<Channel | null>(null);
   const [onlineMembers, setOnlineMembers] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
+  const activeServerIdRef = useRef<string | null>(null);
 
   // Fetch user and servers on mount
   useEffect(() => {
+    let presenceHandler: ((data: { serverId: string; members: { userId: string; username: string }[] }) => void) | null = null;
+
     async function init() {
       try {
         const [userRes, serversRes] = await Promise.all([
@@ -66,9 +69,11 @@ export default function ChatPage() {
         });
 
         // Listen for presence updates
-        socket.on("presence:update", (data: { serverId: string; members: { userId: string; username: string }[] }) => {
+        presenceHandler = (data: { serverId: string; members: { userId: string; username: string }[] }) => {
+          if (data.serverId !== activeServerIdRef.current) return;
           setOnlineMembers(new Set(data.members.map((m) => m.userId)));
-        });
+        };
+        socket.on("presence:update", presenceHandler);
 
         setLoading(false);
       } catch {
@@ -79,9 +84,16 @@ export default function ChatPage() {
     init();
 
     return () => {
+      if (presenceHandler) {
+        getSocket().off("presence:update", presenceHandler);
+      }
       disconnectSocket();
     };
   }, [router]);
+
+  useEffect(() => {
+    activeServerIdRef.current = activeServer?.id ?? null;
+  }, [activeServer]);
 
   // Auto-select first server and channel
   useEffect(() => {

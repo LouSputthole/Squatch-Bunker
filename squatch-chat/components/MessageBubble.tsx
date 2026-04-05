@@ -11,6 +11,11 @@ interface MessageBubbleProps {
 }
 
 export default function MessageBubble({ message, isOwn }: MessageBubbleProps) {
+  const displayUsername =
+    message.author.username.length > 20
+      ? `${message.author.username.slice(0, 20)}…`
+      : message.author.username;
+
   const time = new Date(message.createdAt).toLocaleTimeString([], {
     hour: "2-digit",
     minute: "2-digit",
@@ -26,7 +31,7 @@ export default function MessageBubble({ message, isOwn }: MessageBubbleProps) {
       <div className="flex-1 min-w-0">
         <div className="flex items-baseline gap-2">
           <span className={`font-semibold text-sm ${isOwn ? "text-[var(--accent)]" : "text-[var(--text)]"}`}>
-            {message.author.username}
+            <span title={message.author.username}>{displayUsername}</span>
           </span>
           <span className="text-xs text-[var(--muted)]">{time}</span>
         </div>
