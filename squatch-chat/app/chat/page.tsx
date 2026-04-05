@@ -27,7 +27,7 @@ interface User {
 }
 
 export default function ChatPage() {
-  const APP_VERSION = "v0.1.0";
+  const APP_VERSION = "v0.0.2";
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
   const [servers, setServers] = useState<Server[]>([]);
