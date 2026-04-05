@@ -4,6 +4,10 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Campfire",
   description: "Gather around the fire",
+  icons: {
+    icon: "/campfire-logo.png",
+    apple: "/campfire-logo.png",
+  },
 };
 
 export default function RootLayout({

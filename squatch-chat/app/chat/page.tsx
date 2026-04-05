@@ -45,8 +45,9 @@ interface VoiceParticipant {
 export default function ChatPage() {
   return (
     <Suspense fallback={
-      <div className="min-h-screen flex items-center justify-center bg-[var(--bg)] text-[var(--muted)]">
-        Following tracks into the woods...
+      <div className="min-h-screen flex flex-col items-center justify-center bg-[var(--bg)] text-[var(--muted)] gap-3">
+        <img src="/campfire-logo.png" alt="Campfire" className="w-16 h-16 animate-pulse" />
+        <span>Following tracks into the woods...</span>
       </div>
     }>
       <ChatPageInner />
@@ -325,8 +326,9 @@ function ChatPageInner() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[var(--bg)] text-[var(--muted)]">
-        Following tracks into the woods...
+      <div className="min-h-screen flex flex-col items-center justify-center bg-[var(--bg)] text-[var(--muted)] gap-3">
+        <img src="/campfire-logo.png" alt="Campfire" className="w-16 h-16 animate-pulse" />
+        <span>Following tracks into the woods...</span>
       </div>
     );
   }
@@ -389,6 +391,7 @@ function ChatPageInner() {
       ) : (
         <div className="flex-1 flex items-center justify-center bg-[var(--panel-2)] text-[var(--muted)]">
           <div className="text-center max-w-sm">
+            <img src="/campfire-logo.png" alt="Campfire" className="w-20 h-20 mx-auto mb-4 opacity-80" />
             <p className="text-2xl mb-2 text-[var(--text)]">Welcome to Campfire</p>
             {servers.length === 0 ? (
               <p className="text-sm">

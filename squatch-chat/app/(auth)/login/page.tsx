@@ -69,12 +69,15 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-[var(--bg)]">
       <div className="w-full max-w-md p-8 bg-[var(--panel)] rounded-lg border border-[var(--accent-2)]">
-        <h1 className="text-3xl font-bold text-[var(--text)] mb-2 text-center">
-          Campfire
-        </h1>
-        <p className="text-[var(--muted)] text-center mb-8">
-          Welcome back to the fire
-        </p>
+        <div className="flex flex-col items-center mb-6">
+          <img src="/campfire-logo.png" alt="Campfire" className="w-24 h-24 mb-3" />
+          <h1 className="text-3xl font-bold text-[var(--text)] mb-1">
+            Campfire
+          </h1>
+          <p className="text-[var(--muted)] text-sm">
+            Welcome back to the fire
+          </p>
+        </div>
 
         {error && (
           <div className="p-3 mb-4 bg-[var(--danger)] text-[var(--text)] rounded text-sm">

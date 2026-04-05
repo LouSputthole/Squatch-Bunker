@@ -227,7 +227,21 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
     onStateChange?.({ muted, deafened, participants });
   }, [muted, deafened, participants, onStateChange]);
 
-  // Socket event handlers
+  // Participant updates — register BEFORE joining so we don't miss the initial broadcast
+  useEffect(() => {
+    const socket = getSocket();
+
+    function handleParticipantsUpdate(data: { channelId: string; participants: VoiceParticipant[] }) {
+      if (data.channelId !== channelId) return;
+      setParticipants(data.participants);
+      onParticipantsChange?.(data.channelId, data.participants);
+    }
+
+    socket.on("voice:participants-update", handleParticipantsUpdate);
+    return () => { socket.off("voice:participants-update", handleParticipantsUpdate); };
+  }, [channelId, onParticipantsChange]);
+
+  // WebRTC signaling handlers — only after joined
   useEffect(() => {
     if (!joined) return;
     const socket = getSocket();
@@ -274,19 +288,12 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
       if (pc) pc.addIceCandidate(new RTCIceCandidate(data.candidate));
     }
 
-    function handleParticipantsUpdate(data: { channelId: string; participants: VoiceParticipant[] }) {
-      if (data.channelId !== channelId) return;
-      setParticipants(data.participants);
-      onParticipantsChange?.(data.channelId, data.participants);
-    }
-
     socket.on("voice:participants", handleParticipants);
     socket.on("voice:user-joined", handleUserJoined);
     socket.on("voice:user-left", handleUserLeft);
     socket.on("voice:offer", handleOffer);
     socket.on("voice:answer", handleAnswer);
     socket.on("voice:ice-candidate", handleIceCandidate);
-    socket.on("voice:participants-update", handleParticipantsUpdate);
 
     return () => {
       socket.off("voice:participants", handleParticipants);
@@ -295,9 +302,8 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
       socket.off("voice:offer", handleOffer);
       socket.off("voice:answer", handleAnswer);
       socket.off("voice:ice-candidate", handleIceCandidate);
-      socket.off("voice:participants-update", handleParticipantsUpdate);
     };
-  }, [joined, channelId, currentUserId, createPeer, onParticipantsChange]);
+  }, [joined, channelId, currentUserId, createPeer]);
 
   // Cleanup on unmount
   useEffect(() => {

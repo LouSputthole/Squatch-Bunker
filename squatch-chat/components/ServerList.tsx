@@ -96,6 +96,10 @@ export default function ServerList({
   return (
     <>
       <div className="w-[72px] bg-[var(--bg)] flex flex-col items-center py-3 gap-2 border-r border-[var(--accent-2)]/30 shrink-0">
+        {/* Campfire logo */}
+        <img src="/campfire-logo.png" alt="Campfire" className="w-10 h-10 mb-1 opacity-90" title="Campfire" />
+        <div className="w-8 h-[1px] bg-[var(--accent-2)]/30 mb-1" />
+
         {servers.map((server) => (
           <button
             key={server.id}
