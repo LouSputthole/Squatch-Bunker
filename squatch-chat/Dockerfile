@@ -1,4 +1,4 @@
-# SquatchChat — Production Dockerfile
+# Campfire — Production Dockerfile
 # Builds both the Next.js app and the Socket.IO realtime server
 
 FROM node:20-alpine AS base
@@ -42,14 +42,14 @@ set -e
 
 # Run migrations if DATABASE_URL is set
 if [ -n "$DATABASE_URL" ]; then
-  echo "[SquatchChat] Running database migrations..."
-  npx prisma migrate deploy 2>/dev/null || echo "[SquatchChat] Migrations skipped"
+  echo "[Campfire] Running database migrations..."
+  npx prisma migrate deploy 2>/dev/null || echo "[Campfire] Migrations skipped"
 fi
 
-echo "[SquatchChat] Starting realtime server on port ${SOCKET_PORT:-3001}..."
+echo "[Campfire] Starting realtime server on port ${SOCKET_PORT:-3001}..."
 npx tsx realtime/server.ts &
 
-echo "[SquatchChat] Starting Next.js on port ${PORT:-3000}..."
+echo "[Campfire] Starting Next.js on port ${PORT:-3000}..."
 exec npx next start -p ${PORT:-3000}
 EOF
 RUN chmod +x /app/start.sh

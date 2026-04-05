@@ -7,7 +7,7 @@ cd "$(dirname "$0")/.."
 bash scripts/setup.sh
 
 echo ""
-echo "  Starting SquatchChat..."
+echo "  Starting Campfire..."
 echo ""
 
 # Start realtime server in background
@@ -19,7 +19,7 @@ pnpm dev &
 NEXT_PID=$!
 
 echo ""
-echo "  SquatchChat is running!"
+echo "  Campfire is running!"
 echo "  -> App:      http://localhost:3000"
 echo "  -> Realtime: ws://localhost:3001"
 echo ""
@@ -33,7 +33,7 @@ cleanup() {
   kill $NEXT_PID 2>/dev/null
   wait $REALTIME_PID 2>/dev/null
   wait $NEXT_PID 2>/dev/null
-  echo "  SquatchChat stopped."
+  echo "  Campfire stopped."
 }
 trap cleanup EXIT INT TERM
 

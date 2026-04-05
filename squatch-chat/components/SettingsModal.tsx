@@ -26,7 +26,7 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
   // Load saved settings
   useEffect(() => {
     if (!open) return;
-    const saved = localStorage.getItem("squatch-audio-settings");
+    const saved = localStorage.getItem("campfire-audio-settings");
     if (saved) {
       try {
         const s = JSON.parse(saved);
@@ -40,7 +40,7 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
 
   // Save settings on change
   const saveSettings = useCallback(() => {
-    localStorage.setItem("squatch-audio-settings", JSON.stringify({
+    localStorage.setItem("campfire-audio-settings", JSON.stringify({
       inputDevice: selectedInput,
       outputDevice: selectedOutput,
       inputVolume,

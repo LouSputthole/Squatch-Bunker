@@ -38,7 +38,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ channel }, { status: 201 });
   } catch (err) {
-    console.error("[SquatchChat] Failed to create channel:", err);
+    console.error("[Campfire] Failed to create channel:", err);
     return NextResponse.json(
       { error: "Database not available. Please check your PostgreSQL connection." },
       { status: 503 }

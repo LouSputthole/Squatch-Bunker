@@ -56,7 +56,7 @@ export async function GET(request: Request) {
       nextCursor: messages.length === limit ? messages[0]?.id : null,
     });
   } catch (err) {
-    console.error("[SquatchChat] Failed to fetch messages:", err);
+    console.error("[Campfire] Failed to fetch messages:", err);
     return NextResponse.json({ messages: [], nextCursor: null });
   }
 }
@@ -110,7 +110,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ message }, { status: 201 });
   } catch (err) {
-    console.error("[SquatchChat] Failed to save message:", err);
+    console.error("[Campfire] Failed to save message:", err);
     return NextResponse.json(
       { error: "Database not available. Messages require PostgreSQL." },
       { status: 503 }

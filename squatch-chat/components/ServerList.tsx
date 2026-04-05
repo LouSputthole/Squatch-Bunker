@@ -172,7 +172,7 @@ export default function ServerList({
                     type="text"
                     value={newName}
                     onChange={(e) => setNewName(e.target.value)}
-                    placeholder="My Squatch Den"
+                    placeholder="My Campfire"
                     className="w-full px-3 py-2 bg-[var(--panel-2)] text-[var(--text)] border border-[var(--accent-2)] rounded focus:outline-none focus:border-[var(--accent)] text-sm"
                     autoFocus
                     required

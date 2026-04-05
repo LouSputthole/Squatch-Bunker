@@ -22,7 +22,7 @@ export async function GET() {
 
     return NextResponse.json({ servers });
   } catch (err) {
-    console.error("[SquatchChat] Failed to fetch servers:", err);
+    console.error("[Campfire] Failed to fetch servers:", err);
     return NextResponse.json({ servers: [] });
   }
 }
@@ -62,7 +62,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ server }, { status: 201 });
   } catch (err) {
-    console.error("[SquatchChat] Failed to create server:", err);
+    console.error("[Campfire] Failed to create server:", err);
     return NextResponse.json(
       { error: "Database not available. Please check your PostgreSQL connection." },
       { status: 503 }

@@ -2,7 +2,7 @@ import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 import { cookies } from "next/headers";
 
-const JWT_SECRET = process.env.JWT_SECRET || "squatch-secret-change-me";
+const JWT_SECRET = process.env.JWT_SECRET || "campfire-secret-change-me";
 const COOKIE_NAME = "squatch-token";
 
 export interface TokenPayload {

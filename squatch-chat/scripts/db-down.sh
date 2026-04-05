@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-CONTAINER_NAME="squatch-db"
+CONTAINER_NAME="campfire-db"
 
 if ! command -v docker >/dev/null 2>&1; then
   echo "Error: Docker is not installed."

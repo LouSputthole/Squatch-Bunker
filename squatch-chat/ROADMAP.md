@@ -1,4 +1,4 @@
-# SquatchChat Voice Product Roadmap
+# Campfire Voice Product Roadmap
 
 > "Five products wearing one trench coat: a real-time media system, a chat system, a room/presence system, a moderation/admin system, and a social hangout layer."
 

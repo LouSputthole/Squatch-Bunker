@@ -70,10 +70,10 @@ export default function LoginPage() {
     <div className="min-h-screen flex items-center justify-center bg-[var(--bg)]">
       <div className="w-full max-w-md p-8 bg-[var(--panel)] rounded-lg border border-[var(--accent-2)]">
         <h1 className="text-3xl font-bold text-[var(--text)] mb-2 text-center">
-          SquatchChat
+          Campfire
         </h1>
         <p className="text-[var(--muted)] text-center mb-8">
-          Welcome back to the woods
+          Welcome back to the fire
         </p>
 
         {error && (

@@ -1,5 +1,5 @@
 # ═══════════════════════════════════════════════════════════════
-#  SquatchChat Installer — Windows (PowerShell)
+#  Campfire Installer — Windows (PowerShell)
 #  One command: .\install.ps1
 # ═══════════════════════════════════════════════════════════════
 
@@ -86,7 +86,7 @@ if (-not $pgAvailable) {
     Write-Host "     * choco:  choco install postgresql16"
     Write-Host ""
     Write-Host "  2. Use Docker Desktop:"
-    Write-Host "     docker run -d --name squatch-db -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=squatchchat -p 5432:5432 postgres:16"
+    Write-Host "     docker run -d --name campfire-db -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=campfire -p 5432:5432 postgres:16"
     Write-Host ""
     Write-Host "  3. Use a remote PostgreSQL (update DATABASE_URL in .env after install)"
     Write-Host ""
@@ -116,7 +116,7 @@ if (-not (Test-Path ".env")) {
     [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
     $jwtSecret = [System.BitConverter]::ToString($bytes) -replace '-',''
     $envContent = Get-Content ".env" -Raw
-    $envContent = $envContent -replace "squatch-secret-change-me-in-production", $jwtSecret.ToLower()
+    $envContent = $envContent -replace "campfire-secret-change-me-in-production", $jwtSecret.ToLower()
     Set-Content ".env" $envContent -NoNewline
     Write-Info "Generated random JWT secret"
 } else {
@@ -144,7 +144,7 @@ if ($pgAvailable) {
 
 # ── Build the app ─────────────────────────────────────────────
 
-Write-Step "Building SquatchChat..."
+Write-Step "Building Campfire..."
 try {
     pnpm build 2>&1
 } catch {
@@ -156,12 +156,12 @@ try {
 Write-Step "Creating launcher scripts..."
 
 $startScript = @'
-# SquatchChat Launcher - Windows
+# Campfire Launcher - Windows
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $scriptDir
 
 Write-Host ""
-Write-Host "  Starting SquatchChat..." -ForegroundColor Green
+Write-Host "  Starting Campfire..." -ForegroundColor Green
 Write-Host ""
 
 # Start realtime server in background
@@ -176,7 +176,7 @@ $nextJob = Start-Job -ScriptBlock {
     pnpm dev
 }
 
-Write-Host "  SquatchChat is running!" -ForegroundColor Green
+Write-Host "  Campfire is running!" -ForegroundColor Green
 Write-Host "  -> App:      http://localhost:3000" -ForegroundColor Cyan
 Write-Host "  -> Realtime: ws://localhost:3001" -ForegroundColor Cyan
 Write-Host ""
@@ -203,20 +203,20 @@ try {
 
     # Kill any remaining node processes for our app
     Get-Process -Name "node" -ErrorAction SilentlyContinue |
-        Where-Object { $_.CommandLine -match "squatch-chat" } |
+        Where-Object { $_.CommandLine -match "campfire" } |
         Stop-Process -Force -ErrorAction SilentlyContinue
 
-    Write-Host "  SquatchChat stopped." -ForegroundColor Green
+    Write-Host "  Campfire stopped." -ForegroundColor Green
 }
 '@
 
 Set-Content -Path "start.ps1" -Value $startScript
 
 $stopScript = @'
-# SquatchChat Stopper - Windows
-Write-Host "Stopping SquatchChat processes..."
+# Campfire Stopper - Windows
+Write-Host "Stopping Campfire processes..."
 Get-Process -Name "node" -ErrorAction SilentlyContinue |
-    Where-Object { $_.CommandLine -match "squatch-chat|next dev|tsx watch" } |
+    Where-Object { $_.CommandLine -match "campfire|next dev|tsx watch" } |
     Stop-Process -Force -ErrorAction SilentlyContinue
 Write-Host "Done."
 '@
@@ -226,7 +226,7 @@ Set-Content -Path "stop.ps1" -Value $stopScript
 # Also create .bat wrappers for double-click convenience
 $installBat = @'
 @echo off
-echo Starting SquatchChat installer...
+echo Starting Campfire installer...
 powershell -ExecutionPolicy Bypass -File "%~dp0install.ps1"
 pause
 '@
@@ -252,10 +252,10 @@ Set-Content -Path "STOP.bat" -Value $stopBat
 
 Write-Host ""
 Write-Host "  =======================================================" -ForegroundColor Green
-Write-Host "  SquatchChat installed successfully!" -ForegroundColor Green
+Write-Host "  Campfire installed successfully!" -ForegroundColor Green
 Write-Host "  =======================================================" -ForegroundColor Green
 Write-Host ""
-Write-Host "  To start SquatchChat:" -ForegroundColor White
+Write-Host "  To start Campfire:" -ForegroundColor White
 Write-Host "    .\start.ps1   (PowerShell)" -ForegroundColor Cyan
 Write-Host "    START.bat      (double-click)" -ForegroundColor Cyan
 Write-Host ""

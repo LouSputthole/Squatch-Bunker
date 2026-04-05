@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-CONTAINER_NAME="squatch-db"
+CONTAINER_NAME="campfire-db"
 TRIES="${1:-30}"
 
 # Try Docker container first
 if command -v docker >/dev/null 2>&1; then
   for i in $(seq 1 "$TRIES"); do
-    if docker exec "$CONTAINER_NAME" pg_isready -U postgres -d squatchchat >/dev/null 2>&1; then
+    if docker exec "$CONTAINER_NAME" pg_isready -U postgres -d campfire >/dev/null 2>&1; then
       echo "Postgres is ready."
       exit 0
     fi

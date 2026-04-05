@@ -32,7 +32,7 @@ export async function POST(request: Request) {
     try {
       const { prisma } = await import("@/lib/db");
       const { hashPassword } = await import("@/lib/auth");
-      const guestEmail = `guest-${guestId}@squatch.local`;
+      const guestEmail = `guest-${guestId}@campfire.local`;
       const guestPassword = crypto.randomBytes(16).toString("hex");
       const passwordHash = await hashPassword(guestPassword);
 
@@ -45,7 +45,7 @@ export async function POST(request: Request) {
       });
     } catch {
       // Database not available — that's fine, guest still gets a session
-      console.log("[SquatchChat] Database not available, creating guest session without persistence");
+      console.log("[Campfire] Database not available, creating guest session without persistence");
     }
 
     const userId = persistedUser?.id || guestUserId;
@@ -65,7 +65,7 @@ export async function POST(request: Request) {
     setTokenCookie(response, token);
     return response;
   } catch (err) {
-    console.error("[SquatchChat] Guest auth error:", err);
+    console.error("[Campfire] Guest auth error:", err);
     return NextResponse.json(
       { error: "Failed to create guest session" },
       { status: 500 }

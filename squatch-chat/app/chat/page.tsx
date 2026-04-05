@@ -342,7 +342,7 @@ function ChatPageInner() {
       ) : (
         <div className="flex-1 flex items-center justify-center bg-[var(--panel-2)] text-[var(--muted)]">
           <div className="text-center max-w-sm">
-            <p className="text-2xl mb-2 text-[var(--text)]">Welcome to SquatchChat</p>
+            <p className="text-2xl mb-2 text-[var(--text)]">Welcome to Campfire</p>
             {servers.length === 0 ? (
               <p className="text-sm">
                 Hit the <span className="text-[var(--accent)] font-bold">+</span> in the left rail to create your first server,

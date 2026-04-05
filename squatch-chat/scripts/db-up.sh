@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-CONTAINER_NAME="squatch-db"
-VOLUME_NAME="squatch-data"
+CONTAINER_NAME="campfire-db"
+VOLUME_NAME="campfire-data"
 IMAGE="postgres:16-alpine"
 
 # Check for Docker
@@ -38,7 +38,7 @@ docker run -d \
   --restart unless-stopped \
   -e POSTGRES_USER=postgres \
   -e POSTGRES_PASSWORD=postgres \
-  -e POSTGRES_DB=squatchchat \
+  -e POSTGRES_DB=campfire \
   -p 5432:5432 \
   -v "$VOLUME_NAME:/var/lib/postgresql/data" \
   "$IMAGE" >/dev/null

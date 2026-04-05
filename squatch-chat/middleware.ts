@@ -12,7 +12,7 @@ export function middleware(request: NextRequest) {
   }
 
   // Allow static files and API routes that don't need auth check here
-  if (pathname.startsWith("/_next") || pathname.startsWith("/favicon") || pathname.startsWith("/sasquatch")) {
+  if (pathname.startsWith("/_next") || pathname.startsWith("/favicon") || pathname.startsWith("/campfire")) {
     return NextResponse.next();
   }
 

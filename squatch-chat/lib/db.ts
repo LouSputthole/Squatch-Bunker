@@ -3,7 +3,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 
 const connectionString =
   process.env.DATABASE_URL ||
-  "postgresql://postgres:postgres@localhost:5432/squatchchat?schema=public";
+  "postgresql://postgres:postgres@localhost:5432/campfire?schema=public";
 
 const adapter = new PrismaPg(connectionString);
 

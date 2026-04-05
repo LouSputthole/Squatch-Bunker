@@ -4,7 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 echo ""
-echo "  SquatchChat Setup"
+echo "  Campfire Setup"
 echo "  ================="
 echo ""
 

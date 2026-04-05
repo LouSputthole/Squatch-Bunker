@@ -45,7 +45,7 @@ export async function POST(request: Request) {
     setTokenCookie(response, token);
     return response;
   } catch (err) {
-    console.error("[SquatchChat] Register error:", err);
+    console.error("[Campfire] Register error:", err);
     return NextResponse.json(
       { error: "Database not available. Try continuing as a guest." },
       { status: 503 }

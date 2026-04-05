@@ -2,7 +2,7 @@
 set -e
 
 # ═══════════════════════════════════════════════════════════════
-#  SquatchChat Installer — Linux / macOS
+#  Campfire Installer — Linux / macOS
 #  One command: ./install.sh
 # ═══════════════════════════════════════════════════════════════
 
@@ -97,7 +97,7 @@ if [ "$POSTGRES_AVAILABLE" = false ]; then
   echo "     • macOS:                 brew install postgresql@16 && brew services start postgresql@16"
   echo ""
   echo "  2. Use Docker:"
-  echo "     docker run -d --name squatch-db -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=squatchchat -p 5432:5432 postgres:16"
+  echo "     docker run -d --name campfire-db -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=campfire -p 5432:5432 postgres:16"
   echo ""
   echo "  3. Use a remote PostgreSQL (update DATABASE_URL in .env after install)"
   echo ""
@@ -127,9 +127,9 @@ if [ ! -f .env ]; then
   if check_command openssl; then
     JWT_SECRET=$(openssl rand -hex 32)
   else
-    JWT_SECRET="squatch-$(date +%s)-$(head -c 16 /dev/urandom | xxd -p)"
+    JWT_SECRET="campfire-$(date +%s)-$(head -c 16 /dev/urandom | xxd -p)"
   fi
-  sed -i.bak "s/squatch-secret-change-me-in-production/$JWT_SECRET/" .env && rm -f .env.bak
+  sed -i.bak "s/campfire-secret-change-me-in-production/$JWT_SECRET/" .env && rm -f .env.bak
   log_info "Generated random JWT secret"
 else
   log_info ".env already exists — keeping existing config"
@@ -169,7 +169,7 @@ fi
 
 # ── Build the app ─────────────────────────────────────────────
 
-log_step "Building SquatchChat..."
+log_step "Building Campfire..."
 pnpm build 2>&1 || {
   log_warn "Build had warnings (this is usually fine for first run)"
 }
@@ -184,7 +184,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 echo ""
-echo "  🌲 Starting SquatchChat..."
+echo "  🌲 Starting Campfire..."
 echo ""
 
 # Start realtime server in background
@@ -196,7 +196,7 @@ pnpm dev &
 NEXT_PID=$!
 
 echo ""
-echo "  SquatchChat is running!"
+echo "  Campfire is running!"
 echo "  → App:      http://localhost:3000"
 echo "  → Realtime: ws://localhost:3001"
 echo ""
@@ -210,7 +210,7 @@ cleanup() {
   kill $NEXT_PID 2>/dev/null
   wait $REALTIME_PID 2>/dev/null
   wait $NEXT_PID 2>/dev/null
-  echo "  SquatchChat stopped."
+  echo "  Campfire stopped."
 }
 trap cleanup EXIT INT TERM
 
@@ -220,7 +220,7 @@ chmod +x start.sh
 
 cat > stop.sh << 'STOPPER'
 #!/usr/bin/env bash
-echo "Stopping SquatchChat processes..."
+echo "Stopping Campfire processes..."
 pkill -f "next dev" 2>/dev/null || true
 pkill -f "tsx watch realtime" 2>/dev/null || true
 echo "Done."
@@ -231,10 +231,10 @@ chmod +x stop.sh
 
 echo ""
 echo -e "${GREEN}═══════════════════════════════════════════════════════════${NC}"
-echo -e "${GREEN}  SquatchChat installed successfully!${NC}"
+echo -e "${GREEN}  Campfire installed successfully!${NC}"
 echo -e "${GREEN}═══════════════════════════════════════════════════════════${NC}"
 echo ""
-echo -e "  ${BOLD}To start SquatchChat:${NC}"
+echo -e "  ${BOLD}To start Campfire:${NC}"
 echo -e "    ${CYAN}./start.sh${NC}"
 echo ""
 echo -e "  ${BOLD}Then open:${NC}"

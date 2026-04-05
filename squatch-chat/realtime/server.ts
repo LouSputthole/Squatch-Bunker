@@ -5,7 +5,7 @@ import { parse } from "cookie";
 
 const PORT = parseInt(process.env.SOCKET_PORT || "3001", 10);
 const CLIENT_ORIGIN = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-const JWT_SECRET = process.env.JWT_SECRET || "squatch-secret-change-me";
+const JWT_SECRET = process.env.JWT_SECRET || "campfire-secret-change-me";
 const COOKIE_NAME = "squatch-token";
 
 const httpServer = createServer();
@@ -49,7 +49,7 @@ io.use((socket, next) => {
 io.on("connection", (socket) => {
   const currentUserId = socket.data.userId as string;
   const currentUsername = socket.data.username as string;
-  console.log(`[SquatchChat] Authenticated socket: ${currentUsername}`);
+  console.log(`[Campfire] Authenticated socket: ${currentUsername}`);
 
   // Join a channel room
   socket.on("channel:join", (channelId: string) => {
@@ -268,7 +268,7 @@ io.on("connection", (socket) => {
   // ─── Disconnect ───
 
   socket.on("disconnect", () => {
-    console.log(`[SquatchChat] Disconnected: ${currentUsername}`);
+    console.log(`[Campfire] Disconnected: ${currentUsername}`);
     // Remove from all voice rooms
     for (const [channelId] of voiceRooms) {
       leaveVoiceChannel(channelId);
@@ -298,7 +298,7 @@ io.on("connection", (socket) => {
 });
 
 httpServer.listen(PORT, () => {
-  console.log(`[SquatchChat] Realtime server running on port ${PORT}`);
+  console.log(`[Campfire] Realtime server running on port ${PORT}`);
 });
 
 export { io };

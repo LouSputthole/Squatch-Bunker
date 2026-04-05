@@ -33,7 +33,7 @@ export async function GET() {
       },
     });
   } catch (err) {
-    console.error("[SquatchChat] Auth/me error:", err);
+    console.error("[Campfire] Auth/me error:", err);
     return NextResponse.json({ error: "Auth check failed" }, { status: 500 });
   }
 }

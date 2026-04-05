@@ -43,7 +43,7 @@ export async function PATCH(
 
     return NextResponse.json({ message: updated });
   } catch (err) {
-    console.error("[SquatchChat] Failed to edit message:", err);
+    console.error("[Campfire] Failed to edit message:", err);
     return NextResponse.json({ error: "Failed to edit message" }, { status: 500 });
   }
 }
@@ -83,7 +83,7 @@ export async function DELETE(
 
     return NextResponse.json({ deleted: true, messageId, channelId: message.channelId });
   } catch (err) {
-    console.error("[SquatchChat] Failed to delete message:", err);
+    console.error("[Campfire] Failed to delete message:", err);
     return NextResponse.json({ error: "Failed to delete message" }, { status: 500 });
   }
 }
