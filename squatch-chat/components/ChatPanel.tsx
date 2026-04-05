@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { getSocket } from "@/lib/socket";
 import MessageBubble from "./MessageBubble";
+import VoicePanel from "./VoicePanel";
 
 interface Message {
   id: string;
@@ -246,6 +247,12 @@ export default function ChatPanel({
         <span className="text-[var(--accent-2)] mr-1">#</span>
         <h3 className="font-bold text-[var(--text)]">{channelName}</h3>
       </div>
+
+      <VoicePanel
+        channelId={channelId}
+        channelName={channelName}
+        currentUserId={currentUserId}
+      />
 
       <div className="flex-1 overflow-y-auto px-4 py-2">
         {loading ? (

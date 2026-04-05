@@ -17,8 +17,11 @@ const io = new Server(httpServer, {
   path: "/api/socketio",
 });
 
-// Track online users per server: serverId -> Set<{userId, username, socketId}>
+// Track online users per server: serverId -> Map<userId, {username, socketId}>
 const onlineUsers = new Map<string, Map<string, { username: string; socketId: string }>>();
+
+// Track voice channel participants: channelId -> Map<userId, {username, socketId, muted}>
+const voiceRooms = new Map<string, Map<string, { username: string; socketId: string; muted: boolean }>>();
 
 interface TokenPayload {
   userId: string;
@@ -142,8 +145,126 @@ io.on("connection", (socket) => {
     });
   });
 
+  // ─── Voice Chat (WebRTC Signaling) ───
+
+  // Join a voice channel
+  socket.on("voice:join", (channelId: string) => {
+    socket.join(`voice:${channelId}`);
+
+    if (!voiceRooms.has(channelId)) {
+      voiceRooms.set(channelId, new Map());
+    }
+
+    // Tell the new user about existing participants (so they can create offers)
+    const existing = Array.from(voiceRooms.get(channelId)!.entries()).map(
+      ([userId, info]) => ({ userId, username: info.username, socketId: info.socketId, muted: info.muted })
+    );
+    socket.emit("voice:participants", { channelId, participants: existing });
+
+    // Add the new user
+    voiceRooms.get(channelId)!.set(currentUserId, {
+      username: currentUsername,
+      socketId: socket.id,
+      muted: false,
+    });
+
+    // Notify others that someone joined
+    socket.to(`voice:${channelId}`).emit("voice:user-joined", {
+      channelId,
+      userId: currentUserId,
+      username: currentUsername,
+      socketId: socket.id,
+    });
+
+    // Broadcast updated participant list to the server room (for UI badges)
+    broadcastVoiceParticipants(channelId);
+  });
+
+  // Leave a voice channel
+  socket.on("voice:leave", (channelId: string) => {
+    leaveVoiceChannel(channelId);
+  });
+
+  // Toggle mute
+  socket.on("voice:mute", (data: { channelId: string; muted: boolean }) => {
+    const room = voiceRooms.get(data.channelId);
+    if (room && room.has(currentUserId)) {
+      room.get(currentUserId)!.muted = data.muted;
+      io.to(`voice:${data.channelId}`).emit("voice:mute-update", {
+        channelId: data.channelId,
+        userId: currentUserId,
+        muted: data.muted,
+      });
+    }
+  });
+
+  // WebRTC signaling: relay offer to a specific peer
+  socket.on("voice:offer", (data: { to: string; offer: RTCSessionDescriptionInit }) => {
+    io.to(data.to).emit("voice:offer", {
+      from: socket.id,
+      fromUserId: currentUserId,
+      fromUsername: currentUsername,
+      offer: data.offer,
+    });
+  });
+
+  // WebRTC signaling: relay answer to a specific peer
+  socket.on("voice:answer", (data: { to: string; answer: RTCSessionDescriptionInit }) => {
+    io.to(data.to).emit("voice:answer", {
+      from: socket.id,
+      answer: data.answer,
+    });
+  });
+
+  // WebRTC signaling: relay ICE candidate to a specific peer
+  socket.on("voice:ice-candidate", (data: { to: string; candidate: RTCIceCandidateInit }) => {
+    io.to(data.to).emit("voice:ice-candidate", {
+      from: socket.id,
+      candidate: data.candidate,
+    });
+  });
+
+  function leaveVoiceChannel(channelId: string) {
+    socket.leave(`voice:${channelId}`);
+    const room = voiceRooms.get(channelId);
+    if (!room) return;
+    const entry = room.get(currentUserId);
+    if (entry && entry.socketId === socket.id) {
+      room.delete(currentUserId);
+      socket.to(`voice:${channelId}`).emit("voice:user-left", {
+        channelId,
+        userId: currentUserId,
+        socketId: socket.id,
+      });
+      if (room.size === 0) {
+        voiceRooms.delete(channelId);
+      }
+      broadcastVoiceParticipants(channelId);
+    }
+  }
+
+  function broadcastVoiceParticipants(channelId: string) {
+    const room = voiceRooms.get(channelId);
+    const participants = room
+      ? Array.from(room.entries()).map(([userId, info]) => ({
+          userId,
+          username: info.username,
+          muted: info.muted,
+        }))
+      : [];
+    io.to(`voice:${channelId}`).emit("voice:participants-update", { channelId, participants });
+    // Also emit to the channel text room so the channel list can show voice indicators
+    io.to(`channel:${channelId}`).emit("voice:participants-update", { channelId, participants });
+  }
+
+  // ─── Disconnect ───
+
   socket.on("disconnect", () => {
     console.log(`[SquatchChat] Disconnected: ${currentUsername}`);
+    // Remove from all voice rooms
+    for (const [channelId] of voiceRooms) {
+      leaveVoiceChannel(channelId);
+    }
     // Remove from all server presence maps
     for (const [serverId] of onlineUsers) {
       removeFromPresence(serverId, currentUserId);

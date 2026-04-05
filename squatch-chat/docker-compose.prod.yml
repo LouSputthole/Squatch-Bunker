@@ -1,0 +1,46 @@
+# SquatchChat — Full Production Stack
+# Run: docker compose -f docker-compose.prod.yml up -d
+#
+# This starts the entire stack:
+#   - PostgreSQL database
+#   - SquatchChat app (Next.js + Socket.IO realtime server)
+#
+# To use: copy .env.example to .env and update values for production.
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: squatch-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      POSTGRES_DB: squatchchat
+    volumes:
+      - squatch-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build: .
+    container_name: squatch-app
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "${APP_PORT:-3000}:3000"
+      - "${SOCKET_PORT:-3001}:3001"
+    environment:
+      DATABASE_URL: "postgresql://postgres:${DB_PASSWORD:-postgres}@db:5432/squatchchat?schema=public"
+      JWT_SECRET: ${JWT_SECRET:-squatch-secret-change-me-in-production}
+      SOCKET_PORT: "3001"
+      NEXT_PUBLIC_SOCKET_URL: ${NEXT_PUBLIC_SOCKET_URL:-http://localhost:3001}
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
+      PORT: "3000"
+
+volumes:
+  squatch-data:
