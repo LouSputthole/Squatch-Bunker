@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Squatch Bunker</title>
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+
+<!-- Username Modal -->
+<div id="modal-overlay">
+  <div id="username-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <div class="modal-logo">🏔️</div>
+    <h2 id="modal-title">Welcome to Squatch Bunker</h2>
+    <p>Choose a username to start talking</p>
+    <form id="username-form" autocomplete="off">
+      <div class="form-group">
+        <label for="username-input">Username</label>
+        <input
+          id="username-input"
+          type="text"
+          placeholder="Enter your username"
+          maxlength="32"
+          required
+          autofocus
+        />
+      </div>
+      <button type="submit" class="btn-primary" id="join-btn">Enter the Bunker</button>
+    </form>
+  </div>
+</div>
+
+<!-- Main App -->
+<div id="app">
+  <!-- Sidebar -->
+  <nav id="sidebar">
+    <div id="server-header">
+      <div class="server-icon">🏔</div>
+      <span>Squatch Bunker</span>
+    </div>
+
+    <div id="channel-list-wrapper">
+      <div class="channel-section-label">Voice Channels</div>
+      <div id="channel-list">
+        <!-- populated by app.js -->
+      </div>
+    </div>
+
+    <div id="user-bar">
+      <div class="user-avatar" id="sidebar-avatar">?</div>
+      <div class="user-info">
+        <div class="user-name" id="sidebar-username">Not connected</div>
+        <div class="user-status" id="connection-status">Connecting…</div>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Main Content -->
+  <main id="main-content">
+    <!-- Empty state -->
+    <div id="empty-state">
+      <div class="empty-icon">🔊</div>
+      <h2>No voice channel selected</h2>
+      <p>Click a channel on the left to join</p>
+    </div>
+
+    <!-- Active voice room -->
+    <div id="voice-room-panel" class="hidden">
+      <div id="room-header">
+        <span class="room-header-icon">🔊</span>
+        <span id="room-header-name">Channel</span>
+        <span class="member-count-badge" id="room-member-count">0 members</span>
+      </div>
+
+      <div id="member-roster">
+        <!-- member cards injected here -->
+      </div>
+
+      <!-- Control bar -->
+      <div id="control-bar">
+        <button class="ctrl-btn" id="btn-mic" title="Toggle microphone">🎤</button>
+        <button class="ctrl-btn" id="btn-deafen" title="Toggle deafen">🔊</button>
+        <button class="ctrl-btn danger" id="btn-disconnect" title="Disconnect from voice">📵</button>
+        <div class="speaking-indicator" id="speaking-indicator">
+          <span class="dot"></span>
+          <span class="speaking-label">Mic off</span>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- Toast container -->
+<div id="toast-container" aria-live="polite"></div>
+
+<!-- Socket.io client (served by socket.io server automatically) -->
+<script src="/socket.io/socket.io.js"></script>
+<script src="/js/voiceClient.js"></script>
+<script src="/js/app.js"></script>
+</body>
+</html>
