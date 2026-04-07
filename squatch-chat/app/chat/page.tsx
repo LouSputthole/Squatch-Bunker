@@ -112,6 +112,15 @@ function ChatPageInner() {
     }
   }, [srv, ch]);
 
+  const handleServerRenamed = useCallback((newName: string) => {
+    srv.renameActiveServer(newName);
+  }, [srv]);
+
+  const handleServerDeleted = useCallback(() => {
+    srv.removeActiveServer();
+    ch.setActiveChannel(null);
+  }, [srv, ch]);
+
   if (auth.loading) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-[var(--bg)] text-[var(--muted)] gap-3">
@@ -141,12 +150,15 @@ function ChatPageInner() {
           serverId={srv.activeServer.id}
           unreadCounts={ch.unreadCounts}
           currentUserId={auth.user?.id}
+          currentUserRole={presence.userRole}
           activeVoiceChannelId={voice.activeVoiceChannel?.id}
           voiceParticipants={voice.voiceParticipants}
           onChannelSelect={ch.selectChannel}
           onChannelCreated={handleChannelCreated}
           onVoiceJoin={voice.joinVoice}
           onVoiceLeave={voice.leaveVoice}
+          onServerRenamed={handleServerRenamed}
+          onServerDeleted={handleServerDeleted}
         />
       ) : (
         <div className="w-60 bg-[var(--panel)] flex flex-col items-center justify-center text-[var(--muted)] text-sm border-r border-[var(--accent-2)]/30 px-4 text-center gap-3 shrink-0">
