@@ -2,9 +2,9 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 const COOKIE_NAME = process.env.COOKIE_NAME || "squatch-token";
-const PUBLIC_PATHS = ["/login", "/register", "/api/auth/login", "/api/auth/register", "/api/auth/guest", "/join"];
+const PUBLIC_PATHS = ["/login", "/register", "/forgot-password", "/reset-password", "/api/auth/login", "/api/auth/register", "/api/auth/guest", "/join", "/explore", "/setup"];
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Allow public paths
@@ -12,8 +12,8 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // Allow static files and API routes that don't need auth check here
-  if (pathname.startsWith("/_next") || pathname.startsWith("/favicon") || pathname.startsWith("/campfire")) {
+  // Allow static files, images, and api routes that handle their own auth
+  if (pathname.startsWith("/_next") || pathname.startsWith("/favicon") || pathname.startsWith("/Campfire") || pathname.endsWith(".png") || pathname.endsWith(".ico")) {
     return NextResponse.next();
   }
 

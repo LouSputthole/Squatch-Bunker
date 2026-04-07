@@ -6,14 +6,14 @@ let socket: Socket | null = null;
 let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
 
 function getSocketUrl(): string {
-  // If NEXT_PUBLIC_SOCKET_URL is explicitly set and not localhost, use it
+  // If NEXT_PUBLIC_SOCKET_URL is explicitly set, use it (dev mode: separate port)
   const envUrl = process.env.NEXT_PUBLIC_SOCKET_URL;
-  if (envUrl && !envUrl.includes("localhost")) return envUrl;
+  if (envUrl) return envUrl;
 
   // Single-port mode: Socket.IO runs on the same origin as the page
   if (typeof window !== "undefined") return window.location.origin;
 
-  return envUrl || "http://localhost:3000";
+  return "http://localhost:3000";
 }
 
 export function getSocket(): Socket {
