@@ -89,6 +89,7 @@ export default function MessageBubble({ message, isOwn, currentUserId, onEdit, o
   const [editContent, setEditContent] = useState(message.content);
   const [showActions, setShowActions] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const shown = truncateName(message.author.username, 20);
 
@@ -223,7 +224,7 @@ export default function MessageBubble({ message, isOwn, currentUserId, onEdit, o
                 Edit
               </button>
               <button
-                onClick={() => onDelete?.(message.id)}
+                onClick={() => setShowDeleteConfirm(true)}
                 className="text-xs text-[var(--muted)] hover:text-[var(--danger)] px-1.5 py-0.5"
                 title="Delete"
               >
@@ -231,6 +232,38 @@ export default function MessageBubble({ message, isOwn, currentUserId, onEdit, o
               </button>
             </>
           )}
+        </div>
+      )}
+
+      {/* Delete confirmation dialog */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center" onClick={() => setShowDeleteConfirm(false)}>
+          <div
+            className="bg-[var(--panel)] border border-[var(--danger)]/40 rounded-lg shadow-2xl p-5 w-80 flex flex-col gap-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="font-semibold text-[var(--text)]">Delete Message</p>
+            <p className="text-sm text-[var(--muted)]">Are you sure you want to delete this message? This cannot be undone.</p>
+            {message.content && (
+              <p className="text-xs text-[var(--muted)] italic bg-[var(--panel-2)] rounded px-2 py-1.5 border-l-2 border-[var(--danger)] truncate">
+                {message.content.slice(0, 100)}
+              </p>
+            )}
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => setShowDeleteConfirm(false)}
+                className="px-4 py-1.5 text-sm text-[var(--text)] bg-[var(--panel-2)] rounded hover:bg-[var(--accent-2)]/30 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => { onDelete?.(message.id); setShowDeleteConfirm(false); }}
+                className="px-4 py-1.5 text-sm text-white bg-[var(--danger)] rounded hover:opacity-90 transition-opacity font-semibold"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
