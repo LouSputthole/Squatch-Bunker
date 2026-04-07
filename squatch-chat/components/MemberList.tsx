@@ -25,6 +25,7 @@ interface Member {
   avatar?: string | null;
   role?: string;
   joinedAt?: string;
+  banned?: boolean;
 }
 
 interface MemberListProps {
@@ -73,8 +74,10 @@ export default function MemberList({ serverId, currentUserId, currentUserRole, o
     return () => window.removeEventListener("click", close);
   }, [contextMenu]);
 
-  const onlineMembers = members.filter((m) => onlineMemberIds.has(m.id));
-  const offlineMembers = members.filter((m) => !onlineMemberIds.has(m.id));
+  const bannedMembers = members.filter((m) => m.banned);
+  const activeMembers = members.filter((m) => !m.banned);
+  const onlineMembers = activeMembers.filter((m) => onlineMemberIds.has(m.id));
+  const offlineMembers = activeMembers.filter((m) => !onlineMemberIds.has(m.id));
 
   function copyInvite() {
     const link = `${window.location.origin}/join/${inviteCode}`;
@@ -104,6 +107,19 @@ export default function MemberList({ serverId, currentUserId, currentUserRole, o
     const res = await fetch(`/api/servers/${serverId}/members/${userId}`, { method: "DELETE" });
     if (res.ok) {
       setMembers((prev) => prev.filter((m) => m.id !== userId));
+    }
+  }
+
+  async function handleBan(userId: string, ban: boolean) {
+    setContextMenu(null);
+    if (ban && !confirm("Ban this member?")) return;
+    const res = await fetch(`/api/servers/${serverId}/members/${userId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ banned: ban }),
+    });
+    if (res.ok) {
+      setMembers((prev) => prev.map((m) => m.id === userId ? { ...m, banned: ban } : m));
     }
   }
 
@@ -157,7 +173,7 @@ export default function MemberList({ serverId, currentUserId, currentUserRole, o
     <div className="w-60 bg-[var(--panel)] flex flex-col border-l border-[var(--accent-2)]/30">
       <div className="h-12 px-4 flex items-center border-b border-[var(--accent-2)]/30 justify-between">
         <span className="text-xs font-semibold text-[var(--muted)] uppercase tracking-wide">
-          Members — {members.length}
+          Members — {activeMembers.length}
         </span>
         <button
           onClick={() => setShowInvite(!showInvite)}
@@ -251,6 +267,22 @@ export default function MemberList({ serverId, currentUserId, currentUserRole, o
                 {offlineMembers.map((m) => renderMember(m, false))}
               </>
             )}
+
+            {canManage && bannedMembers.length > 0 && (
+              <>
+                <div className="px-3 py-1 mt-2">
+                  <span className="text-xs font-semibold text-red-400/70 uppercase">
+                    Banned — {bannedMembers.length}
+                  </span>
+                </div>
+                {bannedMembers.map((m) => (
+                  <div key={m.id} className="flex items-center gap-2 px-3 py-1 opacity-40 cursor-pointer hover:bg-[var(--panel-2)]/50 rounded" onContextMenu={(e) => { e.preventDefault(); setContextMenu({ memberId: m.id, x: e.clientX, y: e.clientY }); }}>
+                    <Avatar username={m.username} avatarUrl={m.avatar} size={32} className="bg-red-900/30 text-red-400" />
+                    <span className="text-sm truncate text-red-400">{truncateName(m.username)}</span>
+                  </div>
+                ))}
+              </>
+            )}
           </>
         )}
       </div>
@@ -300,6 +332,15 @@ export default function MemberList({ serverId, currentUserId, currentUserRole, o
               <button onClick={() => handleKick(target.id)} className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-red-600/10">
                 Kick Member
               </button>
+              {target.banned ? (
+                <button onClick={() => handleBan(target.id, false)} className="w-full text-left px-3 py-1.5 text-xs text-yellow-400 hover:bg-yellow-600/10">
+                  Unban Member
+                </button>
+              ) : (
+                <button onClick={() => handleBan(target.id, true)} className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-red-600/10">
+                  Ban Member
+                </button>
+              )}
             </div>
           </div>
         );

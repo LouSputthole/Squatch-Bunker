@@ -36,11 +36,13 @@ model Server {
 }
 
 model ServerMember {
-  id        String   @id @default(uuid())
+  id        String    @id @default(uuid())
   serverId  String
   userId    String
-  role      String   @default("member")
-  createdAt DateTime @default(now())
+  role      String    @default("member")
+  banned    Boolean   @default(false)
+  bannedAt  DateTime?
+  createdAt DateTime  @default(now())
 
   server Server @relation(fields: [serverId], references: [id])
   user   User   @relation(fields: [userId], references: [id])

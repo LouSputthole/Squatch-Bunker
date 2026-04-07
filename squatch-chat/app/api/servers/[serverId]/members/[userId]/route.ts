@@ -54,6 +54,45 @@ export async function PATCH(
   return NextResponse.json({ role: updated.role });
 }
 
+// PUT: ban or unban member
+export async function PUT(
+  req: NextRequest,
+  { params }: { params: Promise<{ serverId: string; userId: string }> }
+) {
+  const session = await getSession();
+  if (!session) {
+    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  }
+
+  const { serverId, userId } = await params;
+  const { banned } = await req.json();
+
+  const actor = await prisma.serverMember.findUnique({
+    where: { serverId_userId: { serverId, userId: session.userId } },
+  });
+  if (!actor || !canManageMembers(actor.role)) {
+    return NextResponse.json({ error: "No permission" }, { status: 403 });
+  }
+
+  const target = await prisma.serverMember.findUnique({
+    where: { serverId_userId: { serverId, userId } },
+  });
+  if (!target) {
+    return NextResponse.json({ error: "Member not found" }, { status: 404 });
+  }
+
+  if (!canAssignRole(actor.role, target.role)) {
+    return NextResponse.json({ error: "Cannot ban this member" }, { status: 403 });
+  }
+
+  const updated = await prisma.serverMember.update({
+    where: { id: target.id },
+    data: { banned: !!banned, bannedAt: banned ? new Date() : null },
+  });
+
+  return NextResponse.json({ banned: updated.banned });
+}
+
 // DELETE: kick member
 export async function DELETE(
   req: NextRequest,
