@@ -170,6 +170,7 @@ function ChatPageInner() {
           onToggleDeafen={voice.toggleDeafen}
           onTogglePTT={voice.togglePTT}
           onDisconnect={voice.disconnect}
+          onUserVolumeChange={voice.setUserVolume}
         />
       ) : ch.activeChannel && auth.user ? (
         <ChatPanel
@@ -279,6 +280,7 @@ function ChatPageInner() {
         username={auth.user?.username}
         currentAvatar={auth.user?.avatar}
         onAvatarChange={auth.updateAvatar}
+        onInputSensitivityChange={voice.setInputSensitivity}
       />
 
       {/* Version */}

@@ -9,9 +9,10 @@ interface SettingsModalProps {
   username?: string;
   currentAvatar?: string | null;
   onAvatarChange?: (avatar: string | null) => void;
+  onInputSensitivityChange?: (threshold: number) => void;
 }
 
-export default function SettingsModal({ open, onClose, username, currentAvatar, onAvatarChange }: SettingsModalProps) {
+export default function SettingsModal({ open, onClose, username, currentAvatar, onAvatarChange, onInputSensitivityChange }: SettingsModalProps) {
   const [tab, setTab] = useState<"audio" | "account">("audio");
   const [inputDevices, setInputDevices] = useState<MediaDeviceInfo[]>([]);
   const [outputDevices, setOutputDevices] = useState<MediaDeviceInfo[]>([]);
@@ -21,6 +22,7 @@ export default function SettingsModal({ open, onClose, username, currentAvatar, 
   const [outputVolume, setOutputVolume] = useState(100);
   const [testing, setTesting] = useState(false);
   const [micLevel, setMicLevel] = useState(0);
+  const [inputSensitivity, setInputSensitivity] = useState(15);
 
   const testStreamRef = useRef<MediaStream | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
@@ -38,6 +40,10 @@ export default function SettingsModal({ open, onClose, username, currentAvatar, 
         if (s.outputDevice) setSelectedOutput(s.outputDevice);
         if (s.inputVolume !== undefined) setInputVolume(s.inputVolume);
         if (s.outputVolume !== undefined) setOutputVolume(s.outputVolume);
+        if (s.inputSensitivity !== undefined) {
+          setInputSensitivity(s.inputSensitivity);
+          onInputSensitivityChange?.(s.inputSensitivity);
+        }
       } catch { /* ignore */ }
     }
   }, [open]);
@@ -49,8 +55,9 @@ export default function SettingsModal({ open, onClose, username, currentAvatar, 
       outputDevice: selectedOutput,
       inputVolume,
       outputVolume,
+      inputSensitivity,
     }));
-  }, [selectedInput, selectedOutput, inputVolume, outputVolume]);
+  }, [selectedInput, selectedOutput, inputVolume, outputVolume, inputSensitivity]);
 
   useEffect(() => { saveSettings(); }, [saveSettings]);
 
@@ -265,6 +272,28 @@ export default function SettingsModal({ open, onClose, username, currentAvatar, 
                     Speak into your microphone to see the level indicator.
                   </p>
                 )}
+              </div>
+
+              {/* Input Sensitivity */}
+              <div>
+                <label className="block text-sm font-semibold text-[var(--text)] mb-2">
+                  Input Sensitivity: {inputSensitivity}
+                </label>
+                <input
+                  type="range"
+                  min={1}
+                  max={50}
+                  value={inputSensitivity}
+                  onChange={(e) => {
+                    const val = Number(e.target.value);
+                    setInputSensitivity(val);
+                    onInputSensitivityChange?.(val);
+                  }}
+                  className="w-full accent-[var(--accent)]"
+                />
+                <p className="text-xs text-[var(--muted)] mt-1">
+                  Lower = more sensitive (picks up quiet sounds). Higher = less sensitive (only loud speech triggers).
+                </p>
               </div>
 
               <hr className="border-[var(--accent-2)]/20" />

@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { displayName } from "@/lib/utils";
 import Avatar from "@/components/Avatar";
 
@@ -23,6 +24,7 @@ interface VoiceRoomProps {
   onToggleDeafen: () => void;
   onTogglePTT?: () => void;
   onDisconnect: () => void;
+  onUserVolumeChange?: (userId: string, volume: number) => void;
 }
 
 // SVG Icons (larger versions for the room view)
@@ -117,7 +119,10 @@ export default function VoiceRoom({
   onToggleDeafen,
   onTogglePTT,
   onDisconnect,
+  onUserVolumeChange,
 }: VoiceRoomProps) {
+  const [volumePopup, setVolumePopup] = useState<{ userId: string; volume: number } | null>(null);
+
   return (
     <div className="flex-1 flex flex-col bg-[var(--panel-2)]">
       {/* Header */}
@@ -147,12 +152,17 @@ export default function VoiceRoom({
               return (
                 <div
                   key={p.userId}
-                  className={`flex flex-col items-center gap-2 p-4 rounded-xl transition-all ${
+                  className={`flex flex-col items-center gap-2 p-4 rounded-xl transition-all cursor-default ${
                     isSelf
                       ? "bg-[var(--accent)]/10 border border-[var(--accent)]/30"
                       : "bg-[var(--panel)]/50 border border-[var(--accent-2)]/20"
                   }`}
                   style={{ minWidth: 120 }}
+                  onContextMenu={(e) => {
+                    if (isSelf) return;
+                    e.preventDefault();
+                    setVolumePopup({ userId: p.userId, volume: 1 });
+                  }}
                 >
                   {/* Avatar */}
                   <div className="relative">
@@ -193,6 +203,39 @@ export default function VoiceRoom({
                   >
                     {displayName(p.username)}
                   </span>
+
+                  {/* Per-user volume slider */}
+                  {volumePopup?.userId === p.userId && !isSelf && (
+                    <div
+                      className="flex items-center gap-2 bg-[var(--bg)] rounded-lg px-3 py-2 border border-[var(--accent-2)]/30 shadow-lg"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-[var(--muted)] shrink-0">
+                        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                      </svg>
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        defaultValue="100"
+                        className="w-20 accent-[var(--accent)]"
+                        onChange={(e) => {
+                          const vol = parseInt(e.target.value) / 100;
+                          setVolumePopup({ userId: p.userId, volume: vol });
+                          onUserVolumeChange?.(p.userId, vol);
+                        }}
+                      />
+                      <span className="text-xs text-[var(--muted)] w-8">
+                        {Math.round((volumePopup.volume) * 100)}%
+                      </span>
+                      <button
+                        onClick={() => setVolumePopup(null)}
+                        className="text-[var(--muted)] hover:text-[var(--text)] ml-1"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  )}
                 </div>
               );
             })}

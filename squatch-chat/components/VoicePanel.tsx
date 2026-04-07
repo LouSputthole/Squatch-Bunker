@@ -27,6 +27,8 @@ export interface VoicePanelHandle {
   disconnect: () => void;
   togglePTT: () => void;
   isPTT: () => boolean;
+  setUserVolume: (userId: string, volume: number) => void;
+  setInputSensitivity: (threshold: number) => void;
 }
 
 const ICE_SERVERS: RTCConfiguration = {
@@ -103,6 +105,9 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
   const audioCtxRef = useRef<AudioContext | null>(null);
   const vadIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const wasSpeakingRef = useRef(false);
+  const userVolumesRef = useRef<Map<string, number>>(new Map());
+  const socketToUserRef = useRef<Map<string, string>>(new Map());
+  const vadThresholdRef = useRef(15);
 
   const cleanupPeers = useCallback(() => {
     peersRef.current.forEach((pc) => pc.close());
@@ -123,7 +128,6 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
       analyserRef.current = analyser;
 
       const data = new Uint8Array(analyser.frequencyBinCount);
-      const THRESHOLD = 15; // amplitude threshold
       const socket = getSocket();
 
       vadIntervalRef.current = setInterval(() => {
@@ -131,7 +135,7 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
         let sum = 0;
         for (let i = 0; i < data.length; i++) sum += data[i];
         const avg = sum / data.length;
-        const isSpeaking = avg > THRESHOLD;
+        const isSpeaking = avg > vadThresholdRef.current;
 
         if (isSpeaking !== wasSpeakingRef.current) {
           wasSpeakingRef.current = isSpeaking;
@@ -214,9 +218,13 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
   }, [joined, channelId]);
 
   const createPeer = useCallback(
-    (remoteSocketId: string, initiator: boolean) => {
+    (remoteSocketId: string, initiator: boolean, remoteUserId?: string) => {
       const pc = new RTCPeerConnection(ICE_SERVERS);
       const socket = getSocket();
+
+      if (remoteUserId) {
+        socketToUserRef.current.set(remoteSocketId, remoteUserId);
+      }
 
       if (localStreamRef.current) {
         localStreamRef.current.getTracks().forEach((track) => {
@@ -234,6 +242,11 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
           audioElementsRef.current.set(remoteSocketId, audio);
         }
         audio.srcObject = stream;
+        // Apply saved volume for this user
+        const uid = socketToUserRef.current.get(remoteSocketId);
+        if (uid && userVolumesRef.current.has(uid)) {
+          audio.volume = userVolumesRef.current.get(uid)!;
+        }
       };
 
       pc.onicecandidate = (event) => {
@@ -337,6 +350,20 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
     disconnect: leaveVoice,
     togglePTT,
     isPTT: () => pttModeRef.current,
+    setUserVolume: (userId: string, volume: number) => {
+      const clamped = Math.max(0, Math.min(1, volume));
+      userVolumesRef.current.set(userId, clamped);
+      // Apply to active audio element
+      for (const [socketId, uid] of socketToUserRef.current) {
+        if (uid === userId) {
+          const audio = audioElementsRef.current.get(socketId);
+          if (audio) audio.volume = clamped;
+        }
+      }
+    },
+    setInputSensitivity: (threshold: number) => {
+      vadThresholdRef.current = Math.max(1, Math.min(100, threshold));
+    },
   }), [toggleMute, toggleDeafen, leaveVoice, togglePTT]);
 
   // Report state changes to parent — merge speaking state into participants
@@ -391,7 +418,7 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
     }) {
       if (data.channelId !== channelId) return;
       data.participants.forEach((p) => {
-        if (p.userId !== currentUserId) createPeer(p.socketId, true);
+        if (p.userId !== currentUserId) createPeer(p.socketId, true, p.userId);
       });
     }
 
@@ -409,8 +436,8 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
       if (audio) { audio.srcObject = null; audio.remove(); audioElementsRef.current.delete(data.socketId); }
     }
 
-    function handleOffer(data: { from: string; offer: RTCSessionDescriptionInit }) {
-      const pc = createPeer(data.from, false);
+    function handleOffer(data: { from: string; fromUserId?: string; offer: RTCSessionDescriptionInit }) {
+      const pc = createPeer(data.from, false, data.fromUserId);
       pc.setRemoteDescription(new RTCSessionDescription(data.offer))
         .then(() => pc.createAnswer())
         .then((answer) => pc.setLocalDescription(answer))

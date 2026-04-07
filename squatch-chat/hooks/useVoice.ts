@@ -65,6 +65,12 @@ export function useVoice(activeServer: Server | null) {
     voicePanelRef.current?.togglePTT();
     setPttMode((p) => !p);
   }, []);
+  const setUserVolume = useCallback((userId: string, volume: number) => {
+    voicePanelRef.current?.setUserVolume(userId, volume);
+  }, []);
+  const setInputSensitivity = useCallback((threshold: number) => {
+    voicePanelRef.current?.setInputSensitivity(threshold);
+  }, []);
 
   return {
     activeVoiceChannel,
@@ -80,5 +86,7 @@ export function useVoice(activeServer: Server | null) {
     toggleDeafen,
     disconnect,
     togglePTT,
+    setUserVolume,
+    setInputSensitivity,
   };
 }

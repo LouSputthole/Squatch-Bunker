@@ -85,9 +85,9 @@
 **Still needed:**
 - [x] Push-to-talk with hotkey support (Space bar)
 - [x] Voice activity detection (speaking indicator)
-- [ ] Per-user volume control (adjust individual user volumes)
-- [ ] Input sensitivity slider
-- [ ] Hotkey support for mute toggle
+- [x] Per-user volume control (right-click participant → volume slider)
+- [x] Input sensitivity slider (Settings → Audio)
+- [x] Hotkey support for mute toggle (Ctrl+M)
 - [ ] Debug panel: mic detected? input level? output routed? permission denied?
 - [x] Speaking indicator animation (green glow ring)
 - [ ] Push-to-talk while app backgrounded
