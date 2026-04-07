@@ -6,6 +6,7 @@ import Avatar from "@/components/Avatar";
 import ProfileCard from "@/components/ProfileCard";
 import ImageLightbox from "@/components/ImageLightbox";
 import { LinkPreview } from "@/components/LinkPreview";
+import MessageContextMenu from "@/components/MessageContextMenu";
 
 // URL extraction util — returns at most 1 unique URL for preview
 function extractUrls(text: string): string[] {
@@ -340,6 +341,7 @@ export default function MessageBubble({ message, isOwn, currentUserId, authorCol
   const [profileCard, setProfileCard] = useState<{ x: number; y: number } | null>(null);
   const [lightbox, setLightbox] = useState<{ src: string; allSrcs: string[] } | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [translated, setTranslated] = useState<string | null>(null);
   const [translating, setTranslating] = useState(false);
 
@@ -406,6 +408,7 @@ export default function MessageBubble({ message, isOwn, currentUserId, authorCol
       className={`flex gap-3 py-1 group hover:bg-[var(--panel)]/30 px-1 rounded relative ${glowing ? "animate-search-highlight" : ""}`}
       onMouseEnter={() => setShowActions(true)}
       onMouseLeave={() => { setShowActions(false); setShowEmojiPicker(false); setEmojiSearch(""); }}
+      onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setContextMenu({ x: e.clientX, y: e.clientY }); }}
     >
       <Avatar
         username={message.author.username}
@@ -679,6 +682,24 @@ export default function MessageBubble({ message, isOwn, currentUserId, authorCol
             )}
           </div>
         </div>
+      )}
+
+      {contextMenu && (
+        <MessageContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          message={message}
+          currentUserId={currentUserId ?? ""}
+          canPin={canPin}
+          onReply={() => onReply?.(message)}
+          onEdit={isOwn ? () => { setEditing(true); setEditContent(message.content); } : undefined}
+          onDelete={isOwn ? () => setShowDeleteConfirm(true) : undefined}
+          onPin={(pinned) => onPin?.(message.id, pinned)}
+          onReact={(emoji) => onReact?.(message.id, emoji)}
+          onCopyText={() => { navigator.clipboard.writeText(message.content).catch(() => {}); }}
+          onBookmark={() => onBookmark?.(message.id, !isBookmarked)}
+          onClose={() => setContextMenu(null)}
+        />
       )}
 
       {profileCard && (
