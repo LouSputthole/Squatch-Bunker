@@ -14,7 +14,9 @@ interface ServerListProps {
   servers: Server[];
   activeServerId?: string;
   dmActive?: boolean;
+  friendsActive?: boolean;
   onDmClick?: () => void;
+  onFriendsClick?: () => void;
   onServerSelect: (server: Server) => void;
   onServerCreated: (server: Server) => void;
   onServerJoined: (server: Server) => void;
@@ -24,7 +26,9 @@ export default function ServerList({
   servers,
   activeServerId,
   dmActive,
+  friendsActive,
   onDmClick,
+  onFriendsClick,
   onServerSelect,
   onServerCreated,
   onServerJoined,
@@ -149,6 +153,23 @@ export default function ServerList({
         >
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+          </svg>
+        </button>
+        {/* Friends button */}
+        <button
+          onClick={onFriendsClick}
+          className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all ${
+            friendsActive
+              ? "bg-amber-600/30 text-amber-300 rounded-xl"
+              : "bg-[var(--panel)] text-[var(--muted)] hover:bg-amber-600/20 hover:text-amber-300 hover:rounded-xl"
+          }`}
+          title="Friends"
+        >
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+            <circle cx="9" cy="7" r="4" />
+            <line x1="19" y1="8" x2="19" y2="14" />
+            <line x1="22" y1="11" x2="16" y2="11" />
           </svg>
         </button>
         <div className="w-8 h-[1px] bg-[var(--accent-2)]/30 mb-1" />

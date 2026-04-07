@@ -23,6 +23,8 @@ model User {
   conversations1 Conversation[] @relation("ConvUser1")
   conversations2 Conversation[] @relation("ConvUser2")
   directMessages DirectMessage[]
+  sentRequests   Friendship[]   @relation("FriendRequester")
+  recvRequests   Friendship[]   @relation("FriendAddressee")
 }
 
 model Server {
@@ -128,4 +130,18 @@ model DirectMessage {
 
   conversation Conversation @relation(fields: [conversationId], references: [id])
   author       User         @relation(fields: [authorId], references: [id])
+}
+
+model Friendship {
+  id          String   @id @default(uuid())
+  requesterId String
+  addresseeId String
+  status      String   @default("pending") // pending, accepted, blocked
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  requester User @relation("FriendRequester", fields: [requesterId], references: [id])
+  addressee User @relation("FriendAddressee", fields: [addresseeId], references: [id])
+
+  @@unique([requesterId, addresseeId])
 }

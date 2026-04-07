@@ -14,6 +14,7 @@ import SearchPanel from "@/components/SearchPanel";
 import Avatar from "@/components/Avatar";
 import AmbientSounds from "@/components/AmbientSounds";
 import DMPanel from "@/components/DMPanel";
+import FriendPanel from "@/components/FriendPanel";
 import { connectSocket, disconnectSocket } from "@/lib/socket";
 import { displayName } from "@/lib/utils";
 
@@ -53,6 +54,7 @@ function ChatPageInner() {
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [dmOpen, setDmOpen] = useState(false);
+  const [friendsOpen, setFriendsOpen] = useState(false);
 
   useKeyboardShortcuts({
     activeVoiceChannel: voice.activeVoiceChannel,
@@ -144,8 +146,10 @@ function ChatPageInner() {
         servers={srv.servers}
         activeServerId={dmOpen ? undefined : srv.activeServer?.id}
         dmActive={dmOpen}
-        onDmClick={() => setDmOpen((p) => !p)}
-        onServerSelect={(s) => { setDmOpen(false); handleServerSelect(s); }}
+        friendsActive={friendsOpen}
+        onDmClick={() => { setDmOpen((p) => !p); setFriendsOpen(false); }}
+        onFriendsClick={() => { setFriendsOpen((p) => !p); setDmOpen(false); }}
+        onServerSelect={(s) => { setDmOpen(false); setFriendsOpen(false); handleServerSelect(s); }}
         onServerCreated={handleServerCreated}
         onServerJoined={handleServerJoined}
       />
@@ -160,6 +164,22 @@ function ChatPageInner() {
             onClose={() => setDmOpen(false)}
           />
         </div>
+      ) : friendsOpen && auth.user ? (
+        <FriendPanel
+          currentUserId={auth.user.id}
+          onlineMemberIds={presence.onlineMembers}
+          onMessageUser={async (userId) => {
+            const res = await fetch("/api/dm", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ targetUserId: userId }),
+            });
+            if (res.ok) {
+              setFriendsOpen(false);
+              setDmOpen(true);
+            }
+          }}
+        />
       ) : (
       <>
       {/* Channel sidebar */}

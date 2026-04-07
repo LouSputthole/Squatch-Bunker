@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import Avatar from "@/components/Avatar";
 import { displayName } from "@/lib/utils";
 
@@ -30,6 +30,7 @@ export interface ProfileCardProps {
 
 export default function ProfileCard({ username, userId, avatar, role, joinedAt, anchorX, anchorY, onClose, onMessageUser }: ProfileCardProps) {
   const ref = useRef<HTMLDivElement>(null);
+  const [friendStatus, setFriendStatus] = useState<string | null>(null);
 
   useEffect(() => {
     function onMouseDown(e: MouseEvent) {
@@ -98,13 +99,46 @@ export default function ProfileCard({ username, userId, avatar, role, joinedAt, 
           </p>
         </div>
       )}
-      {userId && onMessageUser && (
-        <button
-          onClick={() => { onMessageUser(userId); onClose(); }}
-          className="mt-2 w-full text-xs px-3 py-1.5 bg-amber-600/20 text-amber-300 rounded-lg hover:bg-amber-600/30 transition-colors"
-        >
-          Message
-        </button>
+      {userId && (
+        <div className="mt-2 flex gap-1.5">
+          {onMessageUser && (
+            <button
+              onClick={() => { onMessageUser(userId); onClose(); }}
+              className="flex-1 text-xs px-3 py-1.5 bg-amber-600/20 text-amber-300 rounded-lg hover:bg-amber-600/30 transition-colors"
+            >
+              Message
+            </button>
+          )}
+          <button
+            disabled={friendStatus !== null}
+            onClick={async () => {
+              setFriendStatus("sending");
+              const res = await fetch("/api/friends", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ username }),
+              });
+              const data = await res.json();
+              if (res.ok) {
+                setFriendStatus(data.autoAccepted ? "friends" : "sent");
+              } else {
+                setFriendStatus(data.error === "Already friends" ? "friends" : data.error === "Request already sent" ? "sent" : "error");
+              }
+            }}
+            className={`flex-1 text-xs px-3 py-1.5 rounded-lg transition-colors ${
+              friendStatus === "friends" ? "bg-green-600/20 text-green-300" :
+              friendStatus === "sent" ? "bg-blue-600/20 text-blue-300" :
+              friendStatus === "error" ? "bg-red-600/20 text-red-300" :
+              "bg-[var(--panel-2)] text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--accent-2)]/20"
+            }`}
+          >
+            {friendStatus === "sending" ? "..." :
+             friendStatus === "friends" ? "Friends ✓" :
+             friendStatus === "sent" ? "Sent ✓" :
+             friendStatus === "error" ? "Failed" :
+             "Add Friend"}
+          </button>
+        </div>
       )}
     </div>
   );

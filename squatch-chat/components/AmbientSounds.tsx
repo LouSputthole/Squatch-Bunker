@@ -166,7 +166,7 @@ export default function AmbientSounds() {
     <div className="relative">
       <button
         onClick={() => setOpen(!open)}
-        className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors ${
+        className={`w-7 h-7 rounded-full flex items-center justify-center transition-colors ${
           isPlaying
             ? "bg-amber-600/30 text-amber-400 animate-pulse"
             : "bg-[var(--panel-2)] text-[var(--muted)] hover:text-[var(--text)]"
@@ -181,7 +181,7 @@ export default function AmbientSounds() {
       </button>
 
       {open && (
-        <div className="absolute bottom-12 right-0 w-72 bg-[var(--panel)] border border-[var(--accent-2)]/30 rounded-xl shadow-2xl z-50 overflow-hidden">
+        <div className="absolute bottom-12 left-0 w-72 bg-[var(--panel)] border border-[var(--accent-2)]/30 rounded-xl shadow-2xl z-50 overflow-hidden">
           {/* Header */}
           <div className="px-4 py-3 border-b border-[var(--accent-2)]/20 flex items-center justify-between">
             <span className="text-sm font-semibold text-[var(--text)]">Ambient Sounds</span>
