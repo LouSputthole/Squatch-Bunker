@@ -1,11 +1,5 @@
-# Campfire — Full Production Stack
+# Campfire — Production Stack (single port)
 # Run: docker compose -f docker-compose.prod.yml up -d
-#
-# This starts the entire stack:
-#   - PostgreSQL database
-#   - Campfire app (Next.js + Socket.IO realtime server)
-#
-# To use: copy .env.example to .env and update values for production.
 
 services:
   db:
@@ -32,20 +26,12 @@ services:
       db:
         condition: service_healthy
     ports:
-      - "${APP_PORT:-3000}:3000"
-      - "${SOCKET_PORT:-3001}:3001"
+      - "${PORT:-3000}:3000"
     environment:
-      NODE_ENV: ${NODE_ENV:-production}
+      NODE_ENV: production
       DATABASE_URL: "postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@db:5432/${DB_NAME:-campfire}?schema=public"
       JWT_SECRET: ${JWT_SECRET:-campfire-secret-change-me-in-production}
-      COOKIE_NAME: ${COOKIE_NAME:-squatch-token}
-      SOCKET_PORT: ${SOCKET_PORT:-3001}
-      SOCKET_PATH: ${SOCKET_PATH:-/api/socketio}
-      NEXT_PUBLIC_SOCKET_URL: ${NEXT_PUBLIC_SOCKET_URL:-http://localhost:3001}
-      NEXT_PUBLIC_SOCKET_PATH: ${NEXT_PUBLIC_SOCKET_PATH:-/api/socketio}
-      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
-      CORS_ORIGINS: ${CORS_ORIGINS:-}
-      PORT: ${APP_PORT:-3000}
+      PORT: 3000
 
 volumes:
   campfire-data:

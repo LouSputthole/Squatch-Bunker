@@ -13,6 +13,7 @@ import { SettingsIcon } from "@/components/VoicePanel";
 import SearchPanel from "@/components/SearchPanel";
 import Avatar from "@/components/Avatar";
 import AmbientSounds from "@/components/AmbientSounds";
+import ShareLink from "@/components/ShareLink";
 import DMPanel from "@/components/DMPanel";
 import FriendPanel from "@/components/FriendPanel";
 import { connectSocket, disconnectSocket } from "@/lib/socket";
@@ -24,7 +25,6 @@ import { useChannels } from "@/hooks/useChannels";
 import { usePresence } from "@/hooks/usePresence";
 import { useVoice } from "@/hooks/useVoice";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
-import { useRuntimeConfig } from "@/hooks/useRuntimeConfig";
 
 import type { Channel } from "@/types/chat";
 
@@ -44,9 +44,6 @@ export default function ChatPage() {
 }
 
 function ChatPageInner() {
-  // Fetch runtime config early so socket/voice know the correct URLs
-  useRuntimeConfig();
-
   const auth = useAuth();
   const srv = useServers();
   const ch = useChannels(srv.activeServer);
@@ -375,6 +372,7 @@ function ChatPageInner() {
               <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
             </svg>
           </button>
+          <ShareLink />
           <AmbientSounds />
           <button
             onClick={() => setShortcutsOpen((p) => !p)}

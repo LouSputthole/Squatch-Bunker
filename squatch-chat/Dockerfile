@@ -1,5 +1,5 @@
 # Campfire — Production Dockerfile
-# Builds both the Next.js app and the Socket.IO realtime server
+# Single port: Next.js + Socket.IO on one server
 
 FROM node:20-alpine AS base
 RUN corepack enable && corepack prepare pnpm@latest --activate
@@ -25,36 +25,28 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
-# Copy everything needed at runtime
 COPY --from=builder /app/package.json ./
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/generated ./generated
 COPY --from=builder /app/realtime ./realtime
+COPY --from=builder /app/server.ts ./
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/next.config.ts ./
 
-# Start script: migrations + realtime server + Next.js
 COPY <<'EOF' /app/start.sh
 #!/bin/sh
 set -e
-
-# Run migrations if DATABASE_URL is set
 if [ -n "$DATABASE_URL" ]; then
-  echo "[Campfire] Running database migrations..."
+  echo "[Campfire] Running migrations..."
   npx prisma migrate deploy 2>/dev/null || echo "[Campfire] Migrations skipped"
 fi
-
-echo "[Campfire] Starting realtime server on port ${SOCKET_PORT:-3001}..."
-npx tsx realtime/server.ts &
-
-echo "[Campfire] Starting Next.js on port ${PORT:-3000}..."
-exec npx next start -p ${PORT:-3000}
+echo "[Campfire] Starting on port ${PORT:-3000}..."
+exec npx tsx server.ts
 EOF
 RUN chmod +x /app/start.sh
 
-# Ports are configurable via APP_PORT and SOCKET_PORT env vars
-EXPOSE ${APP_PORT:-3000} ${SOCKET_PORT:-3001}
+EXPOSE ${PORT:-3000}
 
 CMD ["/app/start.sh"]

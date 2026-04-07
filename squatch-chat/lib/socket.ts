@@ -1,39 +1,27 @@
 "use client";
 
 import { io, Socket } from "socket.io-client";
-import { getRuntimeConfig } from "@/hooks/useRuntimeConfig";
 
 let socket: Socket | null = null;
 let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
 
-function getSocketConfig() {
-  const runtime = getRuntimeConfig();
-  if (runtime?.socketUrl) {
-    return { url: runtime.socketUrl, path: runtime.socketPath || "/api/socketio" };
-  }
+function getSocketUrl(): string {
+  // If NEXT_PUBLIC_SOCKET_URL is explicitly set and not localhost, use it
+  const envUrl = process.env.NEXT_PUBLIC_SOCKET_URL;
+  if (envUrl && !envUrl.includes("localhost")) return envUrl;
 
-  // Fallback: derive from current page location (works for LAN/remote access)
-  if (typeof window !== "undefined") {
-    const hostname = window.location.hostname;
-    const protocol = window.location.protocol === "https:" ? "https" : "http";
-    const socketPort = process.env.NEXT_PUBLIC_SOCKET_PORT || "3001";
-    return {
-      url: `${protocol}://${hostname}:${socketPort}`,
-      path: process.env.NEXT_PUBLIC_SOCKET_PATH || "/api/socketio",
-    };
-  }
+  // Single-port mode: Socket.IO runs on the same origin as the page
+  if (typeof window !== "undefined") return window.location.origin;
 
-  return {
-    url: process.env.NEXT_PUBLIC_SOCKET_URL || "http://localhost:3001",
-    path: process.env.NEXT_PUBLIC_SOCKET_PATH || "/api/socketio",
-  };
+  return envUrl || "http://localhost:3000";
 }
 
 export function getSocket(): Socket {
   if (!socket) {
-    const config = getSocketConfig();
-    socket = io(config.url, {
-      path: config.path,
+    const url = getSocketUrl();
+    const path = process.env.NEXT_PUBLIC_SOCKET_PATH || "/api/socketio";
+    socket = io(url, {
+      path,
       autoConnect: false,
       withCredentials: true,
       reconnection: true,
@@ -47,10 +35,7 @@ export function getSocket(): Socket {
 
 export function connectSocket(): Socket {
   const s = getSocket();
-  if (!s.connected) {
-    s.connect();
-  }
-  // Start heartbeat
+  if (!s.connected) s.connect();
   if (!heartbeatInterval) {
     heartbeatInterval = setInterval(() => {
       if (s.connected) s.emit("heartbeat");
@@ -60,14 +45,8 @@ export function connectSocket(): Socket {
 }
 
 export function disconnectSocket(): void {
-  if (heartbeatInterval) {
-    clearInterval(heartbeatInterval);
-    heartbeatInterval = null;
-  }
-  if (socket) {
-    socket.disconnect();
-    socket = null;
-  }
+  if (heartbeatInterval) { clearInterval(heartbeatInterval); heartbeatInterval = null; }
+  if (socket) { socket.disconnect(); socket = null; }
 }
 
 export function setPresenceStatus(status: "online" | "idle" | "dnd" | "invisible"): void {
