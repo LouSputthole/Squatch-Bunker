@@ -248,6 +248,7 @@ function ChatPageInner() {
           channelId={ch.activeChannel.id}
           channelName={ch.activeChannel.name}
           channelTopic={ch.activeChannel.topic}
+          channelSlowMode={(ch.activeChannel as any)?.slowModeSeconds ?? 0}
           currentUserId={auth.user.id}
           currentUsername={auth.user.username}
           currentAvatar={auth.user.avatar}

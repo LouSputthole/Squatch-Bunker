@@ -120,7 +120,7 @@ export async function POST(request: Request) {
 
     const channel = await prisma.channel.findUnique({
       where: { id: channelId },
-      select: { serverId: true },
+      select: { serverId: true, slowModeSeconds: true },
     });
 
     if (!channel) {
@@ -135,6 +135,26 @@ export async function POST(request: Request) {
 
     if (!membership) {
       return NextResponse.json({ error: "Not a server member" }, { status: 403 });
+    }
+
+    // Slow mode check
+    if (channel.slowModeSeconds > 0) {
+      const lastMessage = await prisma.message.findFirst({
+        where: { channelId, authorId: session.userId },
+        orderBy: { createdAt: "desc" },
+        select: { createdAt: true },
+      });
+
+      if (lastMessage) {
+        const elapsed = (Date.now() - new Date(lastMessage.createdAt).getTime()) / 1000;
+        const remaining = Math.ceil(channel.slowModeSeconds - elapsed);
+        if (remaining > 0) {
+          return NextResponse.json(
+            { error: `Slow mode: wait ${remaining} seconds`, remaining },
+            { status: 429 }
+          );
+        }
+      }
     }
 
     const message = await prisma.message.create({

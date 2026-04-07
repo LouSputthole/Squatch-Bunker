@@ -38,6 +38,7 @@ interface ChatPanelProps {
   channelId: string;
   channelName: string;
   channelTopic?: string | null;
+  channelSlowMode?: number;
   currentUserId: string;
   currentUsername: string;
   currentAvatar?: string | null;
@@ -49,6 +50,7 @@ export default function ChatPanel({
   channelId,
   channelName,
   channelTopic,
+  channelSlowMode = 0,
   currentUserId,
   currentUsername,
   currentAvatar,
@@ -77,8 +79,10 @@ export default function ChatPanel({
   const isTypingRef = useRef(false);
   const [uploading, setUploading] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const [slowRemaining, setSlowRemaining] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dragCounterRef = useRef(0);
+  const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
   let pendingIdCounter = useRef(0);
 
   const scrollToBottom = useCallback(() => {
@@ -293,6 +297,22 @@ export default function ChatPanel({
         prev.map((m) => (m.id === tempId ? message : m))
       );
       socket.emit("message:send", { channelId, message });
+
+      // Start slow mode countdown
+      if (channelSlowMode > 0) {
+        if (cooldownRef.current) clearInterval(cooldownRef.current);
+        setSlowRemaining(channelSlowMode);
+        cooldownRef.current = setInterval(() => {
+          setSlowRemaining((prev) => {
+            if (prev <= 1) {
+              clearInterval(cooldownRef.current!);
+              cooldownRef.current = null;
+              return 0;
+            }
+            return prev - 1;
+          });
+        }, 1000);
+      }
     } else {
       // Remove failed optimistic message
       setMessages((prev) => prev.filter((m) => m.id !== tempId));
@@ -699,13 +719,13 @@ export default function ChatPanel({
             type="text"
             value={newMessage}
             onChange={handleInputChange}
-            placeholder={uploading ? "Uploading..." : `Message #${channelName}`}
+            placeholder={uploading ? "Uploading..." : slowRemaining > 0 ? `Wait ${slowRemaining}s to send again` : `Message #${channelName}`}
             className="flex-1 px-2 py-3 bg-transparent text-[var(--text)] focus:outline-none placeholder:text-[var(--muted)]"
-            disabled={uploading}
+            disabled={uploading || slowRemaining > 0}
           />
           <button
             type="submit"
-            disabled={!newMessage.trim() || uploading}
+            disabled={!newMessage.trim() || uploading || slowRemaining > 0}
             className="px-4 py-3 text-[var(--accent-2)] hover:text-[var(--accent)] disabled:opacity-30 transition-colors"
           >
             Send
