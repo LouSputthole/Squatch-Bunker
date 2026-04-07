@@ -34,6 +34,7 @@ interface MemberListProps {
 
 export default function MemberList({ serverId, currentUserId, currentUserRole, onlineMemberIds }: MemberListProps) {
   const [members, setMembers] = useState<Member[]>([]);
+  const [loading, setLoading] = useState(true);
   const [inviteCode, setInviteCode] = useState("");
   const [copied, setCopied] = useState(false);
   const [showInvite, setShowInvite] = useState(false);
@@ -47,6 +48,9 @@ export default function MemberList({ serverId, currentUserId, currentUserRole, o
       .then((data) => {
         setMembers(data.members || []);
         setInviteCode(data.inviteCode || "");
+      })
+      .finally(() => {
+        setLoading(false);
       });
   }, [serverId]);
 
@@ -196,25 +200,41 @@ export default function MemberList({ serverId, currentUserId, currentUserRole, o
       )}
 
       <div className="flex-1 overflow-y-auto py-2">
-        {onlineMembers.length > 0 && (
+        {loading && members.length === 0 ? (
+          <div className="px-2 py-1 space-y-1">
+            {Array.from({ length: 7 }).map((_, i) => (
+              <div key={i} className="flex items-center gap-2 px-2 py-1">
+                <div className="w-8 h-8 rounded-full bg-[var(--accent-2)]/30 animate-pulse shrink-0" />
+                <div
+                  className="h-3 rounded bg-[var(--accent-2)]/30 animate-pulse"
+                  style={{ width: `${48 + (i * 13) % 40}px` }}
+                />
+              </div>
+            ))}
+          </div>
+        ) : (
           <>
-            <div className="px-3 py-1">
-              <span className="text-xs font-semibold text-[var(--muted)] uppercase">
-                Online — {onlineMembers.length}
-              </span>
-            </div>
-            {onlineMembers.map((m) => renderMember(m, true))}
-          </>
-        )}
+            {onlineMembers.length > 0 && (
+              <>
+                <div className="px-3 py-1">
+                  <span className="text-xs font-semibold text-[var(--muted)] uppercase">
+                    Online — {onlineMembers.length}
+                  </span>
+                </div>
+                {onlineMembers.map((m) => renderMember(m, true))}
+              </>
+            )}
 
-        {offlineMembers.length > 0 && (
-          <>
-            <div className="px-3 py-1 mt-2">
-              <span className="text-xs font-semibold text-[var(--muted)] uppercase">
-                Offline — {offlineMembers.length}
-              </span>
-            </div>
-            {offlineMembers.map((m) => renderMember(m, false))}
+            {offlineMembers.length > 0 && (
+              <>
+                <div className="px-3 py-1 mt-2">
+                  <span className="text-xs font-semibold text-[var(--muted)] uppercase">
+                    Offline — {offlineMembers.length}
+                  </span>
+                </div>
+                {offlineMembers.map((m) => renderMember(m, false))}
+              </>
+            )}
           </>
         )}
       </div>
