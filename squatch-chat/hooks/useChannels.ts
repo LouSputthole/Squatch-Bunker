@@ -5,15 +5,43 @@ import { usePathname, useSearchParams } from "next/navigation";
 import { getSocket } from "@/lib/socket";
 import type { Channel, Server } from "@/types/chat";
 
+const STORAGE_KEY = "squatch:unread";
+
+function loadStoredUnreads(): Map<string, number> {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return new Map();
+    const obj = JSON.parse(raw) as Record<string, number>;
+    return new Map(Object.entries(obj));
+  } catch {
+    return new Map();
+  }
+}
+
+function saveUnreads(counts: Map<string, number>) {
+  try {
+    const obj: Record<string, number> = {};
+    counts.forEach((v, k) => { obj[k] = v; });
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(obj));
+  } catch {
+    // ignore
+  }
+}
+
 export function useChannels(activeServer: Server | null) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [activeChannel, setActiveChannel] = useState<Channel | null>(null);
-  const [unreadCounts, setUnreadCounts] = useState<Map<string, number>>(new Map());
+  const [unreadCounts, setUnreadCounts] = useState<Map<string, number>>(() => loadStoredUnreads());
   const activeChannelIdRef = useRef<string | null>(null);
 
   const urlServerId = searchParams.get("s");
   const urlChannelId = searchParams.get("c");
+
+  // Persist unread counts to localStorage whenever they change
+  useEffect(() => {
+    saveUnreads(unreadCounts);
+  }, [unreadCounts]);
 
   // Sync ref
   useEffect(() => {
@@ -85,6 +113,7 @@ export function useChannels(activeServer: Server | null) {
 
   const resetUnreads = useCallback(() => {
     setUnreadCounts(new Map());
+    try { localStorage.removeItem(STORAGE_KEY); } catch { /* ignore */ }
   }, []);
 
   return {
