@@ -14,7 +14,7 @@ import SearchPanel from "@/components/SearchPanel";
 import Avatar from "@/components/Avatar";
 import AmbientSounds from "@/components/AmbientSounds";
 import ShareLink from "@/components/ShareLink";
-import ConnectionStatus from "@/components/ConnectionStatus";
+import ConnectionStatusBar from "@/components/ConnectionStatusBar";
 import DMPanel from "@/components/DMPanel";
 import FriendPanel from "@/components/FriendPanel";
 import OnboardingWizard from "@/components/OnboardingWizard";
@@ -27,6 +27,7 @@ import { useChannels } from "@/hooks/useChannels";
 import { usePresence } from "@/hooks/usePresence";
 import { useVoice } from "@/hooks/useVoice";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
+import { useOfflineQueue } from "@/hooks/useOfflineQueue";
 
 import type { Channel } from "@/types/chat";
 
@@ -79,7 +80,12 @@ function ChatPageInner() {
       if (!user) return;
 
       const serverList = await srv.fetchServers();
-      connectSocket();
+      const socket = connectSocket();
+
+      socket.on("connect", () => { setSocketStatus("connected"); offlineQueue.flush(); });
+      socket.on("disconnect", () => setSocketStatus("disconnected"));
+      socket.on("reconnecting", () => setSocketStatus("connecting"));
+      socket.on("reconnect", () => { setSocketStatus("connected"); offlineQueue.flush(); });
 
       // Restore from URL
       if (ch.urlServerId && serverList.length > 0) {
@@ -145,7 +151,7 @@ function ChatPageInner() {
 
   return (
     <div className="h-screen flex bg-[var(--bg)] relative">
-      <ConnectionStatus />
+      <ConnectionStatusBar status={socketStatus} queuedCount={offlineQueue.queuedCount} />
       {/* Server rail */}
       <ServerList
         servers={srv.servers}
