@@ -46,6 +46,23 @@ export function useServers() {
     });
   }, []);
 
+  const renameActiveServer = useCallback((newName: string) => {
+    setActiveServer((prev) => {
+      if (!prev) return prev;
+      const updated = { ...prev, name: newName };
+      setServers((list) => list.map((s) => (s.id === updated.id ? updated : s)));
+      return updated;
+    });
+  }, []);
+
+  const removeActiveServer = useCallback(() => {
+    setActiveServer((prev) => {
+      if (!prev) return prev;
+      setServers((list) => list.filter((s) => s.id !== prev.id));
+      return null;
+    });
+  }, []);
+
   return {
     servers,
     setServers,
@@ -55,5 +72,7 @@ export function useServers() {
     activateServer,
     selectServer,
     addChannel,
+    renameActiveServer,
+    removeActiveServer,
   };
 }

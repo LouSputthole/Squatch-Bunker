@@ -25,12 +25,15 @@ interface ChannelListProps {
   serverId: string;
   unreadCounts?: Map<string, number>;
   currentUserId?: string;
+  currentUserRole?: string;
   activeVoiceChannelId?: string | null;
   voiceParticipants?: Map<string, VoiceParticipant[]>;
   onChannelSelect: (channel: Channel) => void;
   onChannelCreated: (channel: Channel) => void;
   onVoiceJoin?: (channel: Channel) => void;
   onVoiceLeave?: () => void;
+  onServerRenamed?: (newName: string) => void;
+  onServerDeleted?: () => void;
 }
 
 // SVG Icons
@@ -73,15 +76,22 @@ export default function ChannelList({
   serverId,
   unreadCounts,
   currentUserId,
+  currentUserRole,
   activeVoiceChannelId,
   voiceParticipants,
   onChannelSelect,
   onChannelCreated,
   onVoiceJoin,
   onVoiceLeave,
+  onServerRenamed,
+  onServerDeleted,
 }: ChannelListProps) {
   const [creating, setCreating] = useState<"text" | "voice" | null>(null);
   const [newName, setNewName] = useState("");
+  const [showServerSettings, setShowServerSettings] = useState(false);
+  const [renameValue, setRenameValue] = useState(serverName);
+  const [settingsError, setSettingsError] = useState("");
+  const [settingsLoading, setSettingsLoading] = useState(false);
   const [localVoiceParticipants, setLocalVoiceParticipants] = useState<Map<string, VoiceParticipant[]>>(
     voiceParticipants || new Map()
   );
@@ -131,14 +141,118 @@ export default function ChannelList({
     }
   }
 
+  async function handleRename(e: React.FormEvent) {
+    e.preventDefault();
+    if (!renameValue.trim() || renameValue.trim() === serverName || settingsLoading) return;
+    setSettingsLoading(true);
+    setSettingsError("");
+    const res = await fetch(`/api/servers/${serverId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: renameValue.trim() }),
+    });
+    setSettingsLoading(false);
+    if (res.ok) {
+      onServerRenamed?.(renameValue.trim());
+      setShowServerSettings(false);
+    } else {
+      const data = await res.json();
+      setSettingsError(data.error || "Failed to rename");
+    }
+  }
+
+  async function handleRegenerateInvite() {
+    if (settingsLoading) return;
+    setSettingsLoading(true);
+    setSettingsError("");
+    const res = await fetch(`/api/servers/${serverId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ regenerateInvite: true }),
+    });
+    setSettingsLoading(false);
+    if (!res.ok) {
+      const data = await res.json();
+      setSettingsError(data.error || "Failed");
+    }
+    // Invite code change has no visible effect here — MemberList will pick it up on next open
+  }
+
+  async function handleDeleteServer() {
+    if (!confirm(`Delete "${serverName}" permanently? This cannot be undone.`)) return;
+    setSettingsLoading(true);
+    const res = await fetch(`/api/servers/${serverId}`, { method: "DELETE" });
+    setSettingsLoading(false);
+    if (res.ok) {
+      onServerDeleted?.();
+    } else {
+      const data = await res.json();
+      setSettingsError(data.error || "Failed to delete");
+    }
+  }
+
   const textChannels = channels.filter((c) => !c.type || c.type === "text");
   const voiceChannels = channels.filter((c) => c.type === "voice");
 
   return (
     <div className="w-60 bg-[var(--panel)] flex flex-col border-r border-[var(--accent-2)]/30 shrink-0">
-      <div className="h-12 px-4 flex items-center border-b border-[var(--accent-2)]/30">
-        <h2 className="font-bold text-[var(--text)] truncate">{serverName}</h2>
+      <div className="h-12 px-4 flex items-center border-b border-[var(--accent-2)]/30 group/header">
+        <h2 className="font-bold text-[var(--text)] truncate flex-1">{serverName}</h2>
+        {currentUserRole === "owner" && (
+          <button
+            onClick={() => { setShowServerSettings((v) => !v); setRenameValue(serverName); setSettingsError(""); }}
+            className="text-[var(--muted)] hover:text-[var(--text)] opacity-0 group-hover/header:opacity-100 transition-opacity shrink-0 ml-2"
+            title="Server Settings"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            </svg>
+          </button>
+        )}
       </div>
+
+      {/* Server settings panel */}
+      {showServerSettings && currentUserRole === "owner" && (
+        <div className="border-b border-[var(--accent-2)]/30 p-3 space-y-3 bg-[var(--panel-2)]/50">
+          {settingsError && (
+            <p className="text-xs text-[var(--danger)]">{settingsError}</p>
+          )}
+          <form onSubmit={handleRename} className="space-y-1">
+            <label className="text-xs font-semibold text-[var(--muted)] uppercase">Rename Server</label>
+            <div className="flex gap-1">
+              <input
+                type="text"
+                value={renameValue}
+                onChange={(e) => setRenameValue(e.target.value)}
+                className="flex-1 text-xs px-2 py-1.5 bg-[var(--panel)] text-[var(--text)] border border-[var(--accent-2)]/50 rounded focus:outline-none"
+                maxLength={50}
+              />
+              <button
+                type="submit"
+                disabled={settingsLoading || !renameValue.trim() || renameValue.trim() === serverName}
+                className="text-xs px-2 py-1.5 bg-[var(--accent-2)] text-[var(--text)] rounded hover:bg-[var(--accent)] transition-colors disabled:opacity-40"
+              >
+                Save
+              </button>
+            </div>
+          </form>
+          <button
+            onClick={handleRegenerateInvite}
+            disabled={settingsLoading}
+            className="w-full text-xs px-2 py-1.5 bg-[var(--panel)] text-[var(--muted)] border border-[var(--accent-2)]/30 rounded hover:text-[var(--text)] hover:border-[var(--accent-2)] transition-colors disabled:opacity-40"
+          >
+            Regenerate Invite Code
+          </button>
+          <button
+            onClick={handleDeleteServer}
+            disabled={settingsLoading}
+            className="w-full text-xs px-2 py-1.5 bg-red-600/10 text-red-400 border border-red-600/20 rounded hover:bg-red-600/20 transition-colors disabled:opacity-40"
+          >
+            Delete Server
+          </button>
+        </div>
+      )}
 
       <div className="flex-1 overflow-y-auto py-2">
         {/* Text Channels */}
