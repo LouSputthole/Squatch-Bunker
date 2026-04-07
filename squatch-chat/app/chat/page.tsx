@@ -8,6 +8,7 @@ import MemberList from "@/components/MemberList";
 import VoicePanel from "@/components/VoicePanel";
 import VoiceRoom from "@/components/VoiceRoom";
 import SettingsModal from "@/components/SettingsModal";
+import KeyboardShortcutsPanel from "@/components/KeyboardShortcutsPanel";
 import { SettingsIcon } from "@/components/VoicePanel";
 import SearchPanel from "@/components/SearchPanel";
 import Avatar from "@/components/Avatar";
@@ -48,13 +49,16 @@ function ChatPageInner() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
   useKeyboardShortcuts({
     activeVoiceChannel: voice.activeVoiceChannel,
     searchOpen,
     settingsOpen,
+    shortcutsOpen,
     setSearchOpen,
     setSettingsOpen,
+    setShortcutsOpen,
     toggleMute: voice.toggleMute,
     toggleDeafen: voice.toggleDeafen,
   });
@@ -292,6 +296,13 @@ function ChatPageInner() {
             </svg>
           </button>
           <button
+            onClick={() => setShortcutsOpen((p) => !p)}
+            className="text-[var(--muted)] hover:text-[var(--text)] transition-colors font-bold text-sm"
+            title="Keyboard shortcuts (?)"
+          >
+            ?
+          </button>
+          <button
             onClick={() => setSettingsOpen(true)}
             className="text-[var(--muted)] hover:text-[var(--text)] transition-colors"
             title="Settings"
@@ -316,6 +327,9 @@ function ChatPageInner() {
         onAvatarChange={auth.updateAvatar}
         onInputSensitivityChange={voice.setInputSensitivity}
       />
+
+      {/* Keyboard shortcuts panel */}
+      <KeyboardShortcutsPanel open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
 
       {/* Version */}
       <div className="absolute bottom-3 right-3 text-xs text-[var(--muted)]">
