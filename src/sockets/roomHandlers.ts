@@ -2,6 +2,7 @@ import { Socket, Server as SocketServer } from 'socket.io';
 import { presenceService } from '../services/PresenceService';
 import { sessionRegistry } from '../services/SessionRegistry';
 import { roomService } from '../services/RoomService';
+import { chatService } from '../services/ChatService';
 
 export function registerRoomHandlers(io: SocketServer, socket: Socket): void {
   // join-room: { roomId, userId, username }
@@ -63,6 +64,12 @@ export function registerRoomHandlers(io: SocketServer, socket: Socket): void {
       // Send current room state back to the joining socket
       const members = presenceService.getRoomPresence(roomId);
       socket.emit('room:state', { roomId, members });
+
+      // Send recent chat history to the joining user
+      const history = chatService.getMessages(roomId);
+      if (history.length > 0) {
+        socket.emit('chat:history', { roomId, messages: history });
+      }
     }
   );
 
@@ -145,6 +152,33 @@ export function registerRoomHandlers(io: SocketServer, socket: Socket): void {
       speaking,
     });
   });
+
+  // chat:message: { roomId, content }
+  socket.on(
+    'chat:message',
+    (payload: { roomId: string; content: string }) => {
+      const { roomId, content } = payload;
+      if (!roomId || !content || typeof content !== 'string') return;
+
+      const trimmed = content.trim().slice(0, 500);
+      if (!trimmed) return;
+
+      const session = sessionRegistry.get(socket.id);
+      if (!session?.userId || !session?.username) return;
+
+      const room = roomService.getRoom(roomId);
+      if (!room) return;
+
+      const message = chatService.addMessage(
+        roomId,
+        session.userId,
+        session.username,
+        trimmed
+      );
+
+      io.to(`room:${roomId}`).emit('chat:message', message);
+    }
+  );
 
   // Built-in disconnect event
   socket.on('disconnect', () => {

@@ -42,6 +42,9 @@ const sidebarAvatar   = $('sidebar-avatar');
 const sidebarUsername = $('sidebar-username');
 const connectionStatus = $('connection-status');
 const toastContainer  = $('toast-container');
+const chatMessages    = $('chat-messages');
+const chatForm        = $('chat-form');
+const chatInput       = $('chat-input');
 
 // ── Utilities ──────────────────────────────────────────────────────────────
 
@@ -211,6 +214,20 @@ function connectSocket() {
     voiceClient.handleIceCandidate(fromUserId, candidate);
   });
 
+  // ── Chat ──
+
+  socket.on('chat:history', ({ messages }) => {
+    chatMessages.innerHTML = '';
+    for (const msg of messages) {
+      appendChatMessage(msg, false);
+    }
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+  });
+
+  socket.on('chat:message', (msg) => {
+    appendChatMessage(msg, true);
+  });
+
   // ── VAD callback ──
   voiceClient.onSpeakingChange = (speaking) => {
     if (!state.currentRoomId || state.muted) return;
@@ -319,6 +336,37 @@ async function joinRoom(roomId) {
   await voiceClient.joinRoom(roomId, state.userId, state.socket, []);
 }
 
+// ── Chat ───────────────────────────────────────────────────────────────────
+
+function appendChatMessage(msg, scroll) {
+  const isSelf = msg.userId === state.userId;
+  const wrap = document.createElement('div');
+  wrap.className = 'chat-msg' + (isSelf ? ' self' : '');
+  wrap.dataset.msgId = msg.id;
+
+  const time = new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  wrap.innerHTML = `
+    <span class="chat-avatar" style="background:${avatarColor(msg.userId)};">${initials(msg.username)}</span>
+    <div class="chat-bubble">
+      <span class="chat-author">${escapeHtml(msg.username)}</span>
+      <span class="chat-time">${time}</span>
+      <div class="chat-text">${escapeHtml(msg.content)}</div>
+    </div>
+  `;
+  chatMessages.appendChild(wrap);
+  if (scroll) {
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+  }
+}
+
+chatForm.addEventListener('submit', (e) => {
+  e.preventDefault();
+  const content = chatInput.value.trim();
+  if (!content || !state.currentRoomId || !state.socket?.connected) return;
+  state.socket.emit('chat:message', { roomId: state.currentRoomId, content });
+  chatInput.value = '';
+});
+
 function handleLocalLeave(emitEvent) {
   if (!state.currentRoomId) return;
   const roomId = state.currentRoomId;
@@ -342,6 +390,7 @@ function handleLocalLeave(emitEvent) {
   updateSpeakingIndicator(false);
 
   // UI
+  chatMessages.innerHTML = '';
   emptyState.classList.remove('hidden');
   voiceRoomPanel.classList.add('hidden');
   renderChannelList();

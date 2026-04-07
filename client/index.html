@@ -73,8 +73,25 @@
         <span class="member-count-badge" id="room-member-count">0 members</span>
       </div>
 
-      <div id="member-roster">
-        <!-- member cards injected here -->
+      <div id="voice-room-body">
+        <div id="member-roster">
+          <!-- member cards injected here -->
+        </div>
+
+        <!-- Chat panel -->
+        <div id="chat-panel">
+          <div id="chat-messages" aria-live="polite" aria-label="Chat messages"></div>
+          <form id="chat-form" autocomplete="off">
+            <input
+              id="chat-input"
+              type="text"
+              placeholder="Message the room…"
+              maxlength="500"
+              aria-label="Chat message"
+            />
+            <button type="submit" id="chat-send-btn" title="Send message">&#9658;</button>
+          </form>
+        </div>
       </div>
 
       <!-- Control bar -->
