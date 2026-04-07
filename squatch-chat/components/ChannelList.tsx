@@ -447,6 +447,7 @@ export default function ChannelList({
         {/* Text Channels grouped by category */}
         {sortedCategories.map((cat) => {
           const catChannels = categoryMap.get(cat)!;
+          const label = cat || "Text Channels";
           const isCollapsed = collapsedCategories.has(cat);
           const isDragTarget = dragOverCategory === cat;
           return (

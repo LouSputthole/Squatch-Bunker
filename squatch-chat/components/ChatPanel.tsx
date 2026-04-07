@@ -36,7 +36,7 @@ function wrapSelection(
 }
 
 interface FormattingToolbarProps {
-  inputRef: React.RefObject<HTMLTextAreaElement>;
+  inputRef: React.RefObject<HTMLTextAreaElement | null>;
   value: string;
   onChange: (val: string) => void;
 }
@@ -120,126 +120,6 @@ function FormattingToolbar({ inputRef, onChange }: FormattingToolbarProps) {
       </button>
       <button type="button" onClick={applyBullet} className={btn} title="Bullet list">
         •
-      </button>
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-
-// ── Formatting toolbar ────────────────────────────────────────────────────────
-
-function wrapSelection(
-  textarea: HTMLTextAreaElement,
-  before: string,
-  after: string,
-  placeholder: string,
-  setter: (val: string) => void
-) {
-  const start = textarea.selectionStart;
-  const end = textarea.selectionEnd;
-  const selected = textarea.value.slice(start, end) || placeholder;
-  const newVal =
-    textarea.value.slice(0, start) +
-    before +
-    selected +
-    after +
-    textarea.value.slice(end);
-  setter(newVal);
-  setTimeout(() => {
-    textarea.focus();
-    textarea.setSelectionRange(
-      start + before.length,
-      start + before.length + selected.length
-    );
-  }, 0);
-}
-
-interface FormattingToolbarProps {
-  inputRef: React.RefObject<HTMLTextAreaElement>;
-  value: string;
-  onChange: (val: string) => void;
-}
-
-function FormattingToolbar({ inputRef, onChange }: FormattingToolbarProps) {
-  const btn =
-    "text-xs px-2 py-1 rounded hover:bg-[var(--accent-2)]/20 text-[var(--muted)] hover:text-[var(--text)] font-mono transition-colors";
-
-  function applyBold() {
-    if (!inputRef.current) return;
-    wrapSelection(inputRef.current, "**", "**", "bold text", onChange);
-  }
-  function applyItalic() {
-    if (!inputRef.current) return;
-    wrapSelection(inputRef.current, "_", "_", "italic text", onChange);
-  }
-  function applyCode() {
-    if (!inputRef.current) return;
-    wrapSelection(inputRef.current, "`", "`", "code", onChange);
-  }
-  function applyLink() {
-    if (!inputRef.current) return;
-    const textarea = inputRef.current;
-    const start = textarea.selectionStart;
-    const end = textarea.selectionEnd;
-    const selected = textarea.value.slice(start, end) || "link text";
-    const url = window.prompt("Enter URL:", "https://");
-    if (!url) return;
-    const newVal =
-      textarea.value.slice(0, start) +
-      "[" + selected + "](" + url + ")" +
-      textarea.value.slice(end);
-    onChange(newVal);
-    setTimeout(() => {
-      textarea.focus();
-      textarea.setSelectionRange(start + 1, start + 1 + selected.length);
-    }, 0);
-  }
-  function applyBullet() {
-    if (!inputRef.current) return;
-    const textarea = inputRef.current;
-    const start = textarea.selectionStart;
-    const end = textarea.selectionEnd;
-    if (start === end) {
-      const newVal =
-        textarea.value.slice(0, start) + "\u2022 " + textarea.value.slice(end);
-      onChange(newVal);
-      setTimeout(() => {
-        textarea.focus();
-        textarea.setSelectionRange(start + 2, start + 2);
-      }, 0);
-    } else {
-      const before = textarea.value.slice(0, start);
-      const selected = textarea.value.slice(start, end);
-      const after = textarea.value.slice(end);
-      const bulleted = selected
-        .split("\n")
-        .map((line) => "\u2022 " + line)
-        .join("\n");
-      onChange(before + bulleted + after);
-      setTimeout(() => {
-        textarea.focus();
-        textarea.setSelectionRange(start, start + bulleted.length);
-      }, 0);
-    }
-  }
-
-  return (
-    <div className="border border-[var(--accent-2)]/30 rounded-t-lg bg-[var(--panel)] px-2 py-1 flex items-center gap-1">
-      <button type="button" onClick={applyBold} className={btn} title="Bold (Ctrl+B)">
-        <strong>B</strong>
-      </button>
-      <button type="button" onClick={applyItalic} className={btn} title="Italic (Ctrl+I)">
-        <em>I</em>
-      </button>
-      <button type="button" onClick={applyCode} className={btn} title="Inline code">
-        {"</>"}
-      </button>
-      <button type="button" onClick={applyLink} className={btn} title="Link (Ctrl+K)">
-        \U0001F517
-      </button>
-      <button type="button" onClick={applyBullet} className={btn} title="Bullet list">
-        \u2022
       </button>
     </div>
   );

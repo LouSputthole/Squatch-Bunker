@@ -57,6 +57,8 @@ function ChatPageInner() {
   const voice = useVoice(srv.activeServer);
 
   const { notify } = useNotifications();
+  const [socketStatus, setSocketStatus] = useState<"connected" | "connecting" | "disconnected">("connecting");
+  const offlineQueue = useOfflineQueue();
   const [notifications, setNotifications] = useState<Array<{id: string, title: string, body: string, timestamp: number, read: boolean}>>([]);
 
   const [settingsOpen, setSettingsOpen] = useState(false);
