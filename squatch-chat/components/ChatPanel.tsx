@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { getSocket } from "@/lib/socket";
 import { truncateName } from "@/lib/utils";
+import { sounds } from "@/lib/sounds";
 import MessageBubble from "./MessageBubble";
 import PinnedMessagesPanel from "./PinnedMessagesPanel";
 
@@ -224,30 +225,7 @@ export default function ChatPanel({
     }
   }, []);
 
-  function playMessageNotification() {
-    try {
-      const saved = localStorage.getItem("campfire-audio-settings");
-      if (saved) {
-        const s = JSON.parse(saved);
-        if (s.messageNotifications === false) return;
-      }
-      const ctx = new AudioContext();
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.type = "sine";
-      osc.frequency.setValueAtTime(880, ctx.currentTime);
-      osc.frequency.exponentialRampToValueAtTime(1320, ctx.currentTime + 0.08);
-      gain.gain.setValueAtTime(0.15, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
-      osc.start(ctx.currentTime);
-      osc.stop(ctx.currentTime + 0.25);
-      setTimeout(() => ctx.close(), 400);
-    } catch {
-      // Audio not supported
-    }
-  }
+
 
   // Sync topic when channel changes
   useEffect(() => {
@@ -308,9 +286,9 @@ export default function ChatPanel({
         userTypingTimeoutsRef.current.delete(message.author.id);
       }
       setTimeout(scrollToBottom, 100);
-      // Notify when tab is in the background and message is from someone else
-      if (message.author.id !== currentUserId && document.hidden) {
-        playMessageNotification();
+      // Play sound when message is from someone else
+      if (message.author.id !== currentUserId) {
+        sounds.messageReceived();
       }
     }
 
@@ -448,6 +426,7 @@ export default function ChatPanel({
         prev.map((m) => (m.id === tempId ? message : m))
       );
       socket.emit("message:send", { channelId, message });
+      sounds.messageSent();
 
       // Start slow mode countdown
       if (channelSlowMode > 0) {
@@ -868,7 +847,7 @@ export default function ChatPanel({
         </div>
       )}
 
-      <form onSubmit={handleSend} className={`px-4 pb-4 shrink-0 ${replyingTo ? "pt-0" : "pt-1"}`}>
+      <form onSubmit={handleSend} className={`px-4 pb-4 pb-safe shrink-0 ${replyingTo ? "pt-0" : "pt-1"}`}>
         {showToolbar && (
           <FormattingToolbar
             inputRef={inputRef}

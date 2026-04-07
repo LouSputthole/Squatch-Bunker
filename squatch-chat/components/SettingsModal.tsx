@@ -59,7 +59,6 @@ export default function SettingsModal({ open, onClose, username, currentAvatar, 
         if (s.messageNotifications !== undefined) setMessageNotifications(s.messageNotifications);
         if (s.masterEnabled !== undefined) setUiSoundsMaster(s.masterEnabled);
         if (s.messageSend !== undefined) setUiSoundMessages(s.messageSend);
-        if (s.messageReceive !== undefined) setUiSoundMessages(s.messageReceive);
         if (s.voice !== undefined) setUiSoundVoice(s.voice);
         if (s.notifications !== undefined) setUiSoundNotifications(s.notifications);
         if (s.volume !== undefined) setUiSoundVolume(s.volume);
