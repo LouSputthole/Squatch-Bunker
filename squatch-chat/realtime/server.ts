@@ -26,6 +26,18 @@ const voiceRooms = new Map<string, Map<string, { username: string; socketId: str
 // Track which server each voice channel belongs to: channelId -> serverId
 const voiceChannelServer = new Map<string, string>();
 
+// Track which voice channel each user is in: userId -> channelId (enforce single room)
+const userVoiceChannel = new Map<string, string>();
+
+// Presence statuses: userId -> status
+type PresenceStatus = "online" | "idle" | "dnd" | "invisible";
+const userStatus = new Map<string, PresenceStatus>();
+
+// Heartbeat tracking: socketId -> last heartbeat timestamp
+const heartbeats = new Map<string, number>();
+const HEARTBEAT_INTERVAL = 15000; // 15s
+const HEARTBEAT_TIMEOUT = 45000; // 45s — 3 missed beats
+
 interface TokenPayload {
   userId: string;
   username: string;
@@ -49,10 +61,32 @@ io.use((socket, next) => {
   }
 });
 
+// Stale session cleanup — runs every HEARTBEAT_INTERVAL
+setInterval(() => {
+  const now = Date.now();
+  for (const [socketId, lastBeat] of heartbeats) {
+    if (now - lastBeat > HEARTBEAT_TIMEOUT) {
+      const sock = io.sockets.sockets.get(socketId);
+      if (sock) {
+        console.log(`[Campfire] Heartbeat timeout: ${sock.data.username}`);
+        sock.disconnect(true);
+      }
+      heartbeats.delete(socketId);
+    }
+  }
+}, HEARTBEAT_INTERVAL);
+
 io.on("connection", (socket) => {
   const currentUserId = socket.data.userId as string;
   const currentUsername = socket.data.username as string;
   console.log(`[Campfire] Authenticated socket: ${currentUsername}`);
+
+  // Start heartbeat tracking
+  heartbeats.set(socket.id, Date.now());
+  socket.on("heartbeat", () => { heartbeats.set(socket.id, Date.now()); });
+
+  // Default presence
+  userStatus.set(currentUserId, "online");
 
   // Join a channel room
   socket.on("channel:join", (channelId: string) => {
@@ -77,11 +111,7 @@ io.on("connection", (socket) => {
       socketId: socket.id,
     });
 
-    // Broadcast updated presence to server room
-    const members = Array.from(onlineUsers.get(serverId)!.entries()).map(
-      ([userId, info]) => ({ userId, username: info.username })
-    );
-    io.to(`server:${serverId}`).emit("presence:update", { serverId, members });
+    broadcastPresence(serverId);
   });
 
   // Leave a server room
@@ -141,6 +171,18 @@ io.on("connection", (socket) => {
     });
   });
 
+  // Presence status change
+  socket.on("presence:status", (status: string) => {
+    if (!["online", "idle", "dnd", "invisible"].includes(status)) return;
+    userStatus.set(currentUserId, status as PresenceStatus);
+    // Re-broadcast presence to all servers this user is in
+    for (const [serverId, members] of onlineUsers) {
+      if (members.has(currentUserId)) {
+        broadcastPresence(serverId);
+      }
+    }
+  });
+
   // Typing indicator
   socket.on("typing:start", (channelId: string) => {
     socket.to(`channel:${channelId}`).emit("typing:update", {
@@ -167,6 +209,13 @@ io.on("connection", (socket) => {
     // Support both old format (just channelId string) and new format ({channelId, serverId})
     const channelId = typeof data === "string" ? data : data.channelId;
     const serverId = typeof data === "string" ? undefined : data.serverId;
+
+    // Enforce single voice room — auto-leave previous
+    const prevChannel = userVoiceChannel.get(currentUserId);
+    if (prevChannel && prevChannel !== channelId) {
+      leaveVoiceChannel(prevChannel);
+    }
+    userVoiceChannel.set(currentUserId, channelId);
 
     socket.join(`voice:${channelId}`);
 
@@ -269,6 +318,9 @@ io.on("connection", (socket) => {
     const entry = room.get(currentUserId);
     if (entry && entry.socketId === socket.id) {
       room.delete(currentUserId);
+      if (userVoiceChannel.get(currentUserId) === channelId) {
+        userVoiceChannel.delete(currentUserId);
+      }
       socket.to(`voice:${channelId}`).emit("voice:user-left", {
         channelId,
         userId: currentUserId,
@@ -305,6 +357,9 @@ io.on("connection", (socket) => {
 
   socket.on("disconnect", () => {
     console.log(`[Campfire] Disconnected: ${currentUsername}`);
+    heartbeats.delete(socket.id);
+    userVoiceChannel.delete(currentUserId);
+    userStatus.delete(currentUserId);
     // Remove from all voice rooms
     for (const [channelId] of voiceRooms) {
       leaveVoiceChannel(channelId);
@@ -318,18 +373,27 @@ io.on("connection", (socket) => {
   function removeFromPresence(serverId: string, userId: string) {
     const serverMap = onlineUsers.get(serverId);
     if (!serverMap) return;
-    // Only remove if this socket owns the presence entry
     const entry = serverMap.get(userId);
     if (entry && entry.socketId === socket.id) {
       serverMap.delete(userId);
-      const members = Array.from(serverMap.entries()).map(
-        ([uid, info]) => ({ userId: uid, username: info.username })
-      );
-      io.to(`server:${serverId}`).emit("presence:update", { serverId, members });
+      broadcastPresence(serverId);
     }
     if (serverMap.size === 0) {
       onlineUsers.delete(serverId);
     }
+  }
+
+  function broadcastPresence(serverId: string) {
+    const serverMap = onlineUsers.get(serverId);
+    if (!serverMap) return;
+    const members = Array.from(serverMap.entries()).map(
+      ([userId, info]) => ({
+        userId,
+        username: info.username,
+        status: userStatus.get(userId) || "online",
+      })
+    );
+    io.to(`server:${serverId}`).emit("presence:update", { serverId, members });
   }
 });
 

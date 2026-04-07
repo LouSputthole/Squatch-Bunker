@@ -30,9 +30,17 @@ interface MemberListProps {
   currentUserId?: string;
   currentUserRole?: string;
   onlineMemberIds: Set<string>;
+  memberStatuses?: Map<string, string>;
 }
 
-export default function MemberList({ serverId, currentUserId, currentUserRole, onlineMemberIds }: MemberListProps) {
+const STATUS_COLORS: Record<string, string> = {
+  online: "bg-green-500",
+  idle: "bg-yellow-500",
+  dnd: "bg-red-500",
+  invisible: "bg-gray-500",
+};
+
+export default function MemberList({ serverId, currentUserId, currentUserRole, onlineMemberIds, memberStatuses }: MemberListProps) {
   const [members, setMembers] = useState<Member[]>([]);
   const [inviteCode, setInviteCode] = useState("");
   const [copied, setCopied] = useState(false);
@@ -115,7 +123,11 @@ export default function MemberList({ serverId, currentUserId, currentUserRole, o
           className={online ? "bg-[var(--accent-2)] text-[var(--text)]" : "bg-[var(--panel-2)] text-[var(--muted)]"}
         />
         <div className="flex items-center gap-1.5 min-w-0">
-          <div className={`w-2 h-2 rounded-full shrink-0 ${online ? "bg-green-500" : "bg-[var(--muted)]"}`} />
+          <div className={`w-2 h-2 rounded-full shrink-0 ${
+            online
+              ? (STATUS_COLORS[memberStatuses?.get(m.id) || "online"] || "bg-green-500")
+              : "bg-[var(--muted)]"
+          }`} />
           <span
             className={`text-sm truncate ${online ? "text-[var(--text)]" : "text-[var(--muted)]"}`}
             style={roleColor ? { color: roleColor } : undefined}

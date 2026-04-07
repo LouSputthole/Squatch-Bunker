@@ -47,6 +47,7 @@ function ChatPageInner() {
 
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [statusMenuOpen, setStatusMenuOpen] = useState(false);
 
   useKeyboardShortcuts({
     activeVoiceChannel: voice.activeVoiceChannel,
@@ -203,6 +204,7 @@ function ChatPageInner() {
         <MemberList
           serverId={srv.activeServer.id}
           onlineMemberIds={presence.onlineMembers}
+          memberStatuses={presence.memberStatuses}
           currentUserId={auth.user?.id}
           currentUserRole={presence.userRole}
         />
@@ -237,12 +239,43 @@ function ChatPageInner() {
       <div className="absolute bottom-0 left-[72px] w-60 h-12 bg-[var(--bg)] border-t border-r border-[var(--accent-2)]/30 flex items-center px-3 justify-between z-10">
         <div className="flex items-center gap-2 min-w-0">
           {auth.user && (
-            <Avatar
-              username={auth.user.username}
-              avatarUrl={auth.user.avatar}
-              size={28}
-              className="bg-[var(--accent-2)] text-[var(--text)]"
-            />
+            <div className="relative cursor-pointer" onClick={() => setStatusMenuOpen((p) => !p)}>
+              <Avatar
+                username={auth.user.username}
+                avatarUrl={auth.user.avatar}
+                size={28}
+                className="bg-[var(--accent-2)] text-[var(--text)]"
+              />
+              <div
+                className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-[var(--bg)] ${
+                  presence.myStatus === "online" ? "bg-green-500" :
+                  presence.myStatus === "idle" ? "bg-yellow-500" :
+                  presence.myStatus === "dnd" ? "bg-red-500" :
+                  "bg-gray-500"
+                }`}
+              />
+              {statusMenuOpen && (
+                <div className="absolute bottom-full left-0 mb-2 bg-[var(--panel)] border border-[var(--accent-2)]/30 rounded-lg shadow-xl py-1 w-36 z-50">
+                  {([
+                    ["online", "Online", "bg-green-500"],
+                    ["idle", "Idle", "bg-yellow-500"],
+                    ["dnd", "Do Not Disturb", "bg-red-500"],
+                    ["invisible", "Invisible", "bg-gray-500"],
+                  ] as const).map(([status, label, color]) => (
+                    <button
+                      key={status}
+                      onClick={(e) => { e.stopPropagation(); presence.changeStatus(status); setStatusMenuOpen(false); }}
+                      className={`w-full px-3 py-1.5 text-left text-sm flex items-center gap-2 hover:bg-[var(--accent-2)]/20 ${
+                        presence.myStatus === status ? "text-[var(--text)]" : "text-[var(--muted)]"
+                      }`}
+                    >
+                      <div className={`w-2.5 h-2.5 rounded-full ${color}`} />
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
           <span className="text-sm text-[var(--text)] truncate">
             {auth.user ? displayName(auth.user.username) : ""}

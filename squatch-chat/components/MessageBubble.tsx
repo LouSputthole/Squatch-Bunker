@@ -6,6 +6,60 @@ import Avatar from "@/components/Avatar";
 
 const QUICK_EMOJIS = ["👍", "❤️", "😂", "🔥", "👀", "🎉"];
 
+// URL regex — matches http(s) links
+const URL_REGEX = /https?:\/\/[^\s<]+[^\s<.,;:!?'")\]]/g;
+// Mention regex — matches @username
+const MENTION_REGEX = /@(\w+(?:#[a-f0-9]+)?)/g;
+
+function renderContent(text: string) {
+  // Split text into segments: plain text, URLs, mentions
+  const parts: { type: "text" | "url" | "mention"; value: string }[] = [];
+  const combined = new RegExp(`(${URL_REGEX.source})|(${MENTION_REGEX.source})`, "g");
+  let lastIndex = 0;
+  let match;
+
+  while ((match = combined.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push({ type: "text", value: text.slice(lastIndex, match.index) });
+    }
+    if (match[1]) {
+      parts.push({ type: "url", value: match[1] });
+    } else if (match[3]) {
+      parts.push({ type: "mention", value: match[3] });
+    }
+    lastIndex = match.index + match[0].length;
+  }
+  if (lastIndex < text.length) {
+    parts.push({ type: "text", value: text.slice(lastIndex) });
+  }
+
+  if (parts.length === 0) return text;
+
+  return parts.map((part, i) => {
+    if (part.type === "url") {
+      return (
+        <a
+          key={i}
+          href={part.value}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-blue-400 hover:underline break-all"
+        >
+          {part.value}
+        </a>
+      );
+    }
+    if (part.type === "mention") {
+      return (
+        <span key={i} className="bg-blue-500/20 text-blue-300 rounded px-1 font-medium">
+          @{part.value}
+        </span>
+      );
+    }
+    return <span key={i}>{part.value}</span>;
+  });
+}
+
 interface ReactionGroup {
   count: number;
   users: string[];
@@ -110,7 +164,7 @@ export default function MessageBubble({ message, isOwn, currentUserId, onEdit, o
         ) : (
           <>
             {message.content && (
-              <p className="text-[var(--text)] text-sm break-words">{message.content}</p>
+              <p className="text-[var(--text)] text-sm break-words">{renderContent(message.content)}</p>
             )}
             {message.attachmentUrl && (
               <Attachment url={message.attachmentUrl} name={message.attachmentName} />

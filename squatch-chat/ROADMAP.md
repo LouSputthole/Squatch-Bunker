@@ -28,10 +28,10 @@
 - [ ] Room model enhancements: member capacity, permissions, type variants (stage, private)
 - [x] Speaking indicator (voice activity detection)
 - [ ] Streaming/video presence states
-- [ ] Session lifecycle: reconnect after drop, server-side stale session cleanup
-- [ ] Heartbeats to detect disconnects (beyond Socket.IO built-in)
+- [x] Session lifecycle: reconnect after drop, server-side stale session cleanup
+- [x] Heartbeats to detect disconnects (15s interval, 45s timeout)
 - [ ] Join target: under 1-2 seconds
-- [ ] Dropped clients disappear after timeout
+- [x] Dropped clients disappear after timeout (heartbeat-based)
 - [ ] Reconnect returns to prior room
 
 ### 2. Real-Time Voice Transport [~]
@@ -66,9 +66,9 @@
 - [ ] Return to previous room after reconnect
 - [ ] Race condition handling: double join, join while reconnecting, fast room switching
 - [ ] Join/leave state machine (formal)
-- [ ] Reconnecting state in UI
+- [x] Reconnecting state in UI
 - [ ] Preserve room context while app minimized
-- [ ] Prevent user in two voice rooms at once (server-side enforcement)
+- [x] Prevent user in two voice rooms at once (server-side enforcement)
 
 ### 4. Audio Controls [~]
 
@@ -166,8 +166,8 @@
 - [x] Mute/deafen indicators per participant
 
 **Still needed:**
-- [ ] Presence statuses: online, idle, DND, invisible, in voice, streaming
-- [ ] Speaking indicator
+- [x] Presence statuses: online, idle, DND, invisible (with auto-idle after 5min)
+- [x] Speaking indicator
 - [ ] Fine-grained notification settings
 - [ ] Friends online indicator
 - [ ] Presence in server/channel list
@@ -191,7 +191,7 @@
 - [ ] Message persistence
 - [x] Reactions
 - [x] Attachments (file/image uploads)
-- [ ] Mentions, link previews
+- [x] Mentions (@username highlighting), clickable link rendering
 - [ ] Split-pane or tabbed UI
 - [ ] Unread indicators inside voice room
 
