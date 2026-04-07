@@ -13,7 +13,8 @@ interface SettingsModalProps {
 }
 
 export default function SettingsModal({ open, onClose, username, currentAvatar, onAvatarChange, onInputSensitivityChange }: SettingsModalProps) {
-  const [tab, setTab] = useState<"audio" | "account">("audio");
+  const [tab, setTab] = useState<"audio" | "account" | "appearance">("audio");
+  const [theme, setTheme] = useState<"dark" | "light">("dark");
   const [inputDevices, setInputDevices] = useState<MediaDeviceInfo[]>([]);
   const [outputDevices, setOutputDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedInput, setSelectedInput] = useState<string>("");
@@ -29,9 +30,19 @@ export default function SettingsModal({ open, onClose, username, currentAvatar, 
   const animFrameRef = useRef<number | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
 
+  function applyTheme(t: "dark" | "light") {
+    document.documentElement.setAttribute("data-theme", t);
+    localStorage.setItem("campfire-theme", t);
+    setTheme(t);
+  }
+
   // Load saved settings
   useEffect(() => {
     if (!open) return;
+    // Load theme
+    const savedTheme = localStorage.getItem("campfire-theme");
+    if (savedTheme === "light" || savedTheme === "dark") setTheme(savedTheme);
+
     const saved = localStorage.getItem("campfire-audio-settings");
     if (saved) {
       try {
@@ -182,26 +193,19 @@ export default function SettingsModal({ open, onClose, username, currentAvatar, 
 
         {/* Tabs */}
         <div className="flex border-b border-[var(--accent-2)]/30">
-          <button
-            onClick={() => setTab("audio")}
-            className={`px-6 py-2 text-sm font-semibold transition-colors ${
-              tab === "audio"
-                ? "text-[var(--accent)] border-b-2 border-[var(--accent)]"
-                : "text-[var(--muted)] hover:text-[var(--text)]"
-            }`}
-          >
-            Audio
-          </button>
-          <button
-            onClick={() => setTab("account")}
-            className={`px-6 py-2 text-sm font-semibold transition-colors ${
-              tab === "account"
-                ? "text-[var(--accent)] border-b-2 border-[var(--accent)]"
-                : "text-[var(--muted)] hover:text-[var(--text)]"
-            }`}
-          >
-            Account
-          </button>
+          {(["audio", "account", "appearance"] as const).map((t) => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={`px-5 py-2 text-sm font-semibold transition-colors capitalize ${
+                tab === t
+                  ? "text-[var(--accent)] border-b-2 border-[var(--accent)]"
+                  : "text-[var(--muted)] hover:text-[var(--text)]"
+              }`}
+            >
+              {t}
+            </button>
+          ))}
         </div>
 
         {/* Content */}
@@ -353,6 +357,34 @@ export default function SettingsModal({ open, onClose, username, currentAvatar, 
               currentAvatar={currentAvatar}
               onAvatarChange={onAvatarChange}
             />
+          )}
+
+          {tab === "appearance" && (
+            <div className="space-y-6">
+              <div>
+                <label className="block text-sm font-semibold text-[var(--text)] mb-3">
+                  Theme
+                </label>
+                <div className="flex gap-3">
+                  {(["dark", "light"] as const).map((t) => (
+                    <button
+                      key={t}
+                      onClick={() => applyTheme(t)}
+                      className={`flex-1 py-3 rounded-lg border-2 text-sm font-semibold capitalize transition-all ${
+                        theme === t
+                          ? "border-[var(--accent)] text-[var(--accent)] bg-[var(--accent)]/10"
+                          : "border-[var(--accent-2)]/30 text-[var(--muted)] hover:border-[var(--accent-2)]"
+                      }`}
+                    >
+                      {t === "dark" ? "🌲 Dark" : "☀️ Light"}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs text-[var(--muted)] mt-2">
+                  Preference is saved and applied instantly.
+                </p>
+              </div>
+            </div>
           )}
         </div>
       </div>
