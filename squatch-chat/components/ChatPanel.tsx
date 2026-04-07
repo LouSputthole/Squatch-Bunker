@@ -23,6 +23,7 @@ interface Message {
   content: string;
   attachmentUrl?: string | null;
   attachmentName?: string | null;
+  pinned?: boolean;
   createdAt: string;
   updatedAt?: string;
   author: { id: string; username: string; avatar?: string | null };
@@ -37,6 +38,7 @@ interface ChatPanelProps {
   currentUserId: string;
   currentUsername: string;
   currentAvatar?: string | null;
+  canPin?: boolean;
 }
 
 export default function ChatPanel({
@@ -45,6 +47,7 @@ export default function ChatPanel({
   currentUserId,
   currentUsername,
   currentAvatar,
+  canPin,
 }: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState("");
@@ -52,6 +55,7 @@ export default function ChatPanel({
   const [typingUsers, setTypingUsers] = useState<Map<string, string>>(new Map());
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
   const [firstUnreadId, setFirstUnreadId] = useState<string | null>(null);
+  const [showPinned, setShowPinned] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messageRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const prevChannelRef = useRef<string | null>(null);
@@ -328,6 +332,19 @@ export default function ChatPanel({
     }
   }
 
+  async function handlePin(messageId: string, pinned: boolean) {
+    const res = await fetch(`/api/messages/${messageId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pinned }),
+    });
+    if (res.ok) {
+      setMessages((prev) =>
+        prev.map((m) => (m.id === messageId ? { ...m, pinned } : m))
+      );
+    }
+  }
+
   async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -388,10 +405,34 @@ export default function ChatPanel({
 
   return (
     <div className="flex-1 flex flex-col bg-[var(--panel-2)]">
-      <div className="h-12 px-4 flex items-center border-b border-[var(--accent-2)]/30 bg-[var(--panel-2)] shrink-0">
-        <span className="text-[var(--accent-2)] mr-1">#</span>
-        <h3 className="font-bold text-[var(--text)]">{channelName}</h3>
+      <div className="h-12 px-4 flex items-center border-b border-[var(--accent-2)]/30 bg-[var(--panel-2)] shrink-0 justify-between">
+        <div className="flex items-center gap-1">
+          <span className="text-[var(--accent-2)]">#</span>
+          <h3 className="font-bold text-[var(--text)]">{channelName}</h3>
+        </div>
+        {messages.some((m) => m.pinned) && (
+          <button
+            onClick={() => setShowPinned((p) => !p)}
+            className={`text-xs px-2 py-1 rounded transition-colors ${showPinned ? "bg-yellow-500/20 text-yellow-400" : "text-[var(--muted)] hover:text-yellow-400"}`}
+            title="Pinned messages"
+          >
+            📌 {messages.filter((m) => m.pinned).length}
+          </button>
+        )}
       </div>
+
+      {/* Pinned messages panel */}
+      {showPinned && (
+        <div className="border-b border-[var(--accent-2)]/30 bg-[var(--panel)] max-h-48 overflow-y-auto">
+          <div className="px-4 py-2 text-xs font-semibold text-yellow-400 uppercase tracking-wide">Pinned Messages</div>
+          {messages.filter((m) => m.pinned).map((msg) => (
+            <div key={msg.id} className="px-4 py-1.5 border-t border-[var(--accent-2)]/10 hover:bg-[var(--panel-2)]/50">
+              <span className="text-xs font-medium text-[var(--accent-2)] mr-2">{msg.author.username}</span>
+              <span className="text-xs text-[var(--text)] break-words">{msg.content || "[attachment]"}</span>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="flex-1 overflow-y-auto px-4 py-2">
         {loading ? (
@@ -422,11 +463,13 @@ export default function ChatPanel({
                 message={msg}
                 isOwn={msg.author.id === currentUserId}
                 currentUserId={currentUserId}
+                canPin={canPin}
                 onEdit={handleEdit}
                 onDelete={handleDelete}
                 onReact={handleReact}
                 onReply={setReplyingTo}
                 onScrollToMessage={scrollToMessage}
+                onPin={handlePin}
               />
             </div>
           ))

@@ -249,6 +249,7 @@ interface MessageBubbleProps {
     content: string;
     attachmentUrl?: string | null;
     attachmentName?: string | null;
+    pinned?: boolean;
     createdAt: string;
     updatedAt?: string;
     author: { id: string; username: string; avatar?: string | null };
@@ -257,14 +258,16 @@ interface MessageBubbleProps {
   };
   isOwn: boolean;
   currentUserId?: string;
+  canPin?: boolean;
   onEdit?: (messageId: string, newContent: string) => void;
   onDelete?: (messageId: string) => void;
   onReact?: (messageId: string, emoji: string) => void;
   onReply?: (message: MessageBubbleProps["message"]) => void;
   onScrollToMessage?: (messageId: string) => void;
+  onPin?: (messageId: string, pinned: boolean) => void;
 }
 
-export default function MessageBubble({ message, isOwn, currentUserId, onEdit, onDelete, onReact, onReply, onScrollToMessage }: MessageBubbleProps) {
+export default function MessageBubble({ message, isOwn, currentUserId, canPin, onEdit, onDelete, onReact, onReply, onScrollToMessage, onPin }: MessageBubbleProps) {
   const [editing, setEditing] = useState(false);
   const [editContent, setEditContent] = useState(message.content);
   const [showActions, setShowActions] = useState(false);
@@ -414,6 +417,11 @@ export default function MessageBubble({ message, isOwn, currentUserId, onEdit, o
         )}
       </div>
 
+      {/* Pinned indicator */}
+      {message.pinned && (
+        <div className="absolute left-1 top-0 text-yellow-400 text-xs px-1 py-0.5 opacity-70" title="Pinned message">📌</div>
+      )}
+
       {/* Action buttons — show on hover */}
       {showActions && !editing && (
         <div className="absolute right-1 top-0 flex gap-0.5 bg-[var(--panel)] border border-[var(--accent-2)]/30 rounded px-0.5 py-0.5 shadow-lg z-10">
@@ -431,6 +439,15 @@ export default function MessageBubble({ message, isOwn, currentUserId, onEdit, o
           >
             ↩
           </button>
+          {canPin && (
+            <button
+              onClick={() => onPin?.(message.id, !message.pinned)}
+              className={`text-xs px-1.5 py-0.5 ${message.pinned ? "text-yellow-400 hover:text-[var(--muted)]" : "text-[var(--muted)] hover:text-yellow-400"}`}
+              title={message.pinned ? "Unpin" : "Pin"}
+            >
+              📌
+            </button>
+          )}
           {isOwn && (
             <>
               <button

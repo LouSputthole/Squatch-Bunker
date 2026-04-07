@@ -11,36 +11,57 @@ export async function PATCH(
   }
 
   const { messageId } = await params;
-  const { content } = await request.json();
-
-  if (!content || !content.trim()) {
-    return NextResponse.json({ error: "Content is required" }, { status: 400 });
-  }
+  const body = await request.json();
 
   try {
     const { prisma } = await import("@/lib/db");
 
     const message = await prisma.message.findUnique({
       where: { id: messageId },
-      select: { authorId: true },
+      select: {
+        authorId: true,
+        channelId: true,
+        channel: { select: { serverId: true, server: { select: { ownerId: true } } } },
+      },
     });
 
     if (!message) {
       return NextResponse.json({ error: "Message not found" }, { status: 404 });
     }
 
+    // Handle pin toggle — allowed for server owner, admin, and mod
+    if ("pinned" in body) {
+      const membership = await prisma.serverMember.findUnique({
+        where: { serverId_userId: { serverId: message.channel.serverId, userId: session.userId } },
+      });
+      const canPin =
+        message.channel.server.ownerId === session.userId ||
+        membership?.role === "admin" ||
+        membership?.role === "mod";
+      if (!canPin) {
+        return NextResponse.json({ error: "No permission to pin" }, { status: 403 });
+      }
+      const updated = await prisma.message.update({
+        where: { id: messageId },
+        data: { pinned: !!body.pinned },
+        include: { author: { select: { id: true, username: true, avatar: true } } },
+      });
+      return NextResponse.json({ message: updated });
+    }
+
+    // Handle content edit — author only
+    const { content } = body;
+    if (!content || !content.trim()) {
+      return NextResponse.json({ error: "Content is required" }, { status: 400 });
+    }
     if (message.authorId !== session.userId) {
       return NextResponse.json({ error: "Not your message" }, { status: 403 });
     }
-
     const updated = await prisma.message.update({
       where: { id: messageId },
       data: { content: content.trim() },
-      include: {
-        author: { select: { id: true, username: true, avatar: true } },
-      },
+      include: { author: { select: { id: true, username: true, avatar: true } } },
     });
-
     return NextResponse.json({ message: updated });
   } catch (err) {
     console.error("[Campfire] Failed to edit message:", err);

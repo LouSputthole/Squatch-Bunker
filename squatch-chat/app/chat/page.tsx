@@ -209,6 +209,7 @@ function ChatPageInner() {
           currentUserId={auth.user.id}
           currentUsername={auth.user.username}
           currentAvatar={auth.user.avatar}
+          canPin={presence.userRole === "owner" || presence.userRole === "admin" || presence.userRole === "mod"}
         />
       ) : (
         <div className="flex-1 flex items-center justify-center bg-[var(--panel-2)] text-[var(--muted)]">
