@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 
 interface Server {
   id: string;
   name: string;
+  icon?: string | null;
   channels: { id: string; name: string }[];
   _count: { members: number };
 }
@@ -29,6 +30,9 @@ export default function ServerList({
   const [joinCode, setJoinCode] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [iconUploading, setIconUploading] = useState<string | null>(null);
+  const iconInputRef = useRef<HTMLInputElement>(null);
+  const iconTargetRef = useRef<string | null>(null);
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -93,8 +97,39 @@ export default function ServerList({
     }
   }
 
+  async function handleIconChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file || !iconTargetRef.current) return;
+    if (iconInputRef.current) iconInputRef.current.value = "";
+    const serverId = iconTargetRef.current;
+    setIconUploading(serverId);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const uploadRes = await fetch("/api/upload", { method: "POST", body: formData });
+      if (!uploadRes.ok) return;
+      const { url } = await uploadRes.json();
+      await fetch(`/api/servers/${serverId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ icon: url }),
+      });
+      // Reload page to reflect new icon
+      window.location.reload();
+    } finally {
+      setIconUploading(null);
+    }
+  }
+
   return (
     <>
+      <input
+        ref={iconInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={handleIconChange}
+      />
       <div className="w-[72px] bg-[var(--bg)] flex flex-col items-center py-3 gap-2 border-r border-[var(--accent-2)]/30 shrink-0">
         {/* Campfire logo */}
         <img src="/campfire-logo.png" alt="Campfire" className="w-10 h-10 mb-1 opacity-90" title="Campfire" />
@@ -102,6 +137,7 @@ export default function ServerList({
 
         {servers.map((server) => {
           const isActive = activeServerId === server.id;
+          const isUploading = iconUploading === server.id;
           return (
             <div key={server.id} className="relative flex items-center">
               {isActive && (
@@ -109,14 +145,26 @@ export default function ServerList({
               )}
               <button
                 onClick={() => onServerSelect(server)}
-                className={`w-12 h-12 flex items-center justify-center text-lg font-bold text-white transition-all duration-200 ${
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  iconTargetRef.current = server.id;
+                  iconInputRef.current?.click();
+                }}
+                disabled={isUploading}
+                className={`w-12 h-12 flex items-center justify-center text-lg font-bold text-white transition-all duration-200 overflow-hidden ${
                   isActive
                     ? "bg-[var(--accent-2)] rounded-[16px]"
                     : "bg-[var(--panel-2)] rounded-[24px] hover:rounded-[16px] hover:bg-[var(--accent-2)]"
                 }`}
-                title={server.name}
+                title={`${server.name}${isUploading ? " (uploading...)" : "\n(right-click to change icon)"}`}
               >
-                {server.name[0].toUpperCase()}
+                {isUploading ? (
+                  <span className="text-xs opacity-60">...</span>
+                ) : server.icon ? (
+                  <img src={server.icon} alt={server.name} className="w-full h-full object-cover" />
+                ) : (
+                  server.name[0].toUpperCase()
+                )}
               </button>
             </div>
           );

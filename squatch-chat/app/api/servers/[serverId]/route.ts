@@ -10,7 +10,7 @@ export async function PATCH(
 
   const { serverId } = await params;
   const body = await request.json();
-  const { name, regenerateInvite } = body;
+  const { name, regenerateInvite, icon } = body;
 
   try {
     const { prisma } = await import("@/lib/db");
@@ -21,15 +21,20 @@ export async function PATCH(
       return NextResponse.json({ error: "Only the server owner can do this" }, { status: 403 });
     }
 
-    const updates: { name?: string; inviteCode?: string } = {};
+    const updates: { name?: string; inviteCode?: string; icon?: string | null } = {};
     if (name && name.trim()) updates.name = name.trim();
     if (regenerateInvite) updates.inviteCode = crypto.randomUUID();
+    if (typeof icon === "string") updates.icon = icon || null;
 
     if (Object.keys(updates).length === 0) {
       return NextResponse.json({ error: "Nothing to update" }, { status: 400 });
     }
 
-    const updated = await prisma.server.update({ where: { id: serverId }, data: updates });
+    const updated = await prisma.server.update({
+      where: { id: serverId },
+      data: updates,
+      include: { channels: true, _count: { select: { members: true } } },
+    });
     return NextResponse.json({ server: updated });
   } catch (err) {
     console.error("[Campfire] Failed to update server:", err);
@@ -55,7 +60,6 @@ export async function DELETE(
       return NextResponse.json({ error: "Only the server owner can do this" }, { status: 403 });
     }
 
-    // Cascade-delete manually (schema has no onDelete:Cascade on server relations)
     await prisma.$transaction(async (tx) => {
       const channels = await tx.channel.findMany({
         where: { serverId },
