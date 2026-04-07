@@ -22,13 +22,14 @@ export interface ProfileCardProps {
   avatar?: string | null;
   role?: string;
   joinedAt?: string;
+  statusMessage?: string | null;
   anchorX: number;
   anchorY: number;
   onClose: () => void;
   onMessageUser?: (userId: string) => void;
 }
 
-export default function ProfileCard({ username, userId, avatar, role, joinedAt, anchorX, anchorY, onClose, onMessageUser }: ProfileCardProps) {
+export default function ProfileCard({ username, userId, avatar, role, joinedAt, statusMessage, anchorX, anchorY, onClose, onMessageUser }: ProfileCardProps) {
   const ref = useRef<HTMLDivElement>(null);
   const [friendStatus, setFriendStatus] = useState<string | null>(null);
 
@@ -82,6 +83,11 @@ export default function ProfileCard({ username, userId, avatar, role, joinedAt, 
             {displayName(username)}
           </p>
           <p className="text-xs text-[var(--muted)] truncate">{username}</p>
+          {statusMessage && (
+            <p className="text-xs italic text-[var(--muted)] mt-0.5 truncate" title={statusMessage}>
+              {statusMessage}
+            </p>
+          )}
           {roleLabel && (
             <span
               className="inline-block mt-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded"

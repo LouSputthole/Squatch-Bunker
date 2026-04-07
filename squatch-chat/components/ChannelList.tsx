@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { getSocket } from "@/lib/socket";
 import { displayName } from "@/lib/utils";
 import { useMutedChannels } from "@/hooks/useMutedChannels";
@@ -114,7 +114,16 @@ export default function ChannelList({
   const [settingsError, setSettingsError] = useState("");
   const [settingsLoading, setSettingsLoading] = useState(false);
   const [newCategory, setNewCategory] = useState("");
-  const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set());
+  const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(() => {
+    if (typeof window === "undefined") return new Set<string>();
+    try {
+      const saved = JSON.parse(localStorage.getItem("collapsed-categories") || "[]");
+      return new Set<string>(Array.isArray(saved) ? saved : []);
+    } catch {
+      return new Set<string>();
+    }
+  });
+  const [dragOverCategory, setDragOverCategory] = useState<string | null>(null);
   const [localVoiceParticipants, setLocalVoiceParticipants] = useState<Map<string, VoiceParticipant[]>>(
     voiceParticipants || new Map()
   );
@@ -227,29 +236,68 @@ export default function ChannelList({
     setCollapsedCategories((prev) => {
       const next = new Set(prev);
       if (next.has(cat)) next.delete(cat); else next.add(cat);
+      if (typeof window !== "undefined") {
+        localStorage.setItem("collapsed-categories", JSON.stringify(Array.from(next)));
+      }
       return next;
+    });
+  }
+
+  async function handleCategoryRename(cat: string, channels: Channel[]) {
+    if (currentUserRole !== "owner") return;
+    const newCat = window.prompt(`Rename category "${cat === "General" ? "General" : cat}" to:`, cat === "General" ? "" : cat);
+    if (newCat === null) return; // cancelled
+    const normalizedNew = newCat.trim() || null;
+    await Promise.all(
+      channels.map((ch) =>
+        fetch(`/api/channels/${ch.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ category: normalizedNew }),
+        })
+      )
+    );
+    onChannelCreated(channels[0]); // trigger a refresh via parent
+  }
+
+  async function handleDropOnCategory(targetCat: string) {
+    if (!draggingId) return;
+    const ch = localChannels.find((c) => c.id === draggingId);
+    if (!ch) return;
+    const newCat = targetCat === "General" ? null : targetCat;
+    setLocalChannels((prev) =>
+      prev.map((c) => (c.id === draggingId ? { ...c, category: newCat } : c))
+    );
+    setDraggingId(null);
+    setDragOverCategory(null);
+    await fetch(`/api/channels/${draggingId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ category: newCat }),
     });
   }
 
   const isAdminOrOwner = currentUserRole === "owner" || currentUserRole === "admin";
 
   const sortedLocalChannels = [...localChannels].sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
-  const textChannels = sortedLocalChannels.filter((c) => !c.type || c.type === "text");
   const voiceChannels = sortedLocalChannels.filter((c) => c.type === "voice");
 
-  // Group text channels by category
-  const categoryMap = new Map<string, Channel[]>();
-  for (const ch of textChannels) {
-    const cat = ch.category || "";
-    if (!categoryMap.has(cat)) categoryMap.set(cat, []);
-    categoryMap.get(cat)!.push(ch);
-  }
-  // Sort: uncategorized ("") last
-  const sortedCategories = Array.from(categoryMap.keys()).sort((a, b) => {
-    if (a === "") return 1;
-    if (b === "") return -1;
-    return a.localeCompare(b);
-  });
+  // Group text channels by category using useMemo
+  const { categoryMap, sortedCategories } = useMemo(() => {
+    const textChannels = sortedLocalChannels.filter((c) => !c.type || c.type === "text");
+    const map = new Map<string, Channel[]>();
+    for (const ch of textChannels) {
+      const cat = ch.category && ch.category.trim() ? ch.category.trim() : "General";
+      if (!map.has(cat)) map.set(cat, []);
+      map.get(cat)!.push(ch);
+    }
+    const cats = Array.from(map.keys()).sort((a, b) => {
+      if (a === "General") return -1;
+      if (b === "General") return 1;
+      return a.localeCompare(b);
+    });
+    return { categoryMap: map, sortedCategories: cats };
+  }, [localChannels]);
 
   async function handleChannelDrop(targetChannelId: string) {
     if (!draggingId || draggingId === targetChannelId) return;
@@ -354,28 +402,50 @@ export default function ChannelList({
         {/* Text Channels grouped by category */}
         {sortedCategories.map((cat) => {
           const catChannels = categoryMap.get(cat)!;
-          const label = cat || "Text Channels";
           const isCollapsed = collapsedCategories.has(cat);
+          const isDragTarget = dragOverCategory === cat;
           return (
             <div key={cat}>
-              <div className="px-2 mb-1 flex items-center justify-between mt-1">
+              {/* Category header */}
+              <div
+                className={`px-2 mb-0.5 flex items-center justify-between mt-2 rounded ${isDragTarget ? "border border-[var(--accent-2)] bg-[var(--panel-2)]/40" : "border border-transparent"}`}
+                onDragOver={isAdminOrOwner ? (e) => { e.preventDefault(); setDragOverCategory(cat); } : undefined}
+                onDragLeave={isAdminOrOwner ? () => setDragOverCategory(null) : undefined}
+                onDrop={isAdminOrOwner ? () => handleDropOnCategory(cat) : undefined}
+              >
                 <button
                   onClick={() => toggleCategory(cat)}
-                  className="flex items-center gap-1 text-xs font-semibold text-[var(--muted)] uppercase tracking-wide hover:text-[var(--text)] transition-colors"
+                  onContextMenu={currentUserRole === "owner" ? (e) => { e.preventDefault(); handleCategoryRename(cat, catChannels); } : undefined}
+                  className="flex items-center gap-1 text-xs uppercase tracking-wide font-semibold text-[var(--muted)] hover:text-[var(--text)] transition-colors flex-1 min-w-0"
+                  title={currentUserRole === "owner" ? "Right-click to rename category" : undefined}
                 >
-                  <span className="text-[8px]">{isCollapsed ? "▶" : "▼"}</span>
-                  {label}
-                </button>
-                {cat === "" && (
-                  <button
-                    onClick={() => setCreating("text")}
-                    className="text-[var(--muted)] hover:text-[var(--text)] text-lg leading-none"
-                    title="Create Text Channel"
+                  {/* Chevron SVG rotates 90° when collapsed */}
+                  <svg
+                    width="10"
+                    height="10"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className={`shrink-0 transition-transform duration-150 ${isCollapsed ? "-rotate-90" : "rotate-0"}`}
                   >
-                    +
-                  </button>
-                )}
+                    <polyline points="6 9 12 15 18 9" />
+                  </svg>
+                  <span className="truncate">{cat}</span>
+                  <span className="ml-1 font-normal opacity-60">({catChannels.length})</span>
+                </button>
+                <button
+                  onClick={() => setCreating("text")}
+                  className="text-[var(--muted)] hover:text-[var(--text)] text-lg leading-none shrink-0 ml-1"
+                  title="Create Text Channel"
+                >
+                  +
+                </button>
               </div>
+
+              {/* Channels in this category */}
               {!isCollapsed && catChannels.map((channel) => {
                 const unread = unreadCounts?.get(channel.id) || 0;
                 const muted = isMuted(channel.id);
@@ -417,10 +487,10 @@ export default function ChannelList({
           );
         })}
 
-        {/* Add channel button (when no uncategorized section exists) */}
-        {!categoryMap.has("") && (
+        {/* Add channel button (when no text channels at all yet) */}
+        {sortedCategories.length === 0 && (
           <div className="px-2 mb-1 flex items-center justify-between mt-1">
-            <span className="text-xs font-semibold text-[var(--muted)] uppercase tracking-wide">Text Channels</span>
+            <span className="text-xs font-semibold text-[var(--muted)] uppercase tracking-wide">General</span>
             <button
               onClick={() => setCreating("text")}
               className="text-[var(--muted)] hover:text-[var(--text)] text-lg leading-none"

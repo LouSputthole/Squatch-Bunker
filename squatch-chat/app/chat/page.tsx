@@ -29,6 +29,8 @@ import { usePresence } from "@/hooks/usePresence";
 import { useVoice } from "@/hooks/useVoice";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useOfflineQueue } from "@/hooks/useOfflineQueue";
+import { useNotifications } from "@/hooks/useNotifications";
+import NotificationBell from "@/components/NotificationBell";
 
 import type { Channel } from "@/types/chat";
 
@@ -54,6 +56,9 @@ function ChatPageInner() {
   const presence = usePresence(srv.activeServer, auth.user);
   const voice = useVoice(srv.activeServer);
 
+  const { notify } = useNotifications();
+  const [notifications, setNotifications] = useState<Array<{id: string, title: string, body: string, timestamp: number, read: boolean}>>([]);
+
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
@@ -64,6 +69,15 @@ function ChatPageInner() {
   const [profileUserId, setProfileUserId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [mobileView, setMobileView] = useState<"channels" | "chat" | "members">("channels");
+  const [statusMessage, setStatusMessage] = useState("");
+
+  async function saveStatusMessage(msg: string) {
+    await fetch("/api/auth/status", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ statusMessage: msg }),
+    });
+  }
 
   useKeyboardShortcuts({
     activeVoiceChannel: voice.activeVoiceChannel,
@@ -76,6 +90,48 @@ function ChatPageInner() {
     toggleMute: voice.toggleMute,
     toggleDeafen: voice.toggleDeafen,
   });
+
+  // Notification socket listeners
+  useEffect(() => {
+    const { getSocket } = require("@/lib/socket");
+    const s = getSocket();
+
+    function pushNotification(title: string, body: string) {
+      setNotifications((prev) => {
+        const item = { id: Date.now().toString() + Math.random(), title, body, timestamp: Date.now(), read: false };
+        return [item, ...prev].slice(0, 10);
+      });
+    }
+
+    function onDmMessage(message: { content: string }) {
+      notify("New DM", message.content);
+      pushNotification("New DM", message.content);
+    }
+
+    function onFriendRequest() {
+      notify("Friend Request", "Someone sent you a friend request");
+      pushNotification("Friend Request", "Someone sent you a friend request");
+    }
+
+    s.on("dm:message", onDmMessage);
+    s.on("friend:request", onFriendRequest);
+
+    return () => {
+      s.off("dm:message", onDmMessage);
+      s.off("friend:request", onFriendRequest);
+    };
+  }, [notify]);
+
+  const handleMarkAllRead = useCallback(() => {
+    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+  }, []);
+
+  // Sync statusMessage from user once loaded
+  useEffect(() => {
+    if (auth.user?.statusMessage !== undefined) {
+      setStatusMessage(auth.user.statusMessage || "");
+    }
+  }, [auth.user?.statusMessage]);
 
   // Init: fetch user + servers, connect socket, restore URL selection
   useEffect(() => {
@@ -443,7 +499,7 @@ function ChatPageInner() {
                 }`}
               />
               {statusMenuOpen && (
-                <div className="absolute bottom-full left-0 mb-2 bg-[var(--panel)] border border-[var(--accent-2)]/30 rounded-lg shadow-xl py-1 w-36 z-50">
+                <div className="absolute bottom-full left-0 mb-2 bg-[var(--panel)] border border-[var(--accent-2)]/30 rounded-lg shadow-xl py-1 w-52 z-50" onClick={(e) => e.stopPropagation()}>
                   {([
                     ["online", "Online", "bg-green-500"],
                     ["idle", "Idle", "bg-yellow-500"],
@@ -461,6 +517,44 @@ function ChatPageInner() {
                       {label}
                     </button>
                   ))}
+                  <hr className="border-[var(--accent-2)]/20 my-1" />
+                  <div className="px-2 pb-2 space-y-1.5">
+                    <input
+                      type="text"
+                      value={statusMessage}
+                      maxLength={128}
+                      placeholder="What are you up to?"
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={(e) => setStatusMessage(e.target.value)}
+                      onBlur={() => saveStatusMessage(statusMessage)}
+                      className="w-full text-xs px-2 py-1.5 bg-[var(--panel-2)] text-[var(--text)] border border-[var(--accent-2)]/40 rounded focus:outline-none focus:border-[var(--accent)] placeholder:text-[var(--muted)]"
+                    />
+                    <div className="flex flex-wrap gap-1">
+                      {(["🎮 Gaming", "☕ AFK", "💼 Busy", "🎵 Music", "🔕 DND"] as const).map((preset) => (
+                        <button
+                          key={preset}
+                          onClick={(e) => { e.stopPropagation(); setStatusMessage(preset); saveStatusMessage(preset); }}
+                          className="text-[10px] px-1.5 py-0.5 bg-[var(--panel-2)] text-[var(--muted)] rounded hover:bg-[var(--accent-2)]/30 hover:text-[var(--text)] transition-colors"
+                        >
+                          {preset}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="flex gap-1">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setStatusMessage(""); saveStatusMessage(""); }}
+                        className="flex-1 text-[10px] px-2 py-1 bg-[var(--panel-2)] text-[var(--muted)] rounded hover:text-[var(--text)] transition-colors"
+                      >
+                        Clear
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); saveStatusMessage(statusMessage); setStatusMenuOpen(false); }}
+                        className="flex-1 text-[10px] px-2 py-1 bg-[var(--accent-2)]/30 text-[var(--text)] rounded hover:bg-[var(--accent-2)]/50 transition-colors"
+                      >
+                        Save
+                      </button>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
@@ -480,6 +574,7 @@ function ChatPageInner() {
             </svg>
           </button>
           <ShareLink />
+          <NotificationBell notifications={notifications} onMarkAllRead={handleMarkAllRead} />
           <AmbientSounds />
           <button
             onClick={() => setShortcutsOpen((p) => !p)}
