@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from "react";
 import { getSocket } from "@/lib/socket";
+import { sounds } from "@/lib/sounds";
 import { getRuntimeConfig } from "@/hooks/useRuntimeConfig";
 
 interface VoiceParticipant {
@@ -70,35 +71,6 @@ function getIceServers(): RTCConfiguration {
   return { iceServers: servers };
 }
 
-// Generate a short notification tone using Web Audio API
-function playNotificationSound(type: "join" | "leave") {
-  try {
-    const ctx = new AudioContext();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-
-    if (type === "join") {
-      osc.frequency.setValueAtTime(600, ctx.currentTime);
-      osc.frequency.setValueAtTime(800, ctx.currentTime + 0.1);
-      gain.gain.setValueAtTime(0.15, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
-      osc.start(ctx.currentTime);
-      osc.stop(ctx.currentTime + 0.25);
-    } else {
-      osc.frequency.setValueAtTime(500, ctx.currentTime);
-      osc.frequency.setValueAtTime(350, ctx.currentTime + 0.1);
-      gain.gain.setValueAtTime(0.15, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.2);
-      osc.start(ctx.currentTime);
-      osc.stop(ctx.currentTime + 0.2);
-    }
-    setTimeout(() => ctx.close(), 500);
-  } catch {
-    // Audio not available
-  }
-}
 
 function SettingsIcon() {
   return (
@@ -615,7 +587,7 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
         joinedChannelRef.current = channelId;
         setJoined(true);
         joinedRef.current = true;
-        playNotificationSound("join");
+        sounds.voiceJoin();
       } catch (err) {
         console.error("[Voice] Mic access failed:", err);
         alert("Could not access microphone. Check browser permissions.");
@@ -665,7 +637,7 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
     setDeafened(false);
     setParticipants([]);
     setSpeakingUsers(new Set());
-    playNotificationSound("leave");
+    sounds.voiceLeave();
     onDisconnect?.();
   }, [cleanupPeers, cleanupScreenPeers, stopVAD, onDisconnect]);
 
@@ -794,7 +766,7 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
 
     function handleUserJoined(data: { channelId: string; userId: string; socketId: string }) {
       if (data.channelId !== channelId || data.userId === currentUserId) return;
-      playNotificationSound("join");
+      sounds.voiceJoin();
       // If we're sharing screen, send it to the new peer
       if (screenStreamRef.current) {
         createScreenPeer(data.socketId, true);
@@ -803,7 +775,7 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
 
     function handleUserLeft(data: { channelId: string; socketId: string }) {
       if (data.channelId !== channelId) return;
-      playNotificationSound("leave");
+      sounds.voiceLeave();
       const pc = peersRef.current.get(data.socketId);
       if (pc) { pc.close(); peersRef.current.delete(data.socketId); }
       const audio = audioElementsRef.current.get(data.socketId);
