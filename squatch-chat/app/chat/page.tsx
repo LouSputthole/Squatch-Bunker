@@ -178,9 +178,11 @@ function ChatPageInner() {
         <ChatPanel
           channelId={ch.activeChannel.id}
           channelName={ch.activeChannel.name}
+          channelTopic={ch.activeChannel.topic}
           currentUserId={auth.user.id}
           currentUsername={auth.user.username}
           currentAvatar={auth.user.avatar}
+          canEditTopic={presence.userRole === "owner" || presence.userRole === "admin" || presence.userRole === "mod"}
         />
       ) : (
         <div className="flex-1 flex items-center justify-center bg-[var(--panel-2)] text-[var(--muted)]">

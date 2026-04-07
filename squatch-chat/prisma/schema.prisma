@@ -54,6 +54,7 @@ model Channel {
   name        String
   type        String   @default("text")
   description String?
+  topic       String?
   createdAt   DateTime @default(now())
 
   server   Server    @relation(fields: [serverId], references: [id])
