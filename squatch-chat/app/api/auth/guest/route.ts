@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
-import { createToken, setTokenCookie } from "@/lib/auth";
-import crypto from "crypto";
+import jwt from "jsonwebtoken";
+
+const JWT_SECRET = process.env.JWT_SECRET || "campfire-secret-change-me";
+const COOKIE_NAME = process.env.COOKIE_NAME || "squatch-token";
 
 export async function POST(request: Request) {
   try {
@@ -22,8 +24,8 @@ export async function POST(request: Request) {
       );
     }
 
-    // Generate a unique guest ID — no database needed
-    const guestId = crypto.randomBytes(4).toString("hex");
+    // Generate a unique guest ID
+    const guestId = Math.random().toString(36).slice(2, 10);
     const guestUsername = `${cleanUsername}#${guestId}`;
     const guestUserId = `guest-${crypto.randomUUID()}`;
 
@@ -31,10 +33,9 @@ export async function POST(request: Request) {
     let persistedUser = null;
     try {
       const { prisma } = await import("@/lib/db");
-      const { hashPassword } = await import("@/lib/auth");
+      const bcrypt = await import("bcryptjs");
       const guestEmail = `guest-${guestId}@campfire.local`;
-      const guestPassword = crypto.randomBytes(16).toString("hex");
-      const passwordHash = await hashPassword(guestPassword);
+      const passwordHash = await bcrypt.hash(crypto.randomUUID(), 10);
 
       persistedUser = await prisma.user.create({
         data: {
@@ -45,13 +46,17 @@ export async function POST(request: Request) {
           guestExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
         },
       });
-    } catch {
-      // Database not available — that's fine, guest still gets a session
-      console.log("[Campfire] Database not available, creating guest session without persistence");
+    } catch (dbErr) {
+      console.log("[Campfire] Guest DB fallback:", dbErr instanceof Error ? dbErr.message : dbErr);
     }
 
     const userId = persistedUser?.id || guestUserId;
-    const token = createToken({ userId, username: guestUsername });
+    const token = jwt.sign({ userId, username: guestUsername }, JWT_SECRET, { expiresIn: "7d" });
+
+    const isProduction = process.env.NODE_ENV === "production";
+    const secure = isProduction ? " Secure;" : "";
+    const sameSite = isProduction ? "None" : "Lax";
+    const cookieFlags = `Path=/; HttpOnly; SameSite=${sameSite};${secure} Max-Age=${60 * 60 * 24 * 7}`;
 
     const response = NextResponse.json(
       {
@@ -64,7 +69,7 @@ export async function POST(request: Request) {
       },
       { status: 201 }
     );
-    setTokenCookie(response, token);
+    response.headers.append("Set-Cookie", `${COOKIE_NAME}=${token}; ${cookieFlags}`);
     return response;
   } catch (err) {
     console.error("[Campfire] Guest auth error:", err);
