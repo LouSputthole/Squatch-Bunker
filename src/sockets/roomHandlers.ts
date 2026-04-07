@@ -2,6 +2,7 @@ import { Socket, Server as SocketServer } from 'socket.io';
 import { presenceService } from '../services/PresenceService';
 import { sessionRegistry } from '../services/SessionRegistry';
 import { roomService } from '../services/RoomService';
+import { chatService } from '../services/ChatService';
 
 export function registerRoomHandlers(io: SocketServer, socket: Socket): void {
   // join-room: { roomId, userId, username }
@@ -63,6 +64,12 @@ export function registerRoomHandlers(io: SocketServer, socket: Socket): void {
       // Send current room state back to the joining socket
       const members = presenceService.getRoomPresence(roomId);
       socket.emit('room:state', { roomId, members });
+
+      // Send chat history to the joining user
+      const history = chatService.getHistory(roomId);
+      if (history.length > 0) {
+        socket.emit('chat:history', { roomId, messages: history });
+      }
     }
   );
 

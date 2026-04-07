@@ -8,6 +8,7 @@ import roomsRouter from './routes/rooms';
 import usersRouter from './routes/users';
 import { registerRoomHandlers } from './sockets/roomHandlers';
 import { registerSignalingHandlers } from './sockets/signalingHandlers';
+import { registerChatHandlers } from './sockets/chatHandlers';
 import { presenceService } from './services/PresenceService';
 import { sessionRegistry } from './services/SessionRegistry';
 
@@ -66,6 +67,7 @@ io.on('connection', (socket) => {
 
   registerRoomHandlers(io, socket);
   registerSignalingHandlers(socket);
+  registerChatHandlers(io, socket);
 
   socket.on('disconnect', () => {
     console.log(`[socket] disconnected: ${socket.id}`);

@@ -16,6 +16,10 @@ const state = {
   muted: false,
   deafened: false,
   heartbeatIntervalId: null,
+  /** userId of the last person who sent a chat message (for grouping) */
+  lastChatSenderId: null,
+  /** timestamp of last chat message (for grouping within 5 min window) */
+  lastChatTimestamp: 0,
 };
 
 const voiceClient = new VoiceClient();
@@ -42,6 +46,9 @@ const sidebarAvatar   = $('sidebar-avatar');
 const sidebarUsername = $('sidebar-username');
 const connectionStatus = $('connection-status');
 const toastContainer  = $('toast-container');
+const chatMessages    = $('chat-messages');
+const chatInput       = $('chat-input');
+const chatSendBtn     = $('chat-send-btn');
 
 // ── Utilities ──────────────────────────────────────────────────────────────
 
@@ -211,6 +218,23 @@ function connectSocket() {
     voiceClient.handleIceCandidate(fromUserId, candidate);
   });
 
+  // ── In-room text chat ──
+
+  socket.on('chat:history', ({ roomId, messages }) => {
+    if (roomId !== state.currentRoomId) return;
+    clearChatPanel();
+    for (const msg of messages) {
+      appendChatMessage(msg);
+    }
+    scrollChatToBottom();
+  });
+
+  socket.on('chat:message', (msg) => {
+    if (msg.roomId !== state.currentRoomId) return;
+    appendChatMessage(msg);
+    scrollChatToBottom();
+  });
+
   // ── VAD callback ──
   voiceClient.onSpeakingChange = (speaking) => {
     if (!state.currentRoomId || state.muted) return;
@@ -317,6 +341,7 @@ async function joinRoom(roomId) {
   // Initialize voice (room:state event will give us the member list)
   // We pass empty array here; connectToPeer calls happen after room:state
   await voiceClient.joinRoom(roomId, state.userId, state.socket, []);
+  updateChatInputState();
 }
 
 function handleLocalLeave(emitEvent) {
@@ -334,6 +359,11 @@ function handleLocalLeave(emitEvent) {
   state.currentRoomId = null;
   state.activeRoomMembers.clear();
 
+  // Clear chat
+  clearChatPanel();
+  state.lastChatSenderId = null;
+  state.lastChatTimestamp = 0;
+
   // Reset mute/deafen state visually
   state.muted = false;
   state.deafened = false;
@@ -345,6 +375,7 @@ function handleLocalLeave(emitEvent) {
   emptyState.classList.remove('hidden');
   voiceRoomPanel.classList.add('hidden');
   renderChannelList();
+  updateChatInputState();
 }
 
 // ── Heartbeat ──────────────────────────────────────────────────────────────
@@ -498,6 +529,82 @@ function escapeHtml(str) {
     .replace(/"/g, '&quot;');
 }
 
+// ── Chat ───────────────────────────────────────────────────────────────────
+
+const GROUP_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
+
+function formatTime(ts) {
+  const d = new Date(ts);
+  const h = d.getHours();
+  const m = String(d.getMinutes()).padStart(2, '0');
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  return `${h % 12 || 12}:${m} ${ampm}`;
+}
+
+function clearChatPanel() {
+  chatMessages.innerHTML = '';
+  state.lastChatSenderId = null;
+  state.lastChatTimestamp = 0;
+}
+
+function appendChatMessage(msg) {
+  const isGrouped =
+    msg.userId === state.lastChatSenderId &&
+    msg.timestamp - state.lastChatTimestamp < GROUP_WINDOW_MS;
+
+  state.lastChatSenderId = msg.userId;
+  state.lastChatTimestamp = msg.timestamp;
+
+  const bg = avatarColor(msg.userId);
+  const ini = initials(msg.username);
+
+  const el = document.createElement('div');
+  el.className = 'chat-msg' + (isGrouped ? ' continued' : '');
+  el.dataset.msgId = msg.id;
+
+  el.innerHTML = `
+    <div class="chat-msg-avatar" style="background:${bg};">${ini}</div>
+    <div class="chat-msg-body">
+      <div class="chat-msg-meta">
+        <span class="chat-msg-author">${escapeHtml(msg.username)}</span>
+        <span class="chat-msg-time">${formatTime(msg.timestamp)}</span>
+      </div>
+      <div class="chat-msg-content">${escapeHtml(msg.content)}</div>
+    </div>
+  `;
+
+  chatMessages.appendChild(el);
+}
+
+function scrollChatToBottom() {
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+function sendChatMessage() {
+  if (!state.currentRoomId || !state.socket || !state.socket.connected) return;
+  const content = chatInput.value.trim();
+  if (!content) return;
+  state.socket.emit('chat:send', { roomId: state.currentRoomId, content });
+  chatInput.value = '';
+}
+
+chatSendBtn.addEventListener('click', sendChatMessage);
+
+chatInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendChatMessage();
+  }
+});
+
+// Disable chat input when not in a room
+function updateChatInputState() {
+  const active = !!state.currentRoomId;
+  chatInput.disabled = !active;
+  chatSendBtn.disabled = !active;
+  chatInput.placeholder = active ? 'Message the room…' : 'Join a channel to chat';
+}
+
 // ── Bootstrap ──────────────────────────────────────────────────────────────
 
 function onUserReady() {
@@ -509,6 +616,7 @@ function onUserReady() {
 // On page load
 (function init() {
   setConnectionStatus('Waiting…');
+  updateChatInputState();
   const session = checkExistingSession();
   if (session) {
     state.userId   = session.userId;
