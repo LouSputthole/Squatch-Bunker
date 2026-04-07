@@ -3,6 +3,7 @@
 import { useRef, useEffect, useState } from "react";
 import { displayName } from "@/lib/utils";
 import Avatar from "@/components/Avatar";
+import ConnectionQualityIcon from "@/components/ConnectionQualityIcon";
 
 interface Participant {
   userId: string;
@@ -12,7 +13,8 @@ interface Participant {
   speaking?: boolean;
   camera?: boolean;
   avatar?: string | null;
-  connectionQuality?: "good" | "fair" | "poor";
+  connectionQuality?: "good" | "fair" | "poor" | "unknown";
+  pingMs?: number;
 }
 
 function QualityDot({ quality }: { quality?: "good" | "fair" | "poor" }) {
@@ -259,7 +261,11 @@ export default function CircleView({ participants, currentUserId, onContextMenu 
                   {/* Status badges */}
                   {p.muted && <MicOffDot />}
                   {p.deafened && <DeafDot />}
-                  <QualityDot quality={p.connectionQuality} />
+                  {!isSelf && p.connectionQuality && (
+                    <div className="flex items-center justify-center mt-0.5">
+                      <ConnectionQualityIcon quality={p.connectionQuality} pingMs={p.pingMs} />
+                    </div>
+                  )}
 
                   {/* Camera indicator */}
                   {p.camera && (
