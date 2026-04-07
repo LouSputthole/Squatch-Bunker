@@ -45,7 +45,7 @@ const STATUS_COLORS: Record<string, string> = {
 
 function MoonIcon() {
   return (
-    <svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor" className="text-yellow-400 shrink-0">
+    <svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor" className="text-yellow-400 shrink-0" aria-hidden="true">
       <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
     </svg>
   );
@@ -137,8 +137,9 @@ export default function MemberList({ serverId, currentUserId, currentUserRole, o
     const isSelf = m.id === currentUserId;
 
     return (
-      <div
+      <li
         key={m.id}
+        role="listitem"
         className={`flex items-center gap-2 px-3 py-1 cursor-pointer hover:bg-[var(--panel-2)]/50 rounded ${online ? "" : "opacity-50"}`}
         onClick={(e) => setProfileCard({ member: m, x: e.clientX, y: e.clientY })}
         onContextMenu={(e) => {
@@ -147,6 +148,7 @@ export default function MemberList({ serverId, currentUserId, currentUserRole, o
             setContextMenu({ memberId: m.id, x: e.clientX, y: e.clientY });
           }
         }}
+        aria-label={`${displayName(m.username)}${roleLabel ? `, ${roleLabel}` : ""}${online ? ", online" : ", offline"}`}
       >
         <Avatar
           username={m.username}
@@ -161,7 +163,7 @@ export default function MemberList({ serverId, currentUserId, currentUserRole, o
             return (
               <div className={`w-2 h-2 rounded-full shrink-0 ${
                 online ? (STATUS_COLORS[status] || "bg-green-500") : "bg-[var(--muted)]"
-              }`} />
+              }`} aria-hidden="true" />
             );
           })()}
           <span
@@ -182,7 +184,7 @@ export default function MemberList({ serverId, currentUserId, currentUserRole, o
             </span>
           )}
         </div>
-      </div>
+      </li>
     );
   }
 
@@ -196,6 +198,8 @@ export default function MemberList({ serverId, currentUserId, currentUserRole, o
           onClick={() => setShowInvite(!showInvite)}
           className="text-[var(--muted)] hover:text-[var(--text)] text-xs"
           title="Invite / Join"
+          aria-label={showInvite ? "Close invite panel" : "Invite or join server"}
+          aria-expanded={showInvite}
         >
           {showInvite ? "Close" : "Invite"}
         </button>
@@ -212,7 +216,9 @@ export default function MemberList({ serverId, currentUserId, currentUserRole, o
             </button>
           )}
           <div className="flex gap-1">
+            <label htmlFor="join-code-input" className="sr-only">Invite code</label>
             <input
+              id="join-code-input"
               type="text"
               value={joinCode}
               onChange={(e) => { setJoinCode(e.target.value); setJoinError(""); }}
@@ -265,39 +271,45 @@ export default function MemberList({ serverId, currentUserId, currentUserRole, o
           <>
             {onlineMembers.length > 0 && (
               <>
-                <div className="px-3 py-1">
+                <div className="px-3 py-1" id="online-members-heading">
                   <span className="text-xs font-semibold text-[var(--muted)] uppercase">
                     Online — {onlineMembers.length}
                   </span>
                 </div>
-                {onlineMembers.map((m) => renderMember(m, true))}
+                <ul role="list" aria-labelledby="online-members-heading">
+                  {onlineMembers.map((m) => renderMember(m, true))}
+                </ul>
               </>
             )}
 
             {offlineMembers.length > 0 && (
               <>
-                <div className="px-3 py-1 mt-2">
+                <div className="px-3 py-1 mt-2" id="offline-members-heading">
                   <span className="text-xs font-semibold text-[var(--muted)] uppercase">
                     Offline — {offlineMembers.length}
                   </span>
                 </div>
-                {offlineMembers.map((m) => renderMember(m, false))}
+                <ul role="list" aria-labelledby="offline-members-heading">
+                  {offlineMembers.map((m) => renderMember(m, false))}
+                </ul>
               </>
             )}
 
             {canManage && bannedMembers.length > 0 && (
               <>
-                <div className="px-3 py-1 mt-2">
+                <div className="px-3 py-1 mt-2" id="banned-members-heading">
                   <span className="text-xs font-semibold text-red-400/70 uppercase">
                     Banned — {bannedMembers.length}
                   </span>
                 </div>
-                {bannedMembers.map((m) => (
-                  <div key={m.id} className="flex items-center gap-2 px-3 py-1 opacity-40 cursor-pointer hover:bg-[var(--panel-2)]/50 rounded" onContextMenu={(e) => { e.preventDefault(); setContextMenu({ memberId: m.id, x: e.clientX, y: e.clientY }); }}>
-                    <Avatar username={m.username} avatarUrl={m.avatar} size={32} className="bg-red-900/30 text-red-400" />
-                    <span className="text-sm truncate text-red-400">{truncateName(m.username)}</span>
-                  </div>
-                ))}
+                <ul role="list" aria-labelledby="banned-members-heading">
+                  {bannedMembers.map((m) => (
+                    <li key={m.id} role="listitem" className="flex items-center gap-2 px-3 py-1 opacity-40 cursor-pointer hover:bg-[var(--panel-2)]/50 rounded" onContextMenu={(e) => { e.preventDefault(); setContextMenu({ memberId: m.id, x: e.clientX, y: e.clientY }); }} aria-label={`${m.username}, banned`}>
+                      <Avatar username={m.username} avatarUrl={m.avatar} size={32} className="bg-red-900/30 text-red-400" />
+                      <span className="text-sm truncate text-red-400">{truncateName(m.username)}</span>
+                    </li>
+                  ))}
+                </ul>
               </>
             )}
           </>
@@ -323,6 +335,8 @@ export default function MemberList({ serverId, currentUserId, currentUserRole, o
         if (!target) return null;
         return (
           <div
+            role="menu"
+            aria-label={`Actions for ${displayName(target.username)}`}
             className="fixed bg-[var(--panel)] border border-[var(--accent-2)]/30 rounded-lg shadow-xl py-1 z-50 min-w-[140px]"
             style={{ left: Math.min(contextMenu.x, window.innerWidth - 160), top: Math.min(contextMenu.y, window.innerHeight - 200) }}
             onClick={(e) => e.stopPropagation()}
