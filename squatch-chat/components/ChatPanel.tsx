@@ -5,6 +5,126 @@ import { getSocket } from "@/lib/socket";
 import { truncateName } from "@/lib/utils";
 import MessageBubble from "./MessageBubble";
 
+// ── Formatting toolbar ────────────────────────────────────────────────────────
+
+function wrapSelection(
+  textarea: HTMLTextAreaElement,
+  before: string,
+  after: string,
+  placeholder: string,
+  setter: (val: string) => void
+) {
+  const start = textarea.selectionStart;
+  const end = textarea.selectionEnd;
+  const selected = textarea.value.slice(start, end) || placeholder;
+  const newVal =
+    textarea.value.slice(0, start) +
+    before +
+    selected +
+    after +
+    textarea.value.slice(end);
+  setter(newVal);
+  setTimeout(() => {
+    textarea.focus();
+    textarea.setSelectionRange(
+      start + before.length,
+      start + before.length + selected.length
+    );
+  }, 0);
+}
+
+interface FormattingToolbarProps {
+  inputRef: React.RefObject<HTMLTextAreaElement>;
+  value: string;
+  onChange: (val: string) => void;
+}
+
+function FormattingToolbar({ inputRef, onChange }: FormattingToolbarProps) {
+  const btn =
+    "text-xs px-2 py-1 rounded hover:bg-[var(--accent-2)]/20 text-[var(--muted)] hover:text-[var(--text)] font-mono transition-colors";
+
+  function applyBold() {
+    if (!inputRef.current) return;
+    wrapSelection(inputRef.current, "**", "**", "bold text", onChange);
+  }
+  function applyItalic() {
+    if (!inputRef.current) return;
+    wrapSelection(inputRef.current, "_", "_", "italic text", onChange);
+  }
+  function applyCode() {
+    if (!inputRef.current) return;
+    wrapSelection(inputRef.current, "`", "`", "code", onChange);
+  }
+  function applyLink() {
+    if (!inputRef.current) return;
+    const textarea = inputRef.current;
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const selected = textarea.value.slice(start, end) || "link text";
+    const url = window.prompt("Enter URL:", "https://");
+    if (!url) return;
+    const newVal =
+      textarea.value.slice(0, start) +
+      "[" + selected + "](" + url + ")" +
+      textarea.value.slice(end);
+    onChange(newVal);
+    setTimeout(() => {
+      textarea.focus();
+      textarea.setSelectionRange(start + 1, start + 1 + selected.length);
+    }, 0);
+  }
+  function applyBullet() {
+    if (!inputRef.current) return;
+    const textarea = inputRef.current;
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    if (start === end) {
+      const newVal =
+        textarea.value.slice(0, start) + "\u2022 " + textarea.value.slice(end);
+      onChange(newVal);
+      setTimeout(() => {
+        textarea.focus();
+        textarea.setSelectionRange(start + 2, start + 2);
+      }, 0);
+    } else {
+      const before = textarea.value.slice(0, start);
+      const selected = textarea.value.slice(start, end);
+      const after = textarea.value.slice(end);
+      const bulleted = selected
+        .split("\n")
+        .map((line) => "\u2022 " + line)
+        .join("\n");
+      onChange(before + bulleted + after);
+      setTimeout(() => {
+        textarea.focus();
+        textarea.setSelectionRange(start, start + bulleted.length);
+      }, 0);
+    }
+  }
+
+  return (
+    <div className="border border-[var(--accent-2)]/30 rounded-t-lg bg-[var(--panel)] px-2 py-1 flex items-center gap-1">
+      <button type="button" onClick={applyBold} className={btn} title="Bold (Ctrl+B)">
+        <strong>B</strong>
+      </button>
+      <button type="button" onClick={applyItalic} className={btn} title="Italic (Ctrl+I)">
+        <em>I</em>
+      </button>
+      <button type="button" onClick={applyCode} className={btn} title="Inline code">
+        {"</>"}
+      </button>
+      <button type="button" onClick={applyLink} className={btn} title="Link (Ctrl+K)">
+        🔗
+      </button>
+      <button type="button" onClick={applyBullet} className={btn} title="Bullet list">
+        •
+      </button>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 interface ReactionGroup {
   count: number;
   users: string[];
@@ -81,9 +201,11 @@ export default function ChatPanel({
   const [isDragging, setIsDragging] = useState(false);
   const [slowRemaining, setSlowRemaining] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const [showToolbar, setShowToolbar] = useState(false);
   const dragCounterRef = useRef(0);
   const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  let pendingIdCounter = useRef(0);
+  const pendingIdCounter = useRef(0);
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -237,7 +359,7 @@ export default function ChatPanel({
     };
   }, [channelId, scrollToBottom, currentUserId]);
 
-  function handleInputChange(e: React.ChangeEvent<HTMLInputElement>) {
+  function handleInputChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
     setNewMessage(e.target.value);
 
     const socket = getSocket();
@@ -696,7 +818,14 @@ export default function ChatPanel({
       )}
 
       <form onSubmit={handleSend} className={`px-4 pb-4 shrink-0 ${replyingTo ? "pt-0" : "pt-1"}`}>
-        <div className="flex items-center bg-[var(--panel)] rounded-lg border border-[var(--accent-2)]/30">
+        {showToolbar && (
+          <FormattingToolbar
+            inputRef={inputRef}
+            value={newMessage}
+            onChange={setNewMessage}
+          />
+        )}
+        <div className={`flex items-center bg-[var(--panel)] border border-[var(--accent-2)]/30 ${showToolbar ? "rounded-b-lg" : "rounded-lg"}`}>
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
@@ -715,14 +844,56 @@ export default function ChatPanel({
             onChange={handleFileUpload}
             className="hidden"
           />
-          <input
-            type="text"
+          <textarea
+            ref={inputRef}
             value={newMessage}
             onChange={handleInputChange}
+            onKeyDown={(e) => {
+              const mod = e.ctrlKey || e.metaKey;
+              if (mod && e.key === "b") {
+                e.preventDefault();
+                if (inputRef.current) wrapSelection(inputRef.current, "**", "**", "bold text", setNewMessage);
+              } else if (mod && e.key === "i") {
+                e.preventDefault();
+                if (inputRef.current) wrapSelection(inputRef.current, "_", "_", "italic text", setNewMessage);
+              } else if (mod && e.key === "k") {
+                e.preventDefault();
+                if (inputRef.current) {
+                  const textarea = inputRef.current;
+                  const start = textarea.selectionStart;
+                  const end = textarea.selectionEnd;
+                  const selected = textarea.value.slice(start, end) || "link text";
+                  const url = window.prompt("Enter URL:", "https://");
+                  if (!url) return;
+                  const newVal =
+                    textarea.value.slice(0, start) +
+                    `[${selected}](${url})` +
+                    textarea.value.slice(end);
+                  setNewMessage(newVal);
+                  setTimeout(() => {
+                    textarea.focus();
+                    textarea.setSelectionRange(start + 1, start + 1 + selected.length);
+                  }, 0);
+                }
+              } else if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                handleSend(e as unknown as React.FormEvent);
+              }
+            }}
             placeholder={uploading ? "Uploading..." : slowRemaining > 0 ? `Wait ${slowRemaining}s to send again` : `Message #${channelName}`}
-            className="flex-1 px-2 py-3 bg-transparent text-[var(--text)] focus:outline-none placeholder:text-[var(--muted)]"
+            rows={1}
+            className="flex-1 px-2 py-3 bg-transparent text-[var(--text)] focus:outline-none placeholder:text-[var(--muted)] resize-none max-h-32 overflow-y-auto"
+            style={{ minHeight: "44px" }}
             disabled={uploading || slowRemaining > 0}
           />
+          <button
+            type="button"
+            onClick={() => setShowToolbar((v) => !v)}
+            className={`px-2 py-3 text-xs font-semibold transition-colors ${showToolbar ? "text-[var(--accent-2)]" : "text-[var(--muted)] hover:text-[var(--text)]"}`}
+            title="Toggle formatting toolbar"
+          >
+            Aa
+          </button>
           <button
             type="submit"
             disabled={!newMessage.trim() || uploading || slowRemaining > 0}
