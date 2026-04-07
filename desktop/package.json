@@ -1,0 +1,86 @@
+{
+  "name": "campfire-desktop",
+  "version": "0.0.5",
+  "description": "Campfire — Discord-like voice & text chat (desktop app)",
+  "main": "main.js",
+  "author": "Campfire Team",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dev": "NODE_ENV=development electron .",
+    "build:web": "cd ../squatch-chat && pnpm build",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win",
+    "dist:mac": "electron-builder --mac",
+    "dist:linux": "electron-builder --linux"
+  },
+  "dependencies": {
+    "electron-is-dev": "^2.0.0"
+  },
+  "devDependencies": {
+    "electron": "^35.0.0",
+    "electron-builder": "^26.0.0"
+  },
+  "build": {
+    "appId": "com.campfire.chat",
+    "productName": "Campfire",
+    "files": [
+      "main.js",
+      "preload.js",
+      "splash.html",
+      "icons/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../squatch-chat/.next/standalone",
+        "to": "server",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "../squatch-chat/.next/static",
+        "to": "server/.next/static",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "../squatch-chat/public",
+        "to": "server/public",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "../squatch-chat/realtime",
+        "to": "server/realtime",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "../squatch-chat/prisma",
+        "to": "server/prisma",
+        "filter": ["**/*"]
+      }
+    ],
+    "win": {
+      "target": ["nsis"],
+      "icon": "icons/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerIcon": "icons/icon.ico",
+      "uninstallerIcon": "icons/icon.ico",
+      "installerHeaderIcon": "icons/icon.ico",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Campfire"
+    },
+    "mac": {
+      "target": ["dmg"],
+      "icon": "icons/icon.icns",
+      "category": "public.app-category.social-networking"
+    },
+    "linux": {
+      "target": ["AppImage", "deb"],
+      "icon": "icons",
+      "category": "Network;Chat"
+    }
+  }
+}

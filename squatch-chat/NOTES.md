@@ -242,6 +242,20 @@ See `ROADMAP.md` for the full 20-section voice product roadmap with `[x]` built 
 
 ---
 
+## Delegated Tasks (in progress by other devs)
+
+Do NOT modify these files/features — separate branches pending merge:
+
+| Branch | Task | Files |
+|---|---|---|
+| `feat/member-list-skeletons` | Loading skeleton placeholders | `components/MemberList.tsx` |
+| `feat/typing-indicator` | Typing "X is typing..." display | `components/ChatPanel.tsx` |
+| `feat/message-timestamps` | Hover tooltip with full date/time | `components/MessageBubble.tsx` |
+| `feat/server-initials` | Server letter icons + hover animation | `components/ServerList.tsx` |
+| `feat/channel-descriptions` | Optional description field + tooltip | `schema.prisma`, `api/channels`, `ChannelList.tsx` |
+
+---
+
 ## Dev Communication Style
 
 Short 3-6 word sentences. No filler, preamble, or pleasantries. Run tools first, show result, then stop. Do not narrate. Drop articles ("me fix code" not "I will fix the code").
