@@ -27,6 +27,11 @@ export default function SettingsModal({ open, onClose, username, currentAvatar, 
   const [micLevel, setMicLevel] = useState(0);
   const [inputSensitivity, setInputSensitivity] = useState(15);
   const [messageNotifications, setMessageNotifications] = useState(true);
+  const [uiSoundsMaster, setUiSoundsMaster] = useState(true);
+  const [uiSoundMessages, setUiSoundMessages] = useState(true);
+  const [uiSoundVoice, setUiSoundVoice] = useState(true);
+  const [uiSoundNotifications, setUiSoundNotifications] = useState(true);
+  const [uiSoundVolume, setUiSoundVolume] = useState(0.3);
 
   const testStreamRef = useRef<MediaStream | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
@@ -60,6 +65,11 @@ export default function SettingsModal({ open, onClose, username, currentAvatar, 
           onInputSensitivityChange?.(s.inputSensitivity);
         }
         if (s.messageNotifications !== undefined) setMessageNotifications(s.messageNotifications);
+        if (s.masterEnabled !== undefined) setUiSoundsMaster(s.masterEnabled);
+        if (s.messageSend !== undefined) setUiSoundMessages(s.messageSend);
+        if (s.voice !== undefined) setUiSoundVoice(s.voice);
+        if (s.notifications !== undefined) setUiSoundNotifications(s.notifications);
+        if (s.volume !== undefined) setUiSoundVolume(s.volume);
       } catch { /* ignore */ }
     }
   }, [open]);
@@ -74,8 +84,14 @@ export default function SettingsModal({ open, onClose, username, currentAvatar, 
       outputVolume,
       inputSensitivity,
       messageNotifications,
+      masterEnabled: uiSoundsMaster,
+      messageSend: uiSoundMessages,
+      messageReceive: uiSoundMessages,
+      voice: uiSoundVoice,
+      notifications: uiSoundNotifications,
+      volume: uiSoundVolume,
     }));
-  }, [selectedInput, selectedOutput, selectedVideo, inputVolume, outputVolume, inputSensitivity, messageNotifications]);
+  }, [selectedInput, selectedOutput, selectedVideo, inputVolume, outputVolume, inputSensitivity, messageNotifications, uiSoundsMaster, uiSoundMessages, uiSoundVoice, uiSoundNotifications, uiSoundVolume]);
 
   useEffect(() => { saveSettings(); }, [saveSettings]);
 
@@ -406,6 +422,91 @@ export default function SettingsModal({ open, onClose, username, currentAvatar, 
                 <p className="text-xs text-[var(--muted)] mt-1">
                   Play a sound when a new message arrives while the tab is in the background.
                 </p>
+              </div>
+
+              <hr className="border-[var(--accent-2)]/20" />
+
+              {/* UI Sounds */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-sm font-semibold text-[var(--text)]">UI Sounds</label>
+                  <button
+                    onClick={() => setUiSoundsMaster((v) => !v)}
+                    className={`w-10 h-5 rounded-full transition-colors relative shrink-0 ${
+                      uiSoundsMaster ? "bg-[var(--accent)]" : "bg-[var(--panel-2)] border border-[var(--accent-2)]/30"
+                    }`}
+                    title={uiSoundsMaster ? "Disable UI sounds" : "Enable UI sounds"}
+                  >
+                    <div className={`w-4 h-4 rounded-full bg-white absolute top-0.5 transition-transform ${
+                      uiSoundsMaster ? "translate-x-5" : "translate-x-0.5"
+                    }`} />
+                  </button>
+                </div>
+
+                {uiSoundsMaster && (
+                  <div className="pl-3 space-y-2 border-l border-[var(--accent-2)]/20">
+                    {/* Message sounds */}
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs text-[var(--muted)]">Message sounds</label>
+                      <button
+                        onClick={() => setUiSoundMessages((v) => !v)}
+                        className={`w-8 h-4 rounded-full transition-colors relative shrink-0 ${
+                          uiSoundMessages ? "bg-[var(--accent)]" : "bg-[var(--panel-2)] border border-[var(--accent-2)]/30"
+                        }`}
+                      >
+                        <div className={`w-3 h-3 rounded-full bg-white absolute top-0.5 transition-transform ${
+                          uiSoundMessages ? "translate-x-4" : "translate-x-0.5"
+                        }`} />
+                      </button>
+                    </div>
+
+                    {/* Voice sounds */}
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs text-[var(--muted)]">Voice sounds</label>
+                      <button
+                        onClick={() => setUiSoundVoice((v) => !v)}
+                        className={`w-8 h-4 rounded-full transition-colors relative shrink-0 ${
+                          uiSoundVoice ? "bg-[var(--accent)]" : "bg-[var(--panel-2)] border border-[var(--accent-2)]/30"
+                        }`}
+                      >
+                        <div className={`w-3 h-3 rounded-full bg-white absolute top-0.5 transition-transform ${
+                          uiSoundVoice ? "translate-x-4" : "translate-x-0.5"
+                        }`} />
+                      </button>
+                    </div>
+
+                    {/* Notification sounds */}
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs text-[var(--muted)]">Notification sounds</label>
+                      <button
+                        onClick={() => setUiSoundNotifications((v) => !v)}
+                        className={`w-8 h-4 rounded-full transition-colors relative shrink-0 ${
+                          uiSoundNotifications ? "bg-[var(--accent)]" : "bg-[var(--panel-2)] border border-[var(--accent-2)]/30"
+                        }`}
+                      >
+                        <div className={`w-3 h-3 rounded-full bg-white absolute top-0.5 transition-transform ${
+                          uiSoundNotifications ? "translate-x-4" : "translate-x-0.5"
+                        }`} />
+                      </button>
+                    </div>
+
+                    {/* Volume */}
+                    <div>
+                      <label className="text-xs text-[var(--muted)] block mb-1">
+                        UI Sound Volume: {Math.round(uiSoundVolume * 100)}%
+                      </label>
+                      <input
+                        type="range"
+                        min="0"
+                        max="1"
+                        step="0.05"
+                        value={uiSoundVolume}
+                        onChange={(e) => setUiSoundVolume(parseFloat(e.target.value))}
+                        className="w-full accent-[var(--accent)]"
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
