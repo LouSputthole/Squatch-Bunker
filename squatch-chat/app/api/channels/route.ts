@@ -47,6 +47,18 @@ export async function POST(request: Request) {
       },
     });
 
+    // Post welcome system message for text channels
+    if (channelType === "text") {
+      await prisma.message.create({
+        data: {
+          channelId: channel.id,
+          authorId: session.userId,
+          content: `Welcome to #${channel.name}!`,
+          isSystem: true,
+        },
+      });
+    }
+
     return NextResponse.json({ channel }, { status: 201 });
   } catch (err) {
     console.error("[Campfire] Failed to create channel:", err);

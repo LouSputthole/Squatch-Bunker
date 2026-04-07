@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { getSocket } from "@/lib/socket";
 import { truncateName } from "@/lib/utils";
 import MessageBubble from "./MessageBubble";
+import PinnedMessagesPanel from "./PinnedMessagesPanel";
 
 interface ReactionGroup {
   count: number;
@@ -32,6 +33,7 @@ interface Message {
   reactions?: Record<string, ReactionGroup>;
   replyTo?: ReplySnippet | null;
   pending?: boolean;
+  isSystem?: boolean;
 }
 
 interface ChatPanelProps {
@@ -63,7 +65,7 @@ export default function ChatPanel({
   const [typingUsers, setTypingUsers] = useState<Map<string, string>>(new Map());
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
   const [firstUnreadId, setFirstUnreadId] = useState<string | null>(null);
-  const [showPinned, setShowPinned] = useState(false);
+  const [showPinnedPanel, setShowPinnedPanel] = useState(false);
   const [threadParent, setThreadParent] = useState<{ id: string; author: { id: string; username: string } } | null>(null);
   const [threadMessages, setThreadMessages] = useState<Message[]>([]);
   const [threadInput, setThreadInput] = useState("");

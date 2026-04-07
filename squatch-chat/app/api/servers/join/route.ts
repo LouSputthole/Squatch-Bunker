@@ -46,6 +46,26 @@ export async function POST(request: Request) {
     data: { serverId: server.id, userId: session.userId },
   });
 
+  // Find first text channel and post a join system message
+  const generalChannel = await prisma.channel.findFirst({
+    where: {
+      serverId: server.id,
+      type: "text",
+    },
+    orderBy: { position: "asc" },
+  });
+
+  if (generalChannel) {
+    await prisma.message.create({
+      data: {
+        channelId: generalChannel.id,
+        authorId: session.userId,
+        content: `${session.username} joined the server`,
+        isSystem: true,
+      },
+    });
+  }
+
   const updated = await prisma.server.findUnique({
     where: { id: server.id },
     include: {
