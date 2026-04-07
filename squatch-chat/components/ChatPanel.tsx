@@ -11,6 +11,12 @@ interface ReactionGroup {
   userIds: string[];
 }
 
+interface ReplySnippet {
+  id: string;
+  content: string;
+  author: { id: string; username: string };
+}
+
 interface Message {
   id: string;
   channelId?: string;
@@ -21,6 +27,7 @@ interface Message {
   updatedAt?: string;
   author: { id: string; username: string; avatar?: string | null };
   reactions?: Record<string, ReactionGroup>;
+  replyTo?: ReplySnippet | null;
   pending?: boolean;
 }
 
@@ -43,7 +50,9 @@ export default function ChatPanel({
   const [newMessage, setNewMessage] = useState("");
   const [loading, setLoading] = useState(true);
   const [typingUsers, setTypingUsers] = useState<Map<string, string>>(new Map());
+  const [replyingTo, setReplyingTo] = useState<Message | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messageRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const prevChannelRef = useRef<string | null>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isTypingRef = useRef(false);
@@ -55,11 +64,21 @@ export default function ChatPanel({
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, []);
 
+  const scrollToMessage = useCallback((messageId: string) => {
+    const el = messageRefs.current.get(messageId);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.classList.add("ring-1", "ring-[var(--accent-2)]", "rounded");
+      setTimeout(() => el.classList.remove("ring-1", "ring-[var(--accent-2)]", "rounded"), 1500);
+    }
+  }, []);
+
   // Load message history
   useEffect(() => {
     setLoading(true);
     setMessages([]);
     setTypingUsers(new Map());
+    setReplyingTo(null);
 
     fetch(`/api/messages?channelId=${channelId}`)
       .then((res) => res.json())
@@ -179,6 +198,10 @@ export default function ChatPanel({
     const socket = getSocket();
     socket.emit("typing:stop", channelId);
 
+    // Capture and clear reply state before async work
+    const replyTarget = replyingTo;
+    setReplyingTo(null);
+
     // Optimistic: show message immediately
     const tempId = `pending-${Date.now()}-${pendingIdCounter.current++}`;
     const optimisticMsg: Message = {
@@ -186,6 +209,7 @@ export default function ChatPanel({
       content,
       createdAt: new Date().toISOString(),
       author: { id: currentUserId, username: currentUsername, avatar: currentAvatar },
+      replyTo: replyTarget ? { id: replyTarget.id, content: replyTarget.content, author: { id: replyTarget.author.id, username: replyTarget.author.username } } : null,
       pending: true,
     };
     setMessages((prev) => [...prev, optimisticMsg]);
@@ -194,7 +218,7 @@ export default function ChatPanel({
     const res = await fetch("/api/messages", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ channelId, content }),
+      body: JSON.stringify({ channelId, content, ...(replyTarget ? { replyToId: replyTarget.id } : {}) }),
     });
 
     if (res.ok) {
@@ -343,15 +367,21 @@ export default function ChatPanel({
           </div>
         ) : (
           messages.map((msg) => (
-            <MessageBubble
+            <div
               key={msg.id}
-              message={msg}
-              isOwn={msg.author.id === currentUserId}
-              currentUserId={currentUserId}
-              onEdit={handleEdit}
-              onDelete={handleDelete}
-              onReact={handleReact}
-            />
+              ref={(el) => { if (el) messageRefs.current.set(msg.id, el); else messageRefs.current.delete(msg.id); }}
+            >
+              <MessageBubble
+                message={msg}
+                isOwn={msg.author.id === currentUserId}
+                currentUserId={currentUserId}
+                onEdit={handleEdit}
+                onDelete={handleDelete}
+                onReact={handleReact}
+                onReply={setReplyingTo}
+                onScrollToMessage={scrollToMessage}
+              />
+            </div>
           ))
         )}
         <div ref={messagesEndRef} />
@@ -363,7 +393,24 @@ export default function ChatPanel({
         )}
       </div>
 
-      <form onSubmit={handleSend} className="px-4 pb-4 pt-1 shrink-0">
+      {replyingTo && (
+        <div className="mx-4 mb-0 px-3 py-1.5 bg-[var(--panel)] border border-b-0 border-[var(--accent-2)]/30 rounded-t-lg flex items-center gap-2 text-xs text-[var(--muted)]">
+          <span className="shrink-0">↩ Replying to</span>
+          <span className="font-medium text-[var(--accent-2)]">{replyingTo.author.username}</span>
+          <span className="truncate flex-1 text-[var(--muted)]">
+            {replyingTo.content ? replyingTo.content.slice(0, 60) + (replyingTo.content.length > 60 ? "…" : "") : "attachment"}
+          </span>
+          <button
+            type="button"
+            onClick={() => setReplyingTo(null)}
+            className="shrink-0 text-[var(--muted)] hover:text-[var(--danger)] transition-colors ml-1"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
+      <form onSubmit={handleSend} className={`px-4 pb-4 shrink-0 ${replyingTo ? "pt-0" : "pt-1"}`}>
         <div className="flex items-center bg-[var(--panel)] rounded-lg border border-[var(--accent-2)]/30">
           <button
             type="button"

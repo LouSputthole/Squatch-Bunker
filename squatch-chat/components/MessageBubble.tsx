@@ -236,6 +236,12 @@ interface ReactionGroup {
   userIds: string[];
 }
 
+interface ReplySnippet {
+  id: string;
+  content: string;
+  author: { id: string; username: string };
+}
+
 interface MessageBubbleProps {
   message: {
     id: string;
@@ -246,15 +252,18 @@ interface MessageBubbleProps {
     updatedAt?: string;
     author: { id: string; username: string; avatar?: string | null };
     reactions?: Record<string, ReactionGroup>;
+    replyTo?: ReplySnippet | null;
   };
   isOwn: boolean;
   currentUserId?: string;
   onEdit?: (messageId: string, newContent: string) => void;
   onDelete?: (messageId: string) => void;
   onReact?: (messageId: string, emoji: string) => void;
+  onReply?: (message: MessageBubbleProps["message"]) => void;
+  onScrollToMessage?: (messageId: string) => void;
 }
 
-export default function MessageBubble({ message, isOwn, currentUserId, onEdit, onDelete, onReact }: MessageBubbleProps) {
+export default function MessageBubble({ message, isOwn, currentUserId, onEdit, onDelete, onReact, onReply, onScrollToMessage }: MessageBubbleProps) {
   const [editing, setEditing] = useState(false);
   const [editContent, setEditContent] = useState(message.content);
   const [showActions, setShowActions] = useState(false);
@@ -331,6 +340,22 @@ export default function MessageBubble({ message, isOwn, currentUserId, onEdit, o
           {wasEdited && <span className="text-xs text-[var(--muted)] italic">(edited)</span>}
         </div>
 
+        {/* Reply quote */}
+        {message.replyTo && (
+          <button
+            onClick={() => onScrollToMessage?.(message.replyTo!.id)}
+            className="flex items-start gap-1.5 mb-1 pl-2 border-l-2 border-[var(--accent-2)] text-left hover:border-[var(--accent)] transition-colors group/reply"
+          >
+            <span className="text-xs text-[var(--muted)] group-hover/reply:text-[var(--text)] transition-colors truncate max-w-[320px]">
+              <span className="font-medium text-[var(--accent-2)] group-hover/reply:text-[var(--accent)]">
+                {displayName(message.replyTo.author.username)}
+              </span>
+              {" "}
+              {message.replyTo.content ? message.replyTo.content.slice(0, 80) + (message.replyTo.content.length > 80 ? "…" : "") : "attachment"}
+            </span>
+          </button>
+        )}
+
         {editing ? (
           <form onSubmit={handleEditSubmit} className="mt-1">
             <input
@@ -391,6 +416,13 @@ export default function MessageBubble({ message, isOwn, currentUserId, onEdit, o
             title="React"
           >
             😀
+          </button>
+          <button
+            onClick={() => onReply?.(message)}
+            className="text-xs text-[var(--muted)] hover:text-[var(--text)] px-1.5 py-0.5"
+            title="Reply"
+          >
+            ↩
           </button>
           {isOwn && (
             <>
