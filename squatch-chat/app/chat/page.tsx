@@ -16,6 +16,7 @@ import AmbientSounds from "@/components/AmbientSounds";
 import ShareLink from "@/components/ShareLink";
 import DMPanel from "@/components/DMPanel";
 import FriendPanel from "@/components/FriendPanel";
+import OnboardingWizard from "@/components/OnboardingWizard";
 import { connectSocket, disconnectSocket } from "@/lib/socket";
 import { displayName } from "@/lib/utils";
 
@@ -56,6 +57,7 @@ function ChatPageInner() {
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [dmOpen, setDmOpen] = useState(false);
   const [friendsOpen, setFriendsOpen] = useState(false);
+  const [onboardingDone, setOnboardingDone] = useState(false);
 
   useKeyboardShortcuts({
     activeVoiceChannel: voice.activeVoiceChannel,
@@ -396,6 +398,26 @@ function ChatPageInner() {
           </button>
         </div>
       </div>
+
+
+      {/* Onboarding wizard */}
+      {srv.servers.length === 0 && !auth.loading && !onboardingDone && auth.user && (
+        <OnboardingWizard
+          userId={auth.user.id}
+          username={auth.user.username}
+          currentAvatar={auth.user.avatar}
+          onComplete={async () => {
+            setOnboardingDone(true);
+            const serverList = await srv.fetchServers();
+            if (serverList.length > 0) {
+              srv.setActiveServer(serverList[0]);
+              const textChs = serverList[0].channels.filter((c) => !c.type || c.type === "text");
+              if (textChs.length > 0) ch.setActiveChannel(textChs[0]);
+            }
+          }}
+          onAvatarChange={auth.updateAvatar}
+        />
+      )}
 
       {/* Settings modal */}
       <SettingsModal
