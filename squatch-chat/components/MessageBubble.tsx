@@ -7,6 +7,14 @@ import ProfileCard from "@/components/ProfileCard";
 import ImageLightbox from "@/components/ImageLightbox";
 import { LinkPreview } from "@/components/LinkPreview";
 
+function getFileType(name: string): "image" | "video" | "audio" | "file" {
+  const ext = name.split(".").pop()?.toLowerCase() || "";
+  if (["jpg","jpeg","png","gif","webp","svg"].includes(ext)) return "image";
+  if (["mp4","webm","mov","avi"].includes(ext)) return "video";
+  if (["mp3","wav","ogg","m4a","flac"].includes(ext)) return "audio";
+  return "file";
+}
+
 // URL extraction util — returns at most 1 unique URL for preview
 function extractUrls(text: string): string[] {
   const urlRegex = /https?:\/\/[^\s<>"]+/g;
@@ -475,10 +483,10 @@ export default function MessageBubble({ message, isOwn, currentUserId, authorCol
               <LinkPreview key={url} url={url} />
             ))}
             {message.attachmentUrl && (
-              <Attachment
+              <AttachmentPreview
                 url={message.attachmentUrl}
                 name={message.attachmentName}
-                onImageClick={(src) => {
+                onOpenLightbox={(src) => {
                   const all = Array.from(document.querySelectorAll<HTMLImageElement>("[data-lightbox-src]"))
                     .map((el) => el.getAttribute("data-lightbox-src")!)
                     .filter(Boolean);
@@ -702,41 +710,63 @@ export default function MessageBubble({ message, isOwn, currentUserId, authorCol
   );
 }
 
-function Attachment({ url, name, onImageClick }: { url: string; name?: string | null; onImageClick?: (src: string) => void }) {
-  const isImage = /\.(jpg|jpeg|png|gif|webp)$/i.test(url);
-  const displayName = name || url.split("/").pop() || "file";
+function AttachmentPreview({ url, name, onOpenLightbox }: { url: string; name?: string | null; onOpenLightbox: (src: string) => void }) {
+  const fileName = name || url.split("/").pop() || "file";
+  const fileType = getFileType(fileName);
 
-  if (isImage) {
+  if (fileType === "image") {
     return (
       <button
         type="button"
-        onClick={() => onImageClick?.(url)}
-        className="block mt-1 text-left"
+        onClick={() => onOpenLightbox(url)}
+        className="block mt-1 text-left cursor-pointer"
       >
         <img
           src={url}
-          alt={displayName}
+          alt={fileName}
           data-lightbox-src={url}
-          className="max-w-xs max-h-64 rounded-lg border border-[var(--accent-2)]/30 object-cover hover:opacity-80 transition-opacity cursor-zoom-in"
+          style={{ maxHeight: 300, maxWidth: 400 }}
+          className="rounded-lg border border-[var(--accent-2)]/30 object-cover hover:opacity-80 transition-opacity cursor-pointer"
         />
       </button>
     );
   }
 
+  if (fileType === "video") {
+    return (
+      <video
+        controls
+        style={{ maxWidth: 400 }}
+        className="rounded mt-1 border border-[var(--accent-2)]/30"
+      >
+        <source src={url} />
+      </video>
+    );
+  }
+
+  if (fileType === "audio") {
+    return (
+      <audio controls className="w-full max-w-xs mt-1">
+        <source src={url} />
+      </audio>
+    );
+  }
+
+  // Generic file download card
   return (
-    <a
-      href={url}
-      download={displayName}
-      className="mt-1 inline-flex items-center gap-2 px-3 py-2 bg-[var(--panel)] border border-[var(--accent-2)]/30 rounded-lg text-sm text-[var(--text)] hover:border-[var(--accent-2)] transition-colors"
-    >
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-[var(--muted)]">
-        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-        <polyline points="14 2 14 8 20 8" />
-      </svg>
-      <span className="truncate max-w-[200px]">{displayName}</span>
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-[var(--muted)]">
-        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" />
-      </svg>
-    </a>
+    <div className="mt-1 inline-flex items-center gap-2 px-3 py-2 bg-[var(--panel)] border border-[var(--accent-2)]/30 rounded-lg text-sm text-[var(--text)]">
+      <span className="shrink-0">📄</span>
+      <span className="truncate max-w-[200px] text-[var(--text)]">{fileName}</span>
+      <a
+        href={url}
+        download={fileName}
+        className="shrink-0 text-[var(--accent)] hover:text-[var(--accent-2)] transition-colors"
+        title="Download"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" />
+        </svg>
+      </a>
+    </div>
   );
 }
