@@ -463,6 +463,9 @@ function AccountTab({
   const [avatar, setAvatar] = useState<string | null>(currentAvatar ?? null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
+  const [statusMsg, setStatusMsg] = useState("");
+  const [statusSaving, setStatusSaving] = useState(false);
+  const [statusSaved, setStatusSaved] = useState(false);
   const [preview, setPreview] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -590,6 +593,41 @@ function AccountTab({
         <p className="text-xs text-[var(--muted)] mt-2">
           Recommended: Square image, at least 128x128px. Max 2MB. JPEG, PNG, GIF, or WebP.
         </p>
+      </div>
+
+      <hr className="border-[var(--accent-2)]/20" />
+
+      <div>
+        <label className="block text-sm font-semibold text-[var(--text)] mb-2">
+          Status Message
+        </label>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={statusMsg}
+            onChange={(e) => setStatusMsg(e.target.value.slice(0, 128))}
+            placeholder="What are you up to? (max 128 chars)"
+            className="flex-1 px-3 py-2 bg-[var(--panel-2)] text-[var(--text)] border border-[var(--accent-2)]/50 rounded text-sm focus:outline-none focus:border-[var(--accent-2)]"
+          />
+          <button
+            onClick={async () => {
+              setStatusSaving(true);
+              await fetch("/api/auth/me", {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ statusMessage: statusMsg }),
+              });
+              setStatusSaving(false);
+              setStatusSaved(true);
+              setTimeout(() => setStatusSaved(false), 2000);
+            }}
+            disabled={statusSaving}
+            className="px-3 py-2 bg-[var(--accent-2)] text-[var(--text)] rounded text-sm hover:bg-[var(--accent)] transition-colors disabled:opacity-50"
+          >
+            {statusSaved ? "Saved!" : statusSaving ? "..." : "Save"}
+          </button>
+        </div>
+        <p className="text-xs text-[var(--muted)] mt-1">{statusMsg.length}/128</p>
       </div>
 
       <hr className="border-[var(--accent-2)]/20" />

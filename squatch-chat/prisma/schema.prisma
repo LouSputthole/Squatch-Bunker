@@ -13,6 +13,7 @@ model User {
   username       String    @unique
   passwordHash   String
   avatar         String?
+  statusMessage  String?
   isGuest        Boolean   @default(false)
   guestExpiresAt DateTime?
   tier           String    @default("free")

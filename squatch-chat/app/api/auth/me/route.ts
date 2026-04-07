@@ -1,6 +1,24 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 
+export async function PATCH(request: Request) {
+  const session = await getSession();
+  if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  try {
+    const { statusMessage } = await request.json();
+    const { prisma } = await import("@/lib/db");
+    const user = await prisma.user.update({
+      where: { id: session.userId },
+      data: { statusMessage: typeof statusMessage === "string" ? statusMessage.slice(0, 128) || null : null },
+      select: { id: true, username: true, statusMessage: true },
+    });
+    return NextResponse.json({ user });
+  } catch (err) {
+    console.error("[Campfire] PATCH me:", err);
+    return NextResponse.json({ error: "Server error" }, { status: 500 });
+  }
+}
+
 export async function GET() {
   try {
     const session = await getSession();
@@ -13,7 +31,7 @@ export async function GET() {
       const { prisma } = await import("@/lib/db");
       const user = await prisma.user.findUnique({
         where: { id: session.userId },
-        select: { id: true, username: true, email: true, avatar: true },
+        select: { id: true, username: true, email: true, avatar: true, statusMessage: true },
       });
 
       if (user) {
