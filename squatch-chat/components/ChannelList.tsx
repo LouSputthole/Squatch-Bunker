@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { getSocket } from "@/lib/socket";
 import { displayName } from "@/lib/utils";
 import { useMutedChannels } from "@/hooks/useMutedChannels";
+import InviteModal from "@/components/InviteModal";
 
 interface Channel {
   id: string;
@@ -24,9 +25,12 @@ interface VoiceParticipant {
 interface ChannelListProps {
   serverName: string;
   serverBanner?: string | null;
+  serverIcon?: string | null;
   channels: Channel[];
   activeChannelId?: string;
   serverId: string;
+  inviteCode?: string;
+  memberCount?: number;
   unreadCounts?: Map<string, number>;
   currentUserId?: string;
   currentUserRole?: string;
@@ -84,9 +88,12 @@ function HeadphonesOffIcon() {
 export default function ChannelList({
   serverName,
   serverBanner,
+  serverIcon,
   channels,
   activeChannelId,
   serverId,
+  inviteCode,
+  memberCount,
   unreadCounts,
   currentUserId,
   currentUserRole,
@@ -102,6 +109,7 @@ export default function ChannelList({
   const [creating, setCreating] = useState<"text" | "voice" | null>(null);
   const [newName, setNewName] = useState("");
   const [showServerSettings, setShowServerSettings] = useState(false);
+  const [inviteOpen, setInviteOpen] = useState(false);
   const [renameValue, setRenameValue] = useState(serverName);
   const [settingsError, setSettingsError] = useState("");
   const [settingsLoading, setSettingsLoading] = useState(false);
@@ -272,10 +280,24 @@ export default function ChannelList({
       )}
       <div className="h-12 px-4 flex items-center border-b border-[var(--accent-2)]/30 group/header">
         <h2 className="font-bold text-[var(--text)] truncate flex-1">{serverName}</h2>
+        {inviteCode && (
+          <button
+            onClick={() => setInviteOpen(true)}
+            className="text-[var(--muted)] hover:text-[var(--text)] opacity-0 group-hover/header:opacity-100 transition-opacity shrink-0 ml-1"
+            title="Invite People"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+              <circle cx="9" cy="7" r="4" />
+              <line x1="19" y1="8" x2="19" y2="14" />
+              <line x1="22" y1="11" x2="16" y2="11" />
+            </svg>
+          </button>
+        )}
         {currentUserRole === "owner" && (
           <button
             onClick={() => { setShowServerSettings((v) => !v); setRenameValue(serverName); setSettingsError(""); }}
-            className="text-[var(--muted)] hover:text-[var(--text)] opacity-0 group-hover/header:opacity-100 transition-opacity shrink-0 ml-2"
+            className="text-[var(--muted)] hover:text-[var(--text)] opacity-0 group-hover/header:opacity-100 transition-opacity shrink-0 ml-1"
             title="Server Settings"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -523,6 +545,18 @@ export default function ChannelList({
           );
         })}
       </div>
+
+      {inviteOpen && inviteCode && (
+        <InviteModal
+          serverName={serverName}
+          serverIcon={serverIcon}
+          memberCount={memberCount ?? 0}
+          serverId={serverId}
+          inviteCode={inviteCode}
+          isOwner={currentUserRole === "owner"}
+          onClose={() => setInviteOpen(false)}
+        />
+      )}
     </div>
   );
 }
