@@ -1,14 +1,36 @@
 import { PrismaClient } from "@/generated/prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
 
-const connectionString =
-  process.env.DATABASE_URL ||
-  "postgresql://postgres:postgres@localhost:5432/campfire?schema=public";
+/**
+ * Returns true when DATABASE_URL is unset or starts with "file:",
+ * indicating SQLite should be used instead of PostgreSQL.
+ */
+export function isSQLite(): boolean {
+  const url = process.env.DATABASE_URL ?? "";
+  return !url || url.startsWith("file:");
+}
 
-const adapter = new PrismaPg(connectionString);
+export function getDatabaseProvider(): "postgresql" | "sqlite" {
+  return isSQLite() ? "sqlite" : "postgresql";
+}
+
+function createPrismaClient(): InstanceType<typeof PrismaClient> {
+  if (isSQLite()) {
+    // SQLite: Prisma's built-in driver — no external adapter needed.
+    return new PrismaClient();
+  }
+
+  // PostgreSQL: use the PrismaPg driver adapter.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { PrismaPg } = require("@prisma/adapter-pg") as typeof import("@prisma/adapter-pg");
+  const connectionString =
+    process.env.DATABASE_URL ||
+    "postgresql://postgres:postgres@localhost:5432/campfire?schema=public";
+  const adapter = new PrismaPg(connectionString);
+  return new PrismaClient({ adapter });
+}
 
 const globalForPrisma = globalThis as unknown as { prisma: InstanceType<typeof PrismaClient> };
 
-export const prisma = globalForPrisma.prisma || new PrismaClient({ adapter });
+export const prisma = globalForPrisma.prisma || createPrismaClient();
 
 if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
