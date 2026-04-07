@@ -25,6 +25,8 @@ import { useChannels } from "@/hooks/useChannels";
 import { usePresence } from "@/hooks/usePresence";
 import { useVoice } from "@/hooks/useVoice";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
+import { useNotifications } from "@/hooks/useNotifications";
+import NotificationBell from "@/components/NotificationBell";
 
 import type { Channel } from "@/types/chat";
 
@@ -50,6 +52,9 @@ function ChatPageInner() {
   const presence = usePresence(srv.activeServer, auth.user);
   const voice = useVoice(srv.activeServer);
 
+  const { notify } = useNotifications();
+  const [notifications, setNotifications] = useState<Array<{id: string, title: string, body: string, timestamp: number, read: boolean}>>([]);
+
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
@@ -68,6 +73,41 @@ function ChatPageInner() {
     toggleMute: voice.toggleMute,
     toggleDeafen: voice.toggleDeafen,
   });
+
+  // Notification socket listeners
+  useEffect(() => {
+    const { getSocket } = require("@/lib/socket");
+    const s = getSocket();
+
+    function pushNotification(title: string, body: string) {
+      setNotifications((prev) => {
+        const item = { id: Date.now().toString() + Math.random(), title, body, timestamp: Date.now(), read: false };
+        return [item, ...prev].slice(0, 10);
+      });
+    }
+
+    function onDmMessage(message: { content: string }) {
+      notify("New DM", message.content);
+      pushNotification("New DM", message.content);
+    }
+
+    function onFriendRequest() {
+      notify("Friend Request", "Someone sent you a friend request");
+      pushNotification("Friend Request", "Someone sent you a friend request");
+    }
+
+    s.on("dm:message", onDmMessage);
+    s.on("friend:request", onFriendRequest);
+
+    return () => {
+      s.off("dm:message", onDmMessage);
+      s.off("friend:request", onFriendRequest);
+    };
+  }, [notify]);
+
+  const handleMarkAllRead = useCallback(() => {
+    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+  }, []);
 
   // Init: fetch user + servers, connect socket, restore URL selection
   useEffect(() => {
@@ -373,6 +413,7 @@ function ChatPageInner() {
             </svg>
           </button>
           <ShareLink />
+          <NotificationBell notifications={notifications} onMarkAllRead={handleMarkAllRead} />
           <AmbientSounds />
           <button
             onClick={() => setShortcutsOpen((p) => !p)}
