@@ -178,58 +178,78 @@ const EMOJI_DATA: { emoji: string; keywords: string }[] = [
   { emoji: "🪙", keywords: "coin money" },
 ];
 
-// URL regex — matches http(s) links
-const URL_REGEX = /https?:\/\/[^\s<]+[^\s<.,;:!?'")\]]/g;
-// Mention regex — matches @username
-const MENTION_REGEX = /@(\w+(?:#[a-f0-9]+)?)/g;
+// Inline markdown + URL + mention combined regex
+// Groups: 1=`code`, 2=**bold**, 3=bold-inner, 4=__bold__, 5=bold-inner2,
+//         6=*italic*, 7=italic-inner, 8=_italic_, 9=italic-inner2,
+//         10=~~strike~~, 11=strike-inner, 12=URL, 13=@mention
+const INLINE_RE =
+  /(`[^`\n]+`)|\*\*([^*\n]+)\*\*|__([^_\n]+)__|\*([^*\n]+)\*|_([^_\n]+)_|~~([^~\n]+)~~|(https?:\/\/[^\s<]+[^\s<.,;:!?'")\]])|(@\w+(?:#[a-f0-9]+)?)/g;
 
-function renderContent(text: string) {
-  // Split text into segments: plain text, URLs, mentions
-  const parts: { type: "text" | "url" | "mention"; value: string }[] = [];
-  const combined = new RegExp(`(${URL_REGEX.source})|(${MENTION_REGEX.source})`, "g");
-  let lastIndex = 0;
-  let match;
-
-  while ((match = combined.exec(text)) !== null) {
-    if (match.index > lastIndex) {
-      parts.push({ type: "text", value: text.slice(lastIndex, match.index) });
-    }
-    if (match[1]) {
-      parts.push({ type: "url", value: match[1] });
-    } else if (match[3]) {
-      parts.push({ type: "mention", value: match[3] });
-    }
-    lastIndex = match.index + match[0].length;
+let _inlineKey = 0;
+function renderInline(text: string): React.ReactNode {
+  const parts: React.ReactNode[] = [];
+  let last = 0;
+  INLINE_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = INLINE_RE.exec(text)) !== null) {
+    if (m.index > last) parts.push(text.slice(last, m.index));
+    const k = _inlineKey++;
+    if (m[1]) parts.push(<code key={k} className="bg-black/30 text-green-300 px-1 py-0.5 rounded text-[11px] font-mono">{m[1].slice(1, -1)}</code>);
+    else if (m[2]) parts.push(<strong key={k} className="font-bold">{m[2]}</strong>);
+    else if (m[3]) parts.push(<strong key={k} className="font-bold">{m[3]}</strong>);
+    else if (m[4]) parts.push(<em key={k} className="italic">{m[4]}</em>);
+    else if (m[5]) parts.push(<em key={k} className="italic">{m[5]}</em>);
+    else if (m[6]) parts.push(<del key={k} className="line-through opacity-60">{m[6]}</del>);
+    else if (m[7]) parts.push(<a key={k} href={m[7]} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline break-all">{m[7]}</a>);
+    else if (m[8]) parts.push(<span key={k} className="bg-blue-500/20 text-blue-300 rounded px-1 font-medium">{m[8]}</span>);
+    last = m.index + m[0].length;
   }
-  if (lastIndex < text.length) {
-    parts.push({ type: "text", value: text.slice(lastIndex) });
+  if (last < text.length) parts.push(text.slice(last));
+  return parts.length === 1 && typeof parts[0] === "string" ? parts[0] : <>{parts}</>;
+}
+
+function renderContent(text: string): React.ReactNode {
+  // Extract ``` code blocks first
+  const CODE_BLOCK_RE = /```([^`]*)```/gs;
+  const segments: Array<{ isBlock: boolean; content: string }> = [];
+  let last = 0;
+  let bm: RegExpExecArray | null;
+  CODE_BLOCK_RE.lastIndex = 0;
+  while ((bm = CODE_BLOCK_RE.exec(text)) !== null) {
+    if (bm.index > last) segments.push({ isBlock: false, content: text.slice(last, bm.index) });
+    segments.push({ isBlock: true, content: bm[1] });
+    last = bm.index + bm[0].length;
   }
+  if (last < text.length) segments.push({ isBlock: false, content: text.slice(last) });
 
-  if (parts.length === 0) return text;
-
-  return parts.map((part, i) => {
-    if (part.type === "url") {
-      return (
-        <a
-          key={i}
-          href={part.value}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-blue-400 hover:underline break-all"
-        >
-          {part.value}
-        </a>
+  const nodes: React.ReactNode[] = [];
+  segments.forEach((seg, si) => {
+    if (seg.isBlock) {
+      nodes.push(
+        <pre key={si} className="bg-black/40 border border-[var(--accent-2)]/20 rounded p-2 text-xs font-mono overflow-x-auto my-1 whitespace-pre text-green-300">
+          <code>{seg.content.replace(/^\n/, "").replace(/\n$/, "")}</code>
+        </pre>
       );
+      return;
     }
-    if (part.type === "mention") {
-      return (
-        <span key={i} className="bg-blue-500/20 text-blue-300 rounded px-1 font-medium">
-          @{part.value}
-        </span>
-      );
-    }
-    return <span key={i}>{part.value}</span>;
+    // Split by newline; handle blockquotes
+    const lines = seg.content.split("\n");
+    lines.forEach((line, li) => {
+      const isLastLine = li === lines.length - 1;
+      if (line.startsWith("> ")) {
+        nodes.push(
+          <span key={`${si}-${li}`} className="flex border-l-[3px] border-[var(--accent-2)] pl-2 my-0.5 text-[var(--muted)] italic">
+            {renderInline(line.slice(2))}
+          </span>
+        );
+      } else {
+        nodes.push(<span key={`${si}-${li}`}>{renderInline(line)}</span>);
+        if (!isLastLine) nodes.push(<br key={`br-${si}-${li}`} />);
+      }
+    });
   });
+
+  return <>{nodes}</>;
 }
 
 interface ReactionGroup {
@@ -389,7 +409,7 @@ export default function MessageBubble({ message, isOwn, currentUserId, canPin, o
         ) : (
           <>
             {message.content && (
-              <p className="text-[var(--text)] text-sm break-words">{renderContent(message.content)}</p>
+              <div className="text-[var(--text)] text-sm break-words">{renderContent(message.content)}</div>
             )}
             {message.attachmentUrl && (
               <Attachment
