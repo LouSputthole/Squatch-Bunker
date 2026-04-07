@@ -172,8 +172,9 @@ export default function LoginPage() {
             </div>
 
             <button
+              type="button"
               onClick={() => { setShowGuest(true); setError(""); }}
-              className="w-full py-2 bg-[var(--panel-2)] text-[var(--text)] rounded border border-[var(--accent-2)]/50 hover:border-[var(--accent-2)] transition-colors font-medium"
+              className="w-full py-3 bg-amber-700 text-white rounded hover:bg-amber-600 transition-colors font-semibold text-base"
             >
               Continue as Guest
             </button>
