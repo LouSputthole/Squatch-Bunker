@@ -695,7 +695,7 @@ export default function ChatPanel({
         </div>
       )}
 
-      <form onSubmit={handleSend} className={`px-4 pb-4 shrink-0 ${replyingTo ? "pt-0" : "pt-1"}`}>
+      <form onSubmit={handleSend} className={`px-4 pb-4 pb-safe shrink-0 ${replyingTo ? "pt-0" : "pt-1"}`}>
         <div className="flex items-center bg-[var(--panel)] rounded-lg border border-[var(--accent-2)]/30">
           <button
             type="button"

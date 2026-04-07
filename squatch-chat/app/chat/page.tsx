@@ -16,6 +16,7 @@ import AmbientSounds from "@/components/AmbientSounds";
 import ShareLink from "@/components/ShareLink";
 import ConnectionStatus from "@/components/ConnectionStatus";
 import DMPanel from "@/components/DMPanel";
+import UserProfileModal from "@/components/UserProfileModal";
 import FriendPanel from "@/components/FriendPanel";
 import { connectSocket, disconnectSocket } from "@/lib/socket";
 import { displayName } from "@/lib/utils";
@@ -57,6 +58,9 @@ function ChatPageInner() {
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [dmOpen, setDmOpen] = useState(false);
   const [friendsOpen, setFriendsOpen] = useState(false);
+  const [profileUserId, setProfileUserId] = useState<string | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [mobileView, setMobileView] = useState<"channels" | "chat" | "members">("channels");
 
   useKeyboardShortcuts({
     activeVoiceChannel: voice.activeVoiceChannel,
@@ -144,18 +148,88 @@ function ChatPageInner() {
   return (
     <div className="h-screen flex bg-[var(--bg)] relative">
       <ConnectionStatus />
-      {/* Server rail */}
-      <ServerList
-        servers={srv.servers}
-        activeServerId={dmOpen ? undefined : srv.activeServer?.id}
-        dmActive={dmOpen}
-        friendsActive={friendsOpen}
-        onDmClick={() => { setDmOpen((p) => !p); setFriendsOpen(false); }}
-        onFriendsClick={() => { setFriendsOpen((p) => !p); setDmOpen(false); }}
-        onServerSelect={(s) => { setDmOpen(false); setFriendsOpen(false); handleServerSelect(s); }}
-        onServerCreated={handleServerCreated}
-        onServerJoined={handleServerJoined}
-      />
+
+      {/* Server rail — desktop only; mobile uses bottom tab bar */}
+      <div className="hidden md:flex">
+        <ServerList
+          servers={srv.servers}
+          activeServerId={dmOpen ? undefined : srv.activeServer?.id}
+          dmActive={dmOpen}
+          friendsActive={friendsOpen}
+          onDmClick={() => { setDmOpen((p) => !p); setFriendsOpen(false); }}
+          onFriendsClick={() => { setFriendsOpen((p) => !p); setDmOpen(false); }}
+          onServerSelect={(s) => { setDmOpen(false); setFriendsOpen(false); handleServerSelect(s); }}
+          onServerCreated={handleServerCreated}
+          onServerJoined={handleServerJoined}
+        />
+      </div>
+
+      {/* Mobile bottom tab bar — replaces server rail on small screens */}
+      <div className="md:hidden fixed bottom-0 left-0 right-0 h-16 flex items-center justify-around bg-[var(--bg)] border-t border-[var(--accent-2)]/30 z-20 pb-safe">
+        {/* Hamburger / channels toggle */}
+        <button
+          onClick={() => setSidebarOpen((p) => !p)}
+          className="flex flex-col items-center gap-0.5 min-h-[44px] min-w-[44px] justify-center text-[var(--muted)] hover:text-[var(--text)] transition-colors"
+          title="Channels"
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" />
+          </svg>
+          <span className="text-[10px]">Channels</span>
+        </button>
+        {/* First 3 server icons */}
+        {srv.servers.slice(0, 3).map((server) => (
+          <button
+            key={server.id}
+            onClick={() => {
+              setDmOpen(false);
+              setFriendsOpen(false);
+              handleServerSelect(server);
+              setSidebarOpen(false);
+              setMobileView("chat");
+            }}
+            className={`flex flex-col items-center gap-0.5 min-h-[44px] min-w-[44px] justify-center transition-colors ${
+              srv.activeServer?.id === server.id && !dmOpen && !friendsOpen
+                ? "text-[var(--text)]"
+                : "text-[var(--muted)] hover:text-[var(--text)]"
+            }`}
+            title={server.name}
+          >
+            {(server as { icon?: string | null }).icon ? (
+              <img
+                src={(server as { icon?: string | null }).icon!}
+                alt={server.name}
+                className="w-7 h-7 rounded-full object-cover"
+              />
+            ) : (
+              <div className="w-7 h-7 rounded-full bg-[var(--accent-2)] flex items-center justify-center text-xs font-bold text-[var(--text)]">
+                {server.name.charAt(0).toUpperCase()}
+              </div>
+            )}
+          </button>
+        ))}
+        {/* DMs button */}
+        <button
+          onClick={() => { setDmOpen((p) => !p); setFriendsOpen(false); }}
+          className={`flex flex-col items-center gap-0.5 min-h-[44px] min-w-[44px] justify-center transition-colors ${
+            dmOpen ? "text-[var(--text)]" : "text-[var(--muted)] hover:text-[var(--text)]"
+          }`}
+          title="Direct Messages"
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
+          </svg>
+          <span className="text-[10px]">DMs</span>
+        </button>
+      </div>
+
+      {/* Mobile sidebar overlay backdrop */}
+      {sidebarOpen && (
+        <div
+          className="md:hidden fixed inset-0 bg-black/50 z-30"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
 
       {/* DM panel */}
       {dmOpen && auth.user ? (
@@ -185,28 +259,40 @@ function ChatPageInner() {
         />
       ) : (
       <>
-      {/* Channel sidebar */}
+      {/* Channel sidebar — fixed overlay on mobile, static on desktop */}
       {srv.activeServer ? (
-        <ChannelList
-          serverName={srv.activeServer.name}
-          serverBanner={(srv.activeServer as { banner?: string | null }).banner}
-          channels={srv.activeServer.channels}
-          activeChannelId={ch.activeChannel?.id}
-          serverId={srv.activeServer.id}
-          unreadCounts={ch.unreadCounts}
-          currentUserId={auth.user?.id}
-          currentUserRole={presence.userRole}
-          activeVoiceChannelId={voice.activeVoiceChannel?.id}
-          voiceParticipants={voice.voiceParticipants}
-          onChannelSelect={ch.selectChannel}
-          onChannelCreated={handleChannelCreated}
-          onVoiceJoin={voice.joinVoice}
-          onVoiceLeave={voice.leaveVoice}
-          onServerRenamed={handleServerRenamed}
-          onServerDeleted={handleServerDeleted}
-        />
+        <div
+          className={[
+            "fixed left-0 top-0 bottom-0 z-40 w-64 transform transition-transform duration-300",
+            "md:static md:w-auto md:z-auto md:translate-x-0 md:transition-none",
+            sidebarOpen ? "translate-x-0" : "-translate-x-full",
+          ].join(" ")}
+        >
+          <ChannelList
+            serverName={srv.activeServer.name}
+            serverBanner={(srv.activeServer as { banner?: string | null }).banner}
+            channels={srv.activeServer.channels}
+            activeChannelId={ch.activeChannel?.id}
+            serverId={srv.activeServer.id}
+            unreadCounts={ch.unreadCounts}
+            currentUserId={auth.user?.id}
+            currentUserRole={presence.userRole}
+            activeVoiceChannelId={voice.activeVoiceChannel?.id}
+            voiceParticipants={voice.voiceParticipants}
+            onChannelSelect={(channel) => {
+              ch.selectChannel(channel);
+              setSidebarOpen(false);
+              setMobileView("chat");
+            }}
+            onChannelCreated={handleChannelCreated}
+            onVoiceJoin={voice.joinVoice}
+            onVoiceLeave={voice.leaveVoice}
+            onServerRenamed={handleServerRenamed}
+            onServerDeleted={handleServerDeleted}
+          />
+        </div>
       ) : (
-        <div className="w-60 bg-[var(--panel)] flex flex-col items-center justify-center text-[var(--muted)] text-sm border-r border-[var(--accent-2)]/30 px-4 text-center gap-3 shrink-0">
+        <div className="hidden md:flex w-60 bg-[var(--panel)] flex-col items-center justify-center text-[var(--muted)] text-sm border-r border-[var(--accent-2)]/30 px-4 text-center gap-3 shrink-0">
           <p className="text-base text-[var(--text)]">No servers yet</p>
           <p className="text-xs">
             Use the <span className="text-[var(--accent)] font-bold">+</span> button to create a server
@@ -276,15 +362,18 @@ function ChatPageInner() {
         </div>
       )}
 
-      {/* Right sidebar: members or search */}
+      {/* Right sidebar: members or search — hidden on mobile */}
       {srv.activeServer && !searchOpen && (
-        <MemberList
-          serverId={srv.activeServer.id}
-          onlineMemberIds={presence.onlineMembers}
-          memberStatuses={presence.memberStatuses}
-          currentUserId={auth.user?.id}
-          currentUserRole={presence.userRole}
-        />
+        <div className="hidden md:flex">
+          <MemberList
+            serverId={srv.activeServer.id}
+            onlineMemberIds={presence.onlineMembers}
+            memberStatuses={presence.memberStatuses}
+            currentUserId={auth.user?.id}
+            currentUserRole={presence.userRole}
+            onViewProfile={setProfileUserId}
+          />
+        </div>
       )}
       {searchOpen && srv.activeServer && (
         <SearchPanel
@@ -318,8 +407,8 @@ function ChatPageInner() {
         />
       )}
 
-      {/* User bar */}
-      <div className="absolute bottom-0 left-[72px] w-60 h-12 bg-[var(--bg)] border-t border-r border-[var(--accent-2)]/30 flex items-center px-3 justify-between z-10">
+      {/* User bar — desktop only (hidden on mobile) */}
+      <div className="hidden md:flex absolute bottom-0 left-[72px] w-60 h-12 bg-[var(--bg)] border-t border-r border-[var(--accent-2)]/30 items-center px-3 justify-between z-10">
         <div className="flex items-center gap-2 min-w-0">
           {auth.user && (
             <div className="relative cursor-pointer" onClick={() => setStatusMenuOpen((p) => !p)}>
@@ -398,6 +487,26 @@ function ChatPageInner() {
           </button>
         </div>
       </div>
+
+      {/* User profile modal */}
+      {profileUserId && auth.user && (
+        <UserProfileModal
+          userId={profileUserId}
+          currentUserId={auth.user.id}
+          onClose={() => setProfileUserId(null)}
+          onMessageUser={async (uid) => {
+            const res = await fetch("/api/dm", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ targetUserId: uid }),
+            });
+            if (res.ok) {
+              setProfileUserId(null);
+              setDmOpen(true);
+            }
+          }}
+        />
+      )}
 
       {/* Settings modal */}
       <SettingsModal
