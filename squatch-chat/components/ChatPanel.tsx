@@ -77,6 +77,7 @@ export default function ChatPanel({
   const lastReadIdRef = useRef<string | null>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isTypingRef = useRef(false);
+  const userTypingTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const [uploading, setUploading] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [slowRemaining, setSlowRemaining] = useState(0);
@@ -175,6 +176,12 @@ export default function ChatPanel({
         next.delete(message.author.id);
         return next;
       });
+      // Clear safety timeout for the user who just sent a message
+      const safetyTimeout = userTypingTimeoutsRef.current.get(message.author.id);
+      if (safetyTimeout) {
+        clearTimeout(safetyTimeout);
+        userTypingTimeoutsRef.current.delete(message.author.id);
+      }
       setTimeout(scrollToBottom, 100);
       // Notify when tab is in the background and message is from someone else
       if (message.author.id !== currentUserId && document.hidden) {
@@ -215,8 +222,27 @@ export default function ChatPanel({
         const next = new Map(prev);
         if (data.isTyping) {
           next.set(data.userId, data.username);
+          // Clear any existing safety timeout for this user
+          const existing = userTypingTimeoutsRef.current.get(data.userId);
+          if (existing) clearTimeout(existing);
+          // Set 4s safety timeout to remove user even if no isTyping:false arrives
+          const safetyTimeout = setTimeout(() => {
+            setTypingUsers((m) => {
+              const updated = new Map(m);
+              updated.delete(data.userId);
+              return updated;
+            });
+            userTypingTimeoutsRef.current.delete(data.userId);
+          }, 4000);
+          userTypingTimeoutsRef.current.set(data.userId, safetyTimeout);
         } else {
           next.delete(data.userId);
+          // Clear safety timeout when explicit stop arrives
+          const existing = userTypingTimeoutsRef.current.get(data.userId);
+          if (existing) {
+            clearTimeout(existing);
+            userTypingTimeoutsRef.current.delete(data.userId);
+          }
         }
         return next;
       });
@@ -250,7 +276,7 @@ export default function ChatPanel({
     typingTimeoutRef.current = setTimeout(() => {
       isTypingRef.current = false;
       socket.emit("typing:stop", channelId);
-    }, 2000);
+    }, 3000);
   }
 
   async function handleSend(e: React.FormEvent) {
@@ -517,11 +543,11 @@ export default function ChatPanel({
   const typingNames = Array.from(typingUsers.values()).map((name) => truncateName(name));
   const typingLabel =
     typingNames.length === 1
-      ? `${typingNames[0]} is typing`
+      ? `${typingNames[0]} is typing...`
       : typingNames.length === 2
-        ? `${typingNames[0]} and ${typingNames[1]} are typing`
+        ? `${typingNames[0]} and ${typingNames[1]} are typing...`
         : typingNames.length > 2
-          ? `${typingNames[0]} and ${typingNames.length - 1} others are typing`
+          ? "Several people are typing..."
           : null;
 
   return (
@@ -665,14 +691,14 @@ export default function ChatPanel({
         <div ref={messagesEndRef} />
       </div>
 
-      <div className="h-6 px-4 shrink-0 flex items-center">
+      <div className="h-5 px-4 shrink-0 flex items-center transition-opacity duration-150" style={{ opacity: typingLabel ? 1 : 0 }}>
         {typingLabel && (
-          <span className="flex items-center gap-1.5 text-xs text-[var(--muted)] italic">
+          <span className="flex items-center text-xs text-[var(--muted)] italic">
             {typingLabel}
-            <span className="flex items-end gap-0.5 not-italic" aria-hidden>
-              <span className="w-1 h-1 rounded-full bg-current animate-bounce" style={{ animationDelay: "0ms" }} />
-              <span className="w-1 h-1 rounded-full bg-current animate-bounce" style={{ animationDelay: "150ms" }} />
-              <span className="w-1 h-1 rounded-full bg-current animate-bounce" style={{ animationDelay: "300ms" }} />
+            <span className="inline-flex gap-0.5 items-end ml-1" aria-hidden>
+              <span className="w-1 h-1 rounded-full bg-[var(--muted)] animate-pulse" style={{ animationDelay: "0ms" }} />
+              <span className="w-1 h-1 rounded-full bg-[var(--muted)] animate-pulse" style={{ animationDelay: "200ms" }} />
+              <span className="w-1 h-1 rounded-full bg-[var(--muted)] animate-pulse" style={{ animationDelay: "400ms" }} />
             </span>
           </span>
         )}
