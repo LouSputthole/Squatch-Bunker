@@ -13,19 +13,8 @@ interface Participant {
   speaking?: boolean;
   camera?: boolean;
   avatar?: string | null;
-  connectionQuality?: "good" | "fair" | "poor";
-}
-
-function QualityDot({ quality }: { quality?: "good" | "fair" | "poor" }) {
-  if (!quality || quality === "good") return null;
-  const color = quality === "fair" ? "bg-amber-400" : "bg-red-500";
-  const label = quality === "fair" ? "Weak connection" : "Poor connection";
-  return (
-    <div
-      className={`absolute -top-1 -left-1 w-3 h-3 ${color} rounded-full border border-[#1a1a1e] z-10`}
-      title={label}
-    />
-  );
+  connectionQuality?: "good" | "fair" | "poor" | "unknown";
+  pingMs?: number;
 }
 
 interface CircleViewProps {
@@ -260,7 +249,11 @@ export default function CircleView({ participants, currentUserId, onContextMenu 
                   {/* Status badges */}
                   {p.muted && <MicOffDot />}
                   {p.deafened && <DeafDot />}
-                  <QualityDot quality={p.connectionQuality} />
+                  {!isSelf && p.connectionQuality && p.connectionQuality !== "good" && (
+                    <div className="absolute -top-1 -left-1 z-10">
+                      <ConnectionQualityIcon quality={p.connectionQuality} pingMs={p.pingMs} />
+                    </div>
+                  )}
 
                   {/* Camera indicator */}
                   {p.camera && (
@@ -287,12 +280,6 @@ export default function CircleView({ participants, currentUserId, onContextMenu 
                   {isSelf ? "You" : displayName(p.username)}
                 </span>
 
-                {/* Connection quality icon below name */}
-                {!isSelf && p.connectionQuality && (
-                  <div className="flex items-center justify-center mt-0.5">
-                    <ConnectionQualityIcon quality={p.connectionQuality} pingMs={p.pingMs} />
-                  </div>
-                )}
               </div>
             </div>
           );
