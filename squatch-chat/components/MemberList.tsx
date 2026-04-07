@@ -35,10 +35,17 @@ interface MemberListProps {
 
 const STATUS_COLORS: Record<string, string> = {
   online: "bg-green-500",
-  idle: "bg-yellow-500",
   dnd: "bg-red-500",
   invisible: "bg-gray-500",
 };
+
+function MoonIcon() {
+  return (
+    <svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor" className="text-yellow-400 shrink-0">
+      <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+    </svg>
+  );
+}
 
 export default function MemberList({ serverId, currentUserId, currentUserRole, onlineMemberIds, memberStatuses }: MemberListProps) {
   const [members, setMembers] = useState<Member[]>([]);
@@ -127,11 +134,15 @@ export default function MemberList({ serverId, currentUserId, currentUserRole, o
           className={online ? "bg-[var(--accent-2)] text-[var(--text)]" : "bg-[var(--panel-2)] text-[var(--muted)]"}
         />
         <div className="flex items-center gap-1.5 min-w-0">
-          <div className={`w-2 h-2 rounded-full shrink-0 ${
-            online
-              ? (STATUS_COLORS[memberStatuses?.get(m.id) || "online"] || "bg-green-500")
-              : "bg-[var(--muted)]"
-          }`} />
+          {(() => {
+            const status = online ? (memberStatuses?.get(m.id) || "online") : "offline";
+            if (status === "idle") return <MoonIcon />;
+            return (
+              <div className={`w-2 h-2 rounded-full shrink-0 ${
+                online ? (STATUS_COLORS[status] || "bg-green-500") : "bg-[var(--muted)]"
+              }`} />
+            );
+          })()}
           <span
             className={`text-sm truncate ${online ? "text-[var(--text)]" : "text-[var(--muted)]"}`}
             style={roleColor ? { color: roleColor } : undefined}
