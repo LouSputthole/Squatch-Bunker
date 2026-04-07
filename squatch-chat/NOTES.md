@@ -41,15 +41,26 @@ squatch-chat/
 │   ├── Avatar.tsx           # Shared avatar (image or initials fallback)
 │   ├── ChannelList.tsx      # Sidebar: text channels (#) + voice channels (speaker icon)
 │   ├── ChatPanel.tsx        # Text chat: messages, typing indicators, optimistic sends
-│   ├── MemberList.tsx       # Right sidebar: online/offline members, invite/join
-│   ├── MessageBubble.tsx    # Single message: edit/delete, avatar, timestamps
+│   ├── MemberList.tsx       # Right sidebar: online/offline members, role badges, context menu
+│   ├── MessageBubble.tsx    # Single message: edit/delete, avatar, reactions, attachments
+│   ├── SearchPanel.tsx      # Debounced message search across server
 │   ├── ServerList.tsx       # Left rail: server icons, create/join
 │   ├── SettingsModal.tsx    # Settings: Audio tab + Account tab (avatar upload)
-│   ├── VoicePanel.tsx       # Headless WebRTC engine (forwardRef, no visible UI)
-│   └── VoiceRoom.tsx        # Voice room view: participant grid, mute/deafen/disconnect
+│   ├── VoicePanel.tsx       # Headless WebRTC engine (forwardRef, VAD, PTT)
+│   └── VoiceRoom.tsx        # Voice room view: participant grid, speaking indicators
+├── hooks/                   # Modular state hooks (extracted from chat page)
+│   ├── useAuth.ts           # User state, login check, logout, avatar updates
+│   ├── useServers.ts        # Server list, active server, create/join/select
+│   ├── useChannels.ts       # Active channel, URL sync, unread counts
+│   ├── usePresence.ts       # Online members, user role in server
+│   ├── useVoice.ts          # Voice channel, participants, PTT, state, ref
+│   └── useKeyboardShortcuts.ts # All hotkeys (Ctrl+K, Ctrl+M, Ctrl+D, Esc)
+├── types/
+│   └── chat.ts              # Shared interfaces: Channel, Server, User, VoiceParticipant
 ├── lib/
 │   ├── auth.ts              # JWT token/session management, cookie helpers
 │   ├── db.ts                # Prisma singleton with PrismaPg adapter
+│   ├── permissions.ts       # Role hierarchy, permission checks, colors, labels
 │   ├── socket.ts            # Client-side Socket.IO singleton
 │   └── utils.ts             # displayName(), truncateName(), initials()
 ├── realtime/
@@ -100,6 +111,14 @@ squatch-chat/
 - Max 2MB, accepts JPEG/PNG/GIF/WebP
 - `Avatar` component shows uploaded image or falls back to initials circle
 
+### Roles & Permissions
+- `role` field on ServerMember: `owner`, `admin`, `mod`, `member`
+- Hierarchy in `lib/permissions.ts`: owner(4) > admin(3) > mod(2) > member(1)
+- Server creator auto-assigned `owner`
+- MemberList shows colored role badges + right-click context menu for role management
+- API guards: `PATCH /api/servers/:id/members/:userId` (change role), `DELETE` (kick)
+- Higher roles can manage lower roles only
+
 ### Channels
 - Two types: `text` (default) and `voice` — stored in `Channel.type` field
 - Text channels show `#` icon, voice channels show speaker icon
@@ -109,6 +128,9 @@ squatch-chat/
 - Optimistic rendering with temp IDs, replaced on server confirmation
 - Edit/delete with realtime broadcast
 - Unread badges on text channels (tracked per-channel)
+- Emoji reactions with toggle semantics (click to add/remove)
+- File/image attachments (10MB max, inline image preview, file download cards)
+- Message search: `GET /api/messages/search?serverId=X&q=term` with debounced UI
 
 ---
 
@@ -160,6 +182,20 @@ The app runs at `http://localhost:3000`, realtime server at `http://localhost:30
 
 ### Dynamic imports for DB resilience
 Guest users work without a database. API routes use `try { const { prisma } = await import("@/lib/db"); ... } catch { /* fallback */ }` pattern.
+
+### Modular hooks architecture
+The chat page (`app/chat/page.tsx`) is a thin composition layer. All logic lives in `hooks/`:
+
+| Hook | Owns | Touch when... |
+|---|---|---|
+| `useAuth` | user, login, logout, avatar | changing auth flow |
+| `useServers` | server list, create/join | adding server features |
+| `useChannels` | active channel, URL, unreads | changing channel behavior |
+| `usePresence` | online members, user role | updating presence/roles |
+| `useVoice` | voice state, PTT, participants | working on voice features |
+| `useKeyboardShortcuts` | all hotkeys | adding shortcuts |
+
+Shared types live in `types/chat.ts`. Each hook is self-contained — work on one without reading the others.
 
 ### forwardRef + useImperativeHandle
 Used by VoicePanel to expose methods to the parent chat page. The parent holds a ref (`voicePanelRef`) and calls methods like `voicePanelRef.current?.toggleMute()` from VoiceRoom's button callbacks.
