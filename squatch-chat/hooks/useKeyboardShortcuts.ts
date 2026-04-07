@@ -38,6 +38,13 @@ export function useKeyboardShortcuts({
         return;
       }
 
+      // Ctrl/Cmd+/: toggle shortcuts panel
+      if ((e.ctrlKey || e.metaKey) && e.key === "/") {
+        e.preventDefault();
+        setShortcutsOpen?.((prev) => !prev);
+        return;
+      }
+
       // Ctrl/Cmd+M: toggle mute
       if ((e.ctrlKey || e.metaKey) && e.key === "m") {
         if (activeVoiceChannel) {

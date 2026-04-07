@@ -59,10 +59,11 @@ export default function RegisterPage() {
           )}
 
           <div>
-            <label className="block text-sm text-[var(--muted)] mb-1">
+            <label htmlFor="register-email" className="block text-sm text-[var(--muted)] mb-1">
               Email
             </label>
             <input
+              id="register-email"
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
@@ -72,10 +73,11 @@ export default function RegisterPage() {
           </div>
 
           <div>
-            <label className="block text-sm text-[var(--muted)] mb-1">
+            <label htmlFor="register-username" className="block text-sm text-[var(--muted)] mb-1">
               Username
             </label>
             <input
+              id="register-username"
               type="text"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
@@ -85,10 +87,11 @@ export default function RegisterPage() {
           </div>
 
           <div>
-            <label className="block text-sm text-[var(--muted)] mb-1">
+            <label htmlFor="register-password" className="block text-sm text-[var(--muted)] mb-1">
               Password
             </label>
             <input
+              id="register-password"
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}

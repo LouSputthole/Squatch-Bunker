@@ -592,8 +592,9 @@ export default function ChatPanel({
             onClick={() => { setTopicDraft(topic); setEditingTopic(true); }}
             className="text-[var(--muted)] hover:text-[var(--text)] shrink-0"
             title="Edit topic"
+            aria-label="Edit channel topic"
           >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="12" height="12" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
               <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
             </svg>
@@ -604,6 +605,8 @@ export default function ChatPanel({
             onClick={() => setShowPinned((p) => !p)}
             className={`text-xs px-2 py-1 rounded transition-colors ${showPinned ? "bg-yellow-500/20 text-yellow-400" : "text-[var(--muted)] hover:text-yellow-400"}`}
             title="Pinned messages"
+            aria-label={showPinned ? "Hide pinned messages" : "Show pinned messages"}
+            aria-expanded={showPinned}
           >
             📌 {messages.filter((m) => m.pinned).length}
           </button>
@@ -623,7 +626,7 @@ export default function ChatPanel({
         </div>
       )}
 
-      <div className="flex-1 overflow-y-auto px-4 py-2">
+      <div role="log" aria-live="polite" aria-label={`Messages in #${channelName}`} className="flex-1 overflow-y-auto px-4 py-2">
         {loading ? (
           <div className="flex items-center justify-center h-full text-[var(--muted)]">
             Loading tracks...
@@ -667,11 +670,11 @@ export default function ChatPanel({
         <div ref={messagesEndRef} />
       </div>
 
-      <div className="h-6 px-4 shrink-0 flex items-center">
+      <div aria-live="polite" aria-atomic="true" className="h-6 px-4 shrink-0 flex items-center">
         {typingLabel && (
           <span className="flex items-center gap-1.5 text-xs text-[var(--muted)] italic">
             {typingLabel}
-            <span className="flex items-end gap-0.5 not-italic" aria-hidden>
+            <span className="flex items-end gap-0.5 not-italic" aria-hidden="true">
               <span className="w-1 h-1 rounded-full bg-current animate-bounce" style={{ animationDelay: "0ms" }} />
               <span className="w-1 h-1 rounded-full bg-current animate-bounce" style={{ animationDelay: "150ms" }} />
               <span className="w-1 h-1 rounded-full bg-current animate-bounce" style={{ animationDelay: "300ms" }} />
@@ -691,6 +694,7 @@ export default function ChatPanel({
             type="button"
             onClick={() => setReplyingTo(null)}
             className="shrink-0 text-[var(--muted)] hover:text-[var(--danger)] transition-colors ml-1"
+            aria-label="Cancel reply"
           >
             ✕
           </button>
@@ -705,8 +709,9 @@ export default function ChatPanel({
             disabled={uploading}
             className="px-3 py-3 text-[var(--muted)] hover:text-[var(--text)] transition-colors disabled:opacity-30"
             title="Upload file"
+            aria-label="Upload file"
           >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="20" height="20" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" />
             </svg>
           </button>
@@ -717,7 +722,9 @@ export default function ChatPanel({
             onChange={handleFileUpload}
             className="hidden"
           />
+          <label htmlFor="message-input" className="sr-only">Message #{channelName}</label>
           <input
+            id="message-input"
             type="text"
             value={newMessage}
             onChange={handleInputChange}
@@ -729,6 +736,7 @@ export default function ChatPanel({
             type="submit"
             disabled={!newMessage.trim() || uploading || slowRemaining > 0}
             className="px-4 py-3 text-[var(--accent-2)] hover:text-[var(--accent)] disabled:opacity-30 transition-colors"
+            aria-label="Send message"
           >
             Send
           </button>
@@ -741,7 +749,7 @@ export default function ChatPanel({
         <div className="w-72 flex flex-col border-l border-[var(--accent-2)]/30 bg-[var(--panel)] shrink-0">
           <div className="h-12 px-3 flex items-center justify-between border-b border-[var(--accent-2)]/30 shrink-0">
             <span className="text-sm font-semibold text-[var(--text)]">Thread</span>
-            <button onClick={() => setThreadParent(null)} className="text-[var(--muted)] hover:text-[var(--text)] text-lg leading-none">&times;</button>
+            <button onClick={() => setThreadParent(null)} className="text-[var(--muted)] hover:text-[var(--text)] text-lg leading-none" aria-label="Close thread">&times;</button>
           </div>
           <div className="px-3 py-2 border-b border-[var(--accent-2)]/10 text-xs text-[var(--muted)]">
             Reply to <span className="text-[var(--text)] font-medium">{threadParent.author.username}</span>
@@ -770,7 +778,9 @@ export default function ChatPanel({
           </div>
           <form onSubmit={sendThreadMessage} className="px-3 pb-3 pt-1 shrink-0">
             <div className="flex items-center bg-[var(--panel-2)] rounded-lg border border-[var(--accent-2)]/30">
+              <label htmlFor="thread-input" className="sr-only">Reply in thread</label>
               <input
+                id="thread-input"
                 type="text"
                 value={threadInput}
                 onChange={(e) => setThreadInput(e.target.value)}
@@ -781,6 +791,7 @@ export default function ChatPanel({
                 type="submit"
                 disabled={!threadInput.trim()}
                 className="px-3 py-2 text-[var(--accent-2)] hover:text-[var(--accent)] disabled:opacity-30 transition-colors text-sm"
+                aria-label="Send thread reply"
               >
                 Send
               </button>

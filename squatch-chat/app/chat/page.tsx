@@ -142,7 +142,7 @@ function ChatPageInner() {
   }
 
   return (
-    <div className="h-screen flex bg-[var(--bg)] relative">
+    <div id="main-content" className="h-screen flex bg-[var(--bg)] relative">
       <ConnectionStatus />
       {/* Server rail */}
       <ServerList
@@ -369,8 +369,9 @@ function ChatPageInner() {
             onClick={() => setSearchOpen(!searchOpen)}
             className="text-[var(--muted)] hover:text-[var(--text)] transition-colors"
             title="Search (Ctrl+K)"
+            aria-label="Search (Ctrl+K)"
           >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="15" height="15" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
             </svg>
           </button>
@@ -380,6 +381,7 @@ function ChatPageInner() {
             onClick={() => setShortcutsOpen((p) => !p)}
             className="text-[var(--muted)] hover:text-[var(--text)] transition-colors font-bold text-sm"
             title="Keyboard shortcuts (?)"
+            aria-label="Keyboard shortcuts"
           >
             ?
           </button>
@@ -387,6 +389,7 @@ function ChatPageInner() {
             onClick={() => setSettingsOpen(true)}
             className="text-[var(--muted)] hover:text-[var(--text)] transition-colors"
             title="Settings"
+            aria-label="Settings"
           >
             <SettingsIcon />
           </button>

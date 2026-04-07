@@ -114,6 +114,7 @@ export default function ChannelList({
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const [localChannels, setLocalChannels] = useState<Channel[]>(channels);
+  const [focusedChannelIndex, setFocusedChannelIndex] = useState<number>(-1);
 
   // Sync localChannels when parent channels prop changes
   useEffect(() => {
@@ -243,6 +244,41 @@ export default function ChannelList({
     return a.localeCompare(b);
   });
 
+  // Flat list of navigable channels for keyboard nav (visible text channels first, then voice)
+  const navigableChannels: Channel[] = [
+    ...sortedCategories.flatMap((cat) =>
+      collapsedCategories.has(cat) ? [] : categoryMap.get(cat)!
+    ),
+    ...voiceChannels,
+  ];
+
+  function handleChannelListKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setFocusedChannelIndex((prev) =>
+        prev < navigableChannels.length - 1 ? prev + 1 : 0
+      );
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setFocusedChannelIndex((prev) =>
+        prev > 0 ? prev - 1 : navigableChannels.length - 1
+      );
+    } else if (e.key === "Enter" && focusedChannelIndex >= 0) {
+      const focused = navigableChannels[focusedChannelIndex];
+      if (focused) {
+        if (focused.type === "voice") {
+          if (activeVoiceChannelId === focused.id) {
+            onVoiceLeave?.();
+          } else {
+            onVoiceJoin?.(focused);
+          }
+        } else {
+          onChannelSelect(focused);
+        }
+      }
+    }
+  }
+
   async function handleChannelDrop(targetChannelId: string) {
     if (!draggingId || draggingId === targetChannelId) return;
     const currentOrder = sortedLocalChannels.map((c) => c.id);
@@ -264,7 +300,13 @@ export default function ChannelList({
   }
 
   return (
-    <div className="w-60 bg-[var(--panel)] flex flex-col border-r border-[var(--accent-2)]/30 shrink-0">
+    <div
+      className="w-60 bg-[var(--panel)] flex flex-col border-r border-[var(--accent-2)]/30 shrink-0 outline-none"
+      tabIndex={0}
+      onKeyDown={handleChannelListKeyDown}
+      onBlur={() => setFocusedChannelIndex(-1)}
+      aria-label="Channel list"
+    >
       {serverBanner && (
         <div className="h-16 overflow-hidden shrink-0">
           <img src={serverBanner} alt="Server banner" className="w-full h-full object-cover" />
@@ -277,8 +319,10 @@ export default function ChannelList({
             onClick={() => { setShowServerSettings((v) => !v); setRenameValue(serverName); setSettingsError(""); }}
             className="text-[var(--muted)] hover:text-[var(--text)] opacity-0 group-hover/header:opacity-100 transition-opacity shrink-0 ml-2"
             title="Server Settings"
+            aria-label="Server settings"
+            aria-expanded={showServerSettings}
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <circle cx="12" cy="12" r="3" />
               <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
             </svg>
@@ -293,9 +337,10 @@ export default function ChannelList({
             <p className="text-xs text-[var(--danger)]">{settingsError}</p>
           )}
           <form onSubmit={handleRename} className="space-y-1">
-            <label className="text-xs font-semibold text-[var(--muted)] uppercase">Rename Server</label>
+            <label htmlFor="rename-server-input" className="text-xs font-semibold text-[var(--muted)] uppercase">Rename Server</label>
             <div className="flex gap-1">
               <input
+                id="rename-server-input"
                 type="text"
                 value={renameValue}
                 onChange={(e) => setRenameValue(e.target.value)}
@@ -330,70 +375,82 @@ export default function ChannelList({
 
       <div className="flex-1 overflow-y-auto py-2">
         {/* Text Channels grouped by category */}
-        {sortedCategories.map((cat) => {
-          const catChannels = categoryMap.get(cat)!;
-          const label = cat || "Text Channels";
-          const isCollapsed = collapsedCategories.has(cat);
-          return (
-            <div key={cat}>
-              <div className="px-2 mb-1 flex items-center justify-between mt-1">
-                <button
-                  onClick={() => toggleCategory(cat)}
-                  className="flex items-center gap-1 text-xs font-semibold text-[var(--muted)] uppercase tracking-wide hover:text-[var(--text)] transition-colors"
-                >
-                  <span className="text-[8px]">{isCollapsed ? "▶" : "▼"}</span>
-                  {label}
-                </button>
-                {cat === "" && (
+        {(() => {
+          let flatIndex = 0;
+          return sortedCategories.map((cat) => {
+            const catChannels = categoryMap.get(cat)!;
+            const label = cat || "Text Channels";
+            const isCollapsed = collapsedCategories.has(cat);
+            return (
+              <div key={cat}>
+                <div className="px-2 mb-1 flex items-center justify-between mt-1">
                   <button
-                    onClick={() => setCreating("text")}
-                    className="text-[var(--muted)] hover:text-[var(--text)] text-lg leading-none"
-                    title="Create Text Channel"
+                    onClick={() => toggleCategory(cat)}
+                    className="flex items-center gap-1 text-xs font-semibold text-[var(--muted)] uppercase tracking-wide hover:text-[var(--text)] transition-colors"
+                    aria-expanded={!isCollapsed}
+                    aria-label={`${isCollapsed ? "Expand" : "Collapse"} ${label} category`}
                   >
-                    +
+                    <span className="text-[8px]">{isCollapsed ? "▶" : "▼"}</span>
+                    {label}
                   </button>
-                )}
+                  {cat === "" && (
+                    <button
+                      onClick={() => setCreating("text")}
+                      className="text-[var(--muted)] hover:text-[var(--text)] text-lg leading-none"
+                      title="Create Text Channel"
+                      aria-label="Create channel"
+                    >
+                      +
+                    </button>
+                  )}
+                </div>
+                {!isCollapsed && catChannels.map((channel) => {
+                  const navIdx = flatIndex++;
+                  const isFocused = focusedChannelIndex === navIdx;
+                  const unread = unreadCounts?.get(channel.id) || 0;
+                  const muted = isMuted(channel.id);
+                  const showBadge = !muted && unread > 0;
+                  return (
+                    <button
+                      key={channel.id}
+                      onClick={() => onChannelSelect(channel)}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        toggleMute(channel.id);
+                      }}
+                      title={channel.description || undefined}
+                      aria-label={`#${channel.name}${unread > 0 && !muted ? `, ${unread} unread` : ""}${muted ? ", muted" : ""}`}
+                      aria-current={activeChannelId === channel.id ? "page" : undefined}
+                      draggable={isAdminOrOwner}
+                      onDragStart={isAdminOrOwner ? () => setDraggingId(channel.id) : undefined}
+                      onDragOver={isAdminOrOwner ? (e) => { e.preventDefault(); setDragOverId(channel.id); } : undefined}
+                      onDragEnd={isAdminOrOwner ? () => { setDraggingId(null); setDragOverId(null); } : undefined}
+                      onDrop={isAdminOrOwner ? () => handleChannelDrop(channel.id) : undefined}
+                      className={`w-full text-left px-2 py-1 rounded text-sm flex items-center gap-1.5 ${
+                        activeChannelId === channel.id
+                          ? "bg-[var(--panel-2)] text-[var(--text)]"
+                          : showBadge
+                            ? "text-[var(--text)] font-semibold hover:bg-[var(--panel-2)]/50"
+                            : "text-[var(--muted)] hover:bg-[var(--panel-2)]/50 hover:text-[var(--text)]"
+                      } ${dragOverId === channel.id && draggingId !== channel.id ? "opacity-50" : ""} ${
+                        isFocused ? "ring-1 ring-[var(--accent)]/50" : ""
+                      }`}
+                    >
+                      <HashIcon />
+                      <span className="flex-1 truncate">{channel.name}</span>
+                      {muted && <MuteIcon />}
+                      {showBadge && (
+                        <span className="ml-auto bg-[var(--accent)] text-[var(--bg)] text-xs font-bold rounded-full min-w-[1.25rem] h-5 flex items-center justify-center px-1">
+                          {unread > 99 ? "99+" : unread}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
               </div>
-              {!isCollapsed && catChannels.map((channel) => {
-                const unread = unreadCounts?.get(channel.id) || 0;
-                const muted = isMuted(channel.id);
-                const showBadge = !muted && unread > 0;
-                return (
-                  <button
-                    key={channel.id}
-                    onClick={() => onChannelSelect(channel)}
-                    onContextMenu={(e) => {
-                      e.preventDefault();
-                      toggleMute(channel.id);
-                    }}
-                    title={channel.description || undefined}
-                    draggable={isAdminOrOwner}
-                    onDragStart={isAdminOrOwner ? () => setDraggingId(channel.id) : undefined}
-                    onDragOver={isAdminOrOwner ? (e) => { e.preventDefault(); setDragOverId(channel.id); } : undefined}
-                    onDragEnd={isAdminOrOwner ? () => { setDraggingId(null); setDragOverId(null); } : undefined}
-                    onDrop={isAdminOrOwner ? () => handleChannelDrop(channel.id) : undefined}
-                    className={`w-full text-left px-2 py-1 rounded text-sm flex items-center gap-1.5 ${
-                      activeChannelId === channel.id
-                        ? "bg-[var(--panel-2)] text-[var(--text)]"
-                        : showBadge
-                          ? "text-[var(--text)] font-semibold hover:bg-[var(--panel-2)]/50"
-                          : "text-[var(--muted)] hover:bg-[var(--panel-2)]/50 hover:text-[var(--text)]"
-                    } ${dragOverId === channel.id && draggingId !== channel.id ? "opacity-50" : ""}`}
-                  >
-                    <HashIcon />
-                    <span className="flex-1 truncate">{channel.name}</span>
-                    {muted && <MuteIcon />}
-                    {showBadge && (
-                      <span className="ml-auto bg-[var(--accent)] text-[var(--bg)] text-xs font-bold rounded-full min-w-[1.25rem] h-5 flex items-center justify-center px-1">
-                        {unread > 99 ? "99+" : unread}
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          );
-        })}
+            );
+          });
+        })()}
 
         {/* Add channel button (when no uncategorized section exists) */}
         {!categoryMap.has("") && (
@@ -444,6 +501,7 @@ export default function ChannelList({
             onClick={() => setCreating("voice")}
             className="text-[var(--muted)] hover:text-[var(--text)] text-lg leading-none"
             title="Create Voice Channel"
+            aria-label="Create voice channel"
           >
             +
           </button>
@@ -473,7 +531,9 @@ export default function ChannelList({
           </div>
         )}
 
-        {voiceChannels.map((channel) => {
+        {voiceChannels.map((channel, voiceIdx) => {
+          const navIdx = textChannels.length + voiceIdx;
+          const isFocused = focusedChannelIndex === navIdx;
           const isActive = activeVoiceChannelId === channel.id;
           const participants = localVoiceParticipants.get(channel.id) || [];
           return (
@@ -486,11 +546,13 @@ export default function ChannelList({
                     onVoiceJoin?.(channel);
                   }
                 }}
+                aria-label={isActive ? `Leave ${channel.name} voice channel` : `Join ${channel.name} voice channel`}
+                aria-pressed={isActive}
                 className={`w-full text-left px-2 py-1 rounded text-sm flex items-center gap-1.5 ${
                   isActive
                     ? "bg-green-600/20 text-green-400"
                     : "text-[var(--muted)] hover:bg-[var(--panel-2)]/50 hover:text-[var(--text)]"
-                }`}
+                } ${isFocused ? "ring-1 ring-[var(--accent)]/50" : ""}`}
               >
                 <SpeakerIcon />
                 <span className="flex-1 truncate">{channel.name}</span>
