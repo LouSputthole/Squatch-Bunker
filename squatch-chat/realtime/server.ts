@@ -129,6 +129,18 @@ io.on("connection", (socket) => {
     });
   });
 
+  // Handle reaction update - broadcast to channel room
+  socket.on("message:react", (data: {
+    channelId: string;
+    messageId: string;
+    reactions: Record<string, { count: number; users: string[]; userIds: string[] }>;
+  }) => {
+    socket.to(`channel:${data.channelId}`).emit(`message:reacted:${data.channelId}`, {
+      messageId: data.messageId,
+      reactions: data.reactions,
+    });
+  });
+
   // Typing indicator
   socket.on("typing:start", (channelId: string) => {
     socket.to(`channel:${channelId}`).emit("typing:update", {

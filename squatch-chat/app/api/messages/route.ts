@@ -45,14 +45,29 @@ export async function GET(request: Request) {
       where: { channelId },
       include: {
         author: { select: { id: true, username: true, avatar: true } },
+        reactions: {
+          select: { emoji: true, userId: true, user: { select: { username: true } } },
+        },
       },
       orderBy: { createdAt: "desc" },
       take: limit,
       ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
     });
 
+    // Group reactions by emoji per message
+    const messagesWithGroupedReactions = messages.map((m) => {
+      const grouped: Record<string, { count: number; users: string[]; userIds: string[] }> = {};
+      for (const r of m.reactions) {
+        if (!grouped[r.emoji]) grouped[r.emoji] = { count: 0, users: [], userIds: [] };
+        grouped[r.emoji].count++;
+        grouped[r.emoji].users.push(r.user.username);
+        grouped[r.emoji].userIds.push(r.userId);
+      }
+      return { ...m, reactions: grouped };
+    });
+
     return NextResponse.json({
-      messages: messages.reverse(),
+      messages: messagesWithGroupedReactions.reverse(),
       nextCursor: messages.length === limit ? messages[0]?.id : null,
     });
   } catch (err) {
@@ -67,10 +82,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
 
-  const { channelId, content } = await request.json();
-  if (!channelId || !content || !content.trim()) {
+  const { channelId, content, attachmentUrl, attachmentName } = await request.json();
+  if (!channelId || (!content?.trim() && !attachmentUrl)) {
     return NextResponse.json(
-      { error: "channelId and content are required" },
+      { error: "channelId and content or attachment are required" },
       { status: 400 }
     );
   }
@@ -101,7 +116,8 @@ export async function POST(request: Request) {
       data: {
         channelId,
         authorId: session.userId,
-        content: content.trim(),
+        content: content?.trim() || "",
+        ...(attachmentUrl ? { attachmentUrl, attachmentName } : {}),
       },
       include: {
         author: { select: { id: true, username: true, avatar: true } },

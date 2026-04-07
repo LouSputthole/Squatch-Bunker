@@ -5,13 +5,22 @@ import { getSocket } from "@/lib/socket";
 import { truncateName } from "@/lib/utils";
 import MessageBubble from "./MessageBubble";
 
+interface ReactionGroup {
+  count: number;
+  users: string[];
+  userIds: string[];
+}
+
 interface Message {
   id: string;
   channelId?: string;
   content: string;
+  attachmentUrl?: string | null;
+  attachmentName?: string | null;
   createdAt: string;
   updatedAt?: string;
   author: { id: string; username: string; avatar?: string | null };
+  reactions?: Record<string, ReactionGroup>;
   pending?: boolean;
 }
 
@@ -38,6 +47,8 @@ export default function ChatPanel({
   const prevChannelRef = useRef<string | null>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isTypingRef = useRef(false);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   let pendingIdCounter = useRef(0);
 
   const scrollToBottom = useCallback(() => {
@@ -98,6 +109,12 @@ export default function ChatPanel({
       setMessages((prev) => prev.filter((m) => m.id !== data.messageId));
     }
 
+    function handleReactionUpdate(data: { messageId: string; reactions: Record<string, ReactionGroup> }) {
+      setMessages((prev) =>
+        prev.map((m) => (m.id === data.messageId ? { ...m, reactions: data.reactions } : m))
+      );
+    }
+
     function handleTyping(data: {
       channelId: string;
       userId: string;
@@ -121,12 +138,14 @@ export default function ChatPanel({
     socket.on(`message:channel:${channelId}`, handleChannelMessage);
     socket.on(`message:edited:${channelId}`, handleMessageEdited);
     socket.on(`message:deleted:${channelId}`, handleMessageDeleted);
+    socket.on(`message:reacted:${channelId}`, handleReactionUpdate);
     socket.on("typing:update", handleTyping);
 
     return () => {
       socket.off(`message:channel:${channelId}`, handleChannelMessage);
       socket.off(`message:edited:${channelId}`, handleMessageEdited);
       socket.off(`message:deleted:${channelId}`, handleMessageDeleted);
+      socket.off(`message:reacted:${channelId}`, handleReactionUpdate);
       socket.off("typing:update", handleTyping);
     };
   }, [channelId, scrollToBottom, currentUserId]);
@@ -214,6 +233,24 @@ export default function ChatPanel({
     }
   }
 
+  async function handleReact(messageId: string, emoji: string) {
+    const res = await fetch(`/api/messages/${messageId}/reactions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ emoji }),
+    });
+
+    if (res.ok) {
+      const { reactions } = await res.json();
+      setMessages((prev) =>
+        prev.map((m) => (m.id === messageId ? { ...m, reactions } : m))
+      );
+      // Broadcast reaction update
+      const socket = getSocket();
+      socket.emit("message:react", { channelId, messageId, reactions });
+    }
+  }
+
   async function handleDelete(messageId: string) {
     const res = await fetch(`/api/messages/${messageId}`, {
       method: "DELETE",
@@ -224,6 +261,54 @@ export default function ChatPanel({
       // Broadcast delete
       const socket = getSocket();
       socket.emit("message:delete", { channelId, messageId });
+    }
+  }
+
+  async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (fileInputRef.current) fileInputRef.current.value = "";
+
+    if (file.size > 10 * 1024 * 1024) {
+      alert("File too large. Maximum size is 10MB.");
+      return;
+    }
+
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const uploadRes = await fetch("/api/upload", { method: "POST", body: formData });
+      if (!uploadRes.ok) {
+        const data = await uploadRes.json();
+        alert(data.error || "Upload failed");
+        return;
+      }
+      const { url, name } = await uploadRes.json();
+
+      // Create message with attachment
+      const res = await fetch("/api/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          channelId,
+          content: "",
+          attachmentUrl: url,
+          attachmentName: name,
+        }),
+      });
+
+      if (res.ok) {
+        const { message } = await res.json();
+        setMessages((prev) => [...prev, message]);
+        setTimeout(scrollToBottom, 50);
+        const socket = getSocket();
+        socket.emit("message:send", { channelId, message });
+      }
+    } catch {
+      alert("Upload failed. Please try again.");
+    } finally {
+      setUploading(false);
     }
   }
 
@@ -262,8 +347,10 @@ export default function ChatPanel({
               key={msg.id}
               message={msg}
               isOwn={msg.author.id === currentUserId}
+              currentUserId={currentUserId}
               onEdit={handleEdit}
               onDelete={handleDelete}
+              onReact={handleReact}
             />
           ))
         )}
@@ -278,16 +365,35 @@ export default function ChatPanel({
 
       <form onSubmit={handleSend} className="px-4 pb-4 pt-1 shrink-0">
         <div className="flex items-center bg-[var(--panel)] rounded-lg border border-[var(--accent-2)]/30">
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+            className="px-3 py-3 text-[var(--muted)] hover:text-[var(--text)] transition-colors disabled:opacity-30"
+            title="Upload file"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" />
+            </svg>
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*,.pdf,.txt,.zip"
+            onChange={handleFileUpload}
+            className="hidden"
+          />
           <input
             type="text"
             value={newMessage}
             onChange={handleInputChange}
-            placeholder={`Message #${channelName}`}
-            className="flex-1 px-4 py-3 bg-transparent text-[var(--text)] focus:outline-none placeholder:text-[var(--muted)]"
+            placeholder={uploading ? "Uploading..." : `Message #${channelName}`}
+            className="flex-1 px-2 py-3 bg-transparent text-[var(--text)] focus:outline-none placeholder:text-[var(--muted)]"
+            disabled={uploading}
           />
           <button
             type="submit"
-            disabled={!newMessage.trim()}
+            disabled={!newMessage.trim() || uploading}
             className="px-4 py-3 text-[var(--accent-2)] hover:text-[var(--accent)] disabled:opacity-30 transition-colors"
           >
             Send

@@ -174,10 +174,12 @@
 
 ## P1: Makes It Competitive
 
-### 11. In-Room Text Chat [ ]
+### 11. In-Room Text Chat [~]
 - [ ] Text thread bound to voice room ID
 - [ ] Message persistence
-- [ ] Mentions, reactions, attachments, link previews
+- [x] Reactions
+- [x] Attachments (file/image uploads)
+- [ ] Mentions, link previews
 - [ ] Split-pane or tabbed UI
 - [ ] Unread indicators inside voice room
 
@@ -262,12 +264,14 @@
 - [x] Muted/deafened icons
 - [x] Join/leave sounds
 - [x] Clear connecting state
+- [x] Keyboard shortcuts (Ctrl+K search, Ctrl+M mute, Ctrl+D deafen, Esc close)
+- [x] Message search
+- [x] Logo/branding integration
 
 **Still needed:**
 - [ ] Speaking indicators (green glow)
 - [ ] Drag-and-drop user move for mods
 - [ ] Idle-in-room behavior
-- [ ] Keyboard shortcuts
 - [ ] Lightweight overlays / mini controls
 - [ ] No surprise device switching
 - [ ] Good empty states for rooms
@@ -310,3 +314,4 @@
 - v0.0.1 — Initial chat app: servers, channels, messages, guest login
 - v0.0.2 — Message edit/delete, optimistic sends, URL routing, unread badges
 - v0.0.3 — Separate voice/text channels, WebRTC voice, mute/deafen icons, settings modal, notification sounds, Docker hosting
+- v0.0.4 — Profile pictures, emoji reactions, file/image uploads, message search, keyboard shortcuts, logo integration

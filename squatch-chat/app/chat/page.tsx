@@ -13,6 +13,7 @@ import { SettingsIcon } from "@/components/VoicePanel";
 import { connectSocket, disconnectSocket, getSocket } from "@/lib/socket";
 import { displayName } from "@/lib/utils";
 import Avatar from "@/components/Avatar";
+import SearchPanel from "@/components/SearchPanel";
 
 interface Channel {
   id: string;
@@ -56,7 +57,7 @@ export default function ChatPage() {
 }
 
 function ChatPageInner() {
-  const APP_VERSION = "v0.0.3";
+  const APP_VERSION = "v0.0.4";
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -69,6 +70,7 @@ function ChatPageInner() {
   const [unreadCounts, setUnreadCounts] = useState<Map<string, number>>(new Map());
   const [loading, setLoading] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
 
   // Voice state
   const [activeVoiceChannel, setActiveVoiceChannel] = useState<Channel | null>(null);
@@ -324,6 +326,45 @@ function ChatPageInner() {
     router.push("/login");
   }
 
+  // Keyboard shortcuts
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      // Ctrl/Cmd+K: toggle search
+      if ((e.ctrlKey || e.metaKey) && e.key === "k") {
+        e.preventDefault();
+        setSearchOpen((prev) => !prev);
+        return;
+      }
+
+      // Ctrl/Cmd+M: toggle mute (when in voice)
+      if ((e.ctrlKey || e.metaKey) && e.key === "m") {
+        if (activeVoiceChannel && voicePanelRef.current) {
+          e.preventDefault();
+          voicePanelRef.current.toggleMute();
+        }
+        return;
+      }
+
+      // Ctrl/Cmd+D: toggle deafen (when in voice)
+      if ((e.ctrlKey || e.metaKey) && e.key === "d") {
+        if (activeVoiceChannel && voicePanelRef.current) {
+          e.preventDefault();
+          voicePanelRef.current.toggleDeafen();
+        }
+        return;
+      }
+
+      // Escape: close search or settings
+      if (e.key === "Escape") {
+        if (searchOpen) { setSearchOpen(false); return; }
+        if (settingsOpen) { setSettingsOpen(false); return; }
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [activeVoiceChannel, searchOpen, settingsOpen]);
+
   if (loading) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-[var(--bg)] text-[var(--muted)] gap-3">
@@ -405,10 +446,22 @@ function ChatPageInner() {
         </div>
       )}
 
-      {activeServer && (
+      {activeServer && !searchOpen && (
         <MemberList
           serverId={activeServer.id}
           onlineMemberIds={onlineMembers}
+        />
+      )}
+
+      {searchOpen && activeServer && (
+        <SearchPanel
+          serverId={activeServer.id}
+          onClose={() => setSearchOpen(false)}
+          onJumpToMessage={(channelId) => {
+            const ch = activeServer.channels.find((c) => c.id === channelId);
+            if (ch) setActiveChannel(ch);
+            setSearchOpen(false);
+          }}
         />
       )}
 
@@ -442,7 +495,16 @@ function ChatPageInner() {
             {user ? displayName(user.username) : ""}
           </span>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={() => setSearchOpen(!searchOpen)}
+            className="text-[var(--muted)] hover:text-[var(--text)] transition-colors"
+            title="Search"
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
+          </button>
           <button
             onClick={() => setSettingsOpen(true)}
             className="text-[var(--muted)] hover:text-[var(--text)] transition-colors"

@@ -18,6 +18,7 @@ model User {
 
   memberships ServerMember[]
   messages    Message[]
+  reactions   Reaction[]
   ownedServers Server[]
 }
 
@@ -58,13 +59,29 @@ model Channel {
 }
 
 model Message {
-  id        String   @id @default(uuid())
-  channelId String
-  authorId  String
-  content   String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id            String   @id @default(uuid())
+  channelId     String
+  authorId      String
+  content       String
+  attachmentUrl String?
+  attachmentName String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
-  channel Channel @relation(fields: [channelId], references: [id])
-  author  User    @relation(fields: [authorId], references: [id])
+  channel   Channel    @relation(fields: [channelId], references: [id])
+  author    User       @relation(fields: [authorId], references: [id])
+  reactions Reaction[]
+}
+
+model Reaction {
+  id        String   @id @default(uuid())
+  messageId String
+  userId    String
+  emoji     String
+  createdAt DateTime @default(now())
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id])
+
+  @@unique([messageId, userId, emoji])
 }
