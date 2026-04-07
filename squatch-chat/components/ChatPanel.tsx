@@ -313,13 +313,13 @@ export default function ChatPanel({
   }
 
   const typingNames = Array.from(typingUsers.values()).map((name) => truncateName(name));
-  const typingText =
+  const typingLabel =
     typingNames.length === 1
-      ? `${typingNames[0]} is typing...`
+      ? `${typingNames[0]} is typing`
       : typingNames.length === 2
-        ? `${typingNames[0]} and ${typingNames[1]} are typing...`
+        ? `${typingNames[0]} and ${typingNames[1]} are typing`
         : typingNames.length > 2
-          ? `${typingNames[0]} and ${typingNames.length - 1} others are typing...`
+          ? `${typingNames[0]} and ${typingNames.length - 1} others are typing`
           : null;
 
   return (
@@ -357,9 +357,16 @@ export default function ChatPanel({
         <div ref={messagesEndRef} />
       </div>
 
-      <div className="h-6 px-4 shrink-0">
-        {typingText && (
-          <span className="text-xs text-[var(--muted)] italic">{typingText}</span>
+      <div className="h-6 px-4 shrink-0 flex items-center">
+        {typingLabel && (
+          <span className="flex items-center gap-1.5 text-xs text-[var(--muted)] italic">
+            {typingLabel}
+            <span className="flex items-end gap-0.5 not-italic" aria-hidden>
+              <span className="w-1 h-1 rounded-full bg-current animate-bounce" style={{ animationDelay: "0ms" }} />
+              <span className="w-1 h-1 rounded-full bg-current animate-bounce" style={{ animationDelay: "150ms" }} />
+              <span className="w-1 h-1 rounded-full bg-current animate-bounce" style={{ animationDelay: "300ms" }} />
+            </span>
+          </span>
         )}
       </div>
 
