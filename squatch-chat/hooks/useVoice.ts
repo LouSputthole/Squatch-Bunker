@@ -8,9 +8,11 @@ import type { VoicePanelHandle, ScreenShareInfo } from "@/components/VoicePanel"
 export function useVoice(activeServer: Server | null) {
   const [activeVoiceChannel, setActiveVoiceChannel] = useState<Channel | null>(null);
   const [voiceParticipants, setVoiceParticipants] = useState<Map<string, VoiceParticipant[]>>(new Map());
-  const [voiceState, setVoiceState] = useState({ muted: false, deafened: false, reconnecting: false, sharing: false, participants: [] as VoiceParticipant[] });
+  const [voiceState, setVoiceState] = useState({ muted: false, deafened: false, reconnecting: false, sharing: false, cameraOn: false, participants: [] as VoiceParticipant[] });
   const [pttMode, setPttMode] = useState(false);
   const [incomingScreenShares, setIncomingScreenShares] = useState<ScreenShareInfo[]>([]);
+  const [remoteVideoStreams, setRemoteVideoStreams] = useState<Map<string, MediaStream>>(new Map());
+  const [localCameraStream, setLocalCameraStream] = useState<MediaStream | null>(null);
   const voicePanelRef = useRef<VoicePanelHandle>(null);
 
   // Global voice participants listener
@@ -86,6 +88,20 @@ export function useVoice(activeServer: Server | null) {
   const handleScreenShareChange = useCallback((shares: ScreenShareInfo[]) => {
     setIncomingScreenShares(shares);
   }, []);
+
+  const toggleCamera = useCallback(async () => {
+    await voicePanelRef.current?.toggleCamera();
+  }, []);
+
+  const handleVideoStreamsChange = useCallback((streams: Map<string, MediaStream>) => {
+    setRemoteVideoStreams(new Map(streams));
+  }, []);
+
+  // Track local camera stream from voiceState
+  useEffect(() => {
+    const stream = voicePanelRef.current?.getLocalCameraStream?.() || null;
+    setLocalCameraStream(stream);
+  }, [voiceState.cameraOn]);
 
   // ─── Mod Actions ───
 
@@ -165,5 +181,9 @@ export function useVoice(activeServer: Server | null) {
     stopScreenShare,
     handleScreenShareChange,
     incomingScreenShares,
+    toggleCamera,
+    handleVideoStreamsChange,
+    remoteVideoStreams,
+    localCameraStream,
   };
 }

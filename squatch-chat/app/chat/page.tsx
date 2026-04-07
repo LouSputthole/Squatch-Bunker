@@ -181,9 +181,13 @@ function ChatPageInner() {
           voiceChannels={srv.activeServer?.channels.filter((c) => c.type === "voice")}
           reconnecting={voice.voiceState.reconnecting}
           sharing={voice.voiceState.sharing}
+          cameraOn={voice.voiceState.cameraOn}
           onStartScreenShare={voice.startScreenShare}
           onStopScreenShare={voice.stopScreenShare}
+          onToggleCamera={voice.toggleCamera}
           incomingScreenShares={voice.incomingScreenShares}
+          remoteVideoStreams={voice.remoteVideoStreams}
+          localCameraStream={voice.localCameraStream}
         />
       ) : ch.activeChannel && auth.user ? (
         <ChatPanel
@@ -244,6 +248,7 @@ function ChatPageInner() {
           onDisconnect={voice.leaveVoice}
           onStateChange={voice.setVoiceState}
           onScreenShareChange={voice.handleScreenShareChange}
+          onVideoStreamsChange={voice.handleVideoStreamsChange}
         />
       )}
 

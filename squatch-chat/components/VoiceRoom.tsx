@@ -41,9 +41,13 @@ interface VoiceRoomProps {
   voiceChannels?: VoiceChannel[];
   reconnecting?: boolean;
   sharing?: boolean;
+  cameraOn?: boolean;
   onStartScreenShare?: () => void;
   onStopScreenShare?: () => void;
+  onToggleCamera?: () => void;
   incomingScreenShares?: ScreenShareInfo[];
+  remoteVideoStreams?: Map<string, MediaStream>;
+  localCameraStream?: MediaStream | null;
 }
 
 // SVG Icons (larger versions for the room view)
@@ -124,6 +128,48 @@ function PushToTalkIcon({ active }: { active: boolean }) {
       <path d="M7 11V7a5 5 0 0 1 10 0v4" />
       {active && <circle cx="12" cy="16" r="2" fill="currentColor" />}
     </svg>
+  );
+}
+
+function CameraIcon({ on }: { on: boolean }) {
+  if (on) {
+    return (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M23 7l-7 5 7 5V7z" /><rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+      </svg>
+    );
+  }
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M16 16v1a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2m5.66 0H14a2 2 0 0 1 2 2v3.34l1 1L23 7v10" />
+      <line x1="1" y1="1" x2="23" y2="23" />
+    </svg>
+  );
+}
+
+function VideoTile({ stream, label, isSelf }: { stream: MediaStream; label: string; isSelf?: boolean }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    if (videoRef.current) {
+      videoRef.current.srcObject = stream;
+    }
+  }, [stream]);
+
+  return (
+    <div className={`relative rounded-xl overflow-hidden border ${isSelf ? "border-[var(--accent)]/30" : "border-[var(--accent-2)]/20"} bg-black`}>
+      <video
+        ref={videoRef}
+        autoPlay
+        playsInline
+        muted={isSelf}
+        className="w-full h-full object-cover"
+        style={{ transform: isSelf ? "scaleX(-1)" : undefined }}
+      />
+      <span className="absolute bottom-1 left-1 text-xs bg-black/70 text-white px-1.5 py-0.5 rounded">
+        {label}
+      </span>
+    </div>
   );
 }
 
@@ -216,9 +262,13 @@ export default function VoiceRoom({
   voiceChannels,
   reconnecting,
   sharing,
+  cameraOn,
   onStartScreenShare,
   onStopScreenShare,
+  onToggleCamera,
   incomingScreenShares,
+  remoteVideoStreams,
+  localCameraStream,
 }: VoiceRoomProps) {
   const [volumePopup, setVolumePopup] = useState<{ userId: string; volume: number } | null>(null);
   const [modMenu, setModMenu] = useState<{ userId: string; username: string; x: number; y: number; muted: boolean; deafened?: boolean } | null>(null);
@@ -250,8 +300,30 @@ export default function VoiceRoom({
         <ScreenViewer shares={incomingScreenShares} />
       )}
 
-      {/* Participant Grid (compact when screen sharing) */}
-      <div className={`${incomingScreenShares && incomingScreenShares.length > 0 ? "h-28 shrink-0 overflow-x-auto overflow-y-hidden px-4 py-2" : "flex-1 overflow-y-auto p-6"}`}>
+      {/* Video Grid — shows when any cameras are on */}
+      {(() => {
+        const hasVideo = (remoteVideoStreams && remoteVideoStreams.size > 0) || localCameraStream;
+        if (!hasVideo) return null;
+        const hasScreenShare = incomingScreenShares && incomingScreenShares.length > 0;
+        return (
+          <div className={`${hasScreenShare ? "h-32 shrink-0" : "flex-1"} grid gap-2 p-2 min-h-0`}
+            style={{ gridTemplateColumns: `repeat(auto-fit, minmax(200px, 1fr))` }}
+          >
+            {localCameraStream && (
+              <VideoTile stream={localCameraStream} label="You" isSelf />
+            )}
+            {remoteVideoStreams && Array.from(remoteVideoStreams.entries()).map(([userId, stream]) => {
+              const p = participants.find((pp) => pp.userId === userId);
+              return (
+                <VideoTile key={userId} stream={stream} label={p ? displayName(p.username) : userId} />
+              );
+            })}
+          </div>
+        );
+      })()}
+
+      {/* Participant Grid (compact when screen sharing or video is on) */}
+      <div className={`${(incomingScreenShares && incomingScreenShares.length > 0) || (remoteVideoStreams && remoteVideoStreams.size > 0) || localCameraStream ? "h-28 shrink-0 overflow-x-auto overflow-y-hidden px-4 py-2" : "flex-1 overflow-y-auto p-6"}`}>
         {participants.length === 0 ? (
           <div className="flex items-center justify-center h-full text-[var(--muted)]">
             <div className="text-center">
@@ -469,6 +541,18 @@ export default function VoiceRoom({
               <PushToTalkIcon active={!!pttMode} />
             </button>
           )}
+          {/* Camera */}
+          <button
+            onClick={onToggleCamera}
+            className={`p-3 rounded-full transition-colors ${
+              cameraOn
+                ? "bg-green-600/20 text-green-400 hover:bg-green-600/30"
+                : "bg-[var(--panel-2)] text-[var(--text)] hover:bg-[var(--accent-2)]/30"
+            }`}
+            title={cameraOn ? "Turn Off Camera" : "Turn On Camera"}
+          >
+            <CameraIcon on={!!cameraOn} />
+          </button>
           {/* Screen share */}
           <button
             onClick={sharing ? onStopScreenShare : onStartScreenShare}

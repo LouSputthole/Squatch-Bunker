@@ -18,8 +18,9 @@ interface VoicePanelProps {
   currentUserId: string;
   onParticipantsChange?: (channelId: string, participants: VoiceParticipant[]) => void;
   onDisconnect?: () => void;
-  onStateChange?: (state: { muted: boolean; deafened: boolean; reconnecting: boolean; participants: VoiceParticipant[]; sharing: boolean }) => void;
+  onStateChange?: (state: { muted: boolean; deafened: boolean; reconnecting: boolean; participants: VoiceParticipant[]; sharing: boolean; cameraOn: boolean }) => void;
   onScreenShareChange?: (shares: ScreenShareInfo[]) => void;
+  onVideoStreamsChange?: (streams: Map<string, MediaStream>) => void;
 }
 
 export interface ScreenShareInfo {
@@ -40,6 +41,9 @@ export interface VoicePanelHandle {
   forceDeafen: () => void;
   startScreenShare: () => Promise<void>;
   stopScreenShare: () => void;
+  toggleCamera: () => Promise<void>;
+  getVideoStreams: () => Map<string, MediaStream>;
+  getLocalCameraStream: () => MediaStream | null;
 }
 
 const ICE_SERVERS: RTCConfiguration = {
@@ -98,6 +102,7 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
   onParticipantsChange,
   onDisconnect,
   onScreenShareChange,
+  onVideoStreamsChange,
   onStateChange,
 }, ref) {
   const [joined, setJoined] = useState(false);
@@ -128,6 +133,13 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
   const screenPeersRef = useRef<Map<string, RTCPeerConnection>>(new Map());
   const incomingScreensRef = useRef<Map<string, ScreenShareInfo>>(new Map());
   const [incomingScreens, setIncomingScreens] = useState<ScreenShareInfo[]>([]);
+
+  // Camera state
+  const cameraStreamRef = useRef<MediaStream | null>(null);
+  const [cameraOn, setCameraOn] = useState(false);
+  const videoSendersRef = useRef<Map<string, RTCRtpSender>>(new Map());
+  const remoteVideoStreamsRef = useRef<Map<string, MediaStream>>(new Map());
+  const [remoteVideoStreams, setRemoteVideoStreams] = useState<Map<string, MediaStream>>(new Map());
 
   const cleanupPeers = useCallback(() => {
     peersRef.current.forEach((pc) => pc.close());
@@ -266,6 +278,66 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
     socket.emit("screen:stop", { channelId });
   }, [channelId, cleanupScreenPeers]);
 
+  // ─── Camera Logic ───
+
+  const toggleCamera = useCallback(async () => {
+    const socket = getSocket();
+
+    if (cameraStreamRef.current) {
+      // Turn off: stop tracks, remove senders from all peers
+      cameraStreamRef.current.getTracks().forEach((t) => t.stop());
+      cameraStreamRef.current = null;
+
+      for (const [socketId, sender] of videoSendersRef.current) {
+        const pc = peersRef.current.get(socketId);
+        if (pc) {
+          try { pc.removeTrack(sender); } catch {}
+          // Renegotiate
+          pc.createOffer()
+            .then((offer) => pc.setLocalDescription(offer))
+            .then(() => { socket.emit("voice:offer", { to: socketId, offer: pc.localDescription! }); })
+            .catch(() => {});
+        }
+      }
+      videoSendersRef.current.clear();
+      setCameraOn(false);
+      socket.emit("voice:camera", { channelId, camera: false });
+    } else {
+      // Turn on: get camera stream, add video track to all peers
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 24 } },
+          audio: false,
+        });
+        cameraStreamRef.current = stream;
+        const videoTrack = stream.getVideoTracks()[0];
+
+        for (const [socketId, pc] of peersRef.current) {
+          const sender = pc.addTrack(videoTrack, stream);
+          videoSendersRef.current.set(socketId, sender);
+          // Renegotiate
+          pc.createOffer()
+            .then((offer) => pc.setLocalDescription(offer))
+            .then(() => { socket.emit("voice:offer", { to: socketId, offer: pc.localDescription! }); })
+            .catch(() => {});
+        }
+
+        setCameraOn(true);
+        socket.emit("voice:camera", { channelId, camera: true });
+
+        // Handle track ending (user revokes permission)
+        videoTrack.onended = () => {
+          cameraStreamRef.current = null;
+          videoSendersRef.current.clear();
+          setCameraOn(false);
+          socket.emit("voice:camera", { channelId, camera: false });
+        };
+      } catch (err) {
+        console.error("[Camera] Access failed:", err);
+      }
+    }
+  }, [channelId]);
+
   // Screen share signaling handlers
   useEffect(() => {
     if (!joined) return;
@@ -326,6 +398,11 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
   useEffect(() => {
     onScreenShareChange?.(incomingScreens);
   }, [incomingScreens, onScreenShareChange]);
+
+  // Report video streams to parent
+  useEffect(() => {
+    onVideoStreamsChange?.(remoteVideoStreams);
+  }, [remoteVideoStreams, onVideoStreamsChange]);
 
   const pttModeRef = useRef(false);
 
@@ -402,17 +479,32 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
       pc.ontrack = (event) => {
         const [stream] = event.streams;
         if (!stream) return;
-        let audio = audioElementsRef.current.get(remoteSocketId);
-        if (!audio) {
-          audio = new Audio();
-          audio.autoplay = true;
-          audioElementsRef.current.set(remoteSocketId, audio);
-        }
-        audio.srcObject = stream;
-        // Apply saved volume for this user
-        const uid = socketToUserRef.current.get(remoteSocketId);
-        if (uid && userVolumesRef.current.has(uid)) {
-          audio.volume = userVolumesRef.current.get(uid)!;
+        const track = event.track;
+
+        if (track.kind === "audio") {
+          let audio = audioElementsRef.current.get(remoteSocketId);
+          if (!audio) {
+            audio = new Audio();
+            audio.autoplay = true;
+            audioElementsRef.current.set(remoteSocketId, audio);
+          }
+          audio.srcObject = stream;
+          // Apply saved volume for this user
+          const uid = socketToUserRef.current.get(remoteSocketId);
+          if (uid && userVolumesRef.current.has(uid)) {
+            audio.volume = userVolumesRef.current.get(uid)!;
+          }
+        } else if (track.kind === "video") {
+          const uid = socketToUserRef.current.get(remoteSocketId) || remoteSocketId;
+          // Create a new stream with just this video track
+          const videoStream = new MediaStream([track]);
+          remoteVideoStreamsRef.current.set(uid, videoStream);
+          setRemoteVideoStreams(new Map(remoteVideoStreamsRef.current));
+
+          track.onended = () => {
+            remoteVideoStreamsRef.current.delete(uid);
+            setRemoteVideoStreams(new Map(remoteVideoStreamsRef.current));
+          };
         }
       };
 
@@ -480,6 +572,15 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
       cleanupScreenPeers();
       setSharing(false);
     }
+    // Stop camera if active
+    if (cameraStreamRef.current) {
+      cameraStreamRef.current.getTracks().forEach((t) => t.stop());
+      cameraStreamRef.current = null;
+      videoSendersRef.current.clear();
+      setCameraOn(false);
+    }
+    remoteVideoStreamsRef.current.clear();
+    setRemoteVideoStreams(new Map());
     incomingScreensRef.current.clear();
     setIncomingScreens([]);
     stopVAD();
@@ -548,7 +649,10 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
     },
     startScreenShare,
     stopScreenShare,
-  }), [toggleMute, toggleDeafen, leaveVoice, togglePTT, muted, deafened, startScreenShare, stopScreenShare]);
+    toggleCamera,
+    getVideoStreams: () => remoteVideoStreamsRef.current,
+    getLocalCameraStream: () => cameraStreamRef.current,
+  }), [toggleMute, toggleDeafen, leaveVoice, togglePTT, muted, deafened, startScreenShare, stopScreenShare, toggleCamera]);
 
   // Report state changes to parent — merge speaking state into participants
   useEffect(() => {
@@ -556,8 +660,8 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
       ...p,
       speaking: speakingUsers.has(p.userId),
     }));
-    onStateChange?.({ muted, deafened, reconnecting, participants: withSpeaking, sharing });
-  }, [muted, deafened, reconnecting, participants, speakingUsers, sharing, onStateChange]);
+    onStateChange?.({ muted, deafened, reconnecting, participants: withSpeaking, sharing, cameraOn });
+  }, [muted, deafened, reconnecting, participants, speakingUsers, sharing, cameraOn, onStateChange]);
 
   // Participant updates — register BEFORE joining so we don't miss the initial broadcast
   useEffect(() => {

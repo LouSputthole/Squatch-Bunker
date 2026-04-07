@@ -24,8 +24,8 @@ const io = new Server(httpServer, {
 // Track online users per server: serverId -> Map<userId, {username, socketId}>
 const onlineUsers = new Map<string, Map<string, { username: string; socketId: string }>>();
 
-// Track voice channel participants: channelId -> Map<userId, {username, socketId, muted, deafened}>
-const voiceRooms = new Map<string, Map<string, { username: string; socketId: string; muted: boolean; deafened: boolean }>>();
+// Track voice channel participants: channelId -> Map<userId, {username, socketId, muted, deafened, camera}>
+const voiceRooms = new Map<string, Map<string, { username: string; socketId: string; muted: boolean; deafened: boolean; camera: boolean }>>();
 
 // Track which server each voice channel belongs to: channelId -> serverId
 const voiceChannelServer = new Map<string, string>();
@@ -255,7 +255,7 @@ io.on("connection", (socket) => {
 
     // Tell the new user about existing participants (so they can create offers)
     const existing = Array.from(voiceRooms.get(channelId)!.entries()).map(
-      ([userId, info]) => ({ userId, username: info.username, socketId: info.socketId, muted: info.muted, deafened: info.deafened })
+      ([userId, info]) => ({ userId, username: info.username, socketId: info.socketId, muted: info.muted, deafened: info.deafened, camera: info.camera })
     );
     socket.emit("voice:participants", { channelId, participants: existing });
 
@@ -265,6 +265,7 @@ io.on("connection", (socket) => {
       socketId: socket.id,
       muted: false,
       deafened: false,
+      camera: false,
     });
 
     // Notify others that someone joined
@@ -299,6 +300,15 @@ io.on("connection", (socket) => {
     if (room && room.has(currentUserId)) {
       room.get(currentUserId)!.deafened = data.deafened;
       if (data.deafened) room.get(currentUserId)!.muted = true;
+      broadcastVoiceParticipants(data.channelId);
+    }
+  });
+
+  // Toggle camera
+  socket.on("voice:camera", (data: { channelId: string; camera: boolean }) => {
+    const room = voiceRooms.get(data.channelId);
+    if (room && room.has(currentUserId)) {
+      room.get(currentUserId)!.camera = data.camera;
       broadcastVoiceParticipants(data.channelId);
     }
   });
@@ -467,6 +477,7 @@ io.on("connection", (socket) => {
       socketId: targetEntry.socketId,
       muted: targetEntry.muted,
       deafened: targetEntry.deafened,
+      camera: targetEntry.camera,
     });
     userVoiceChannel.set(data.targetUserId, data.toChannelId);
     voiceChannelServer.set(data.toChannelId, ctx.serverId);
@@ -546,6 +557,7 @@ io.on("connection", (socket) => {
           username: info.username,
           muted: info.muted,
           deafened: info.deafened,
+          camera: info.camera,
         }))
       : [];
     const payload = { channelId, participants };

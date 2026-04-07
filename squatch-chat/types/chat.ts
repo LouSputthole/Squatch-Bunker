@@ -24,5 +24,6 @@ export interface VoiceParticipant {
   muted: boolean;
   deafened?: boolean;
   speaking?: boolean;
+  camera?: boolean;
   avatar?: string | null;
 }
