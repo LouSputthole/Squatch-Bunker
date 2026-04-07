@@ -17,6 +17,7 @@ export interface User {
   username: string;
   email: string;
   avatar?: string | null;
+  statusMessage?: string | null;
 }
 
 export interface VoiceParticipant {

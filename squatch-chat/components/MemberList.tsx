@@ -154,32 +154,37 @@ export default function MemberList({ serverId, currentUserId, currentUserRole, o
           size={32}
           className={online ? "bg-[var(--accent-2)] text-[var(--text)]" : "bg-[var(--panel-2)] text-[var(--muted)]"}
         />
-        <div className="flex items-center gap-1.5 min-w-0">
-          {(() => {
-            const status = online ? (memberStatuses?.get(m.id) || "online") : "offline";
-            if (status === "idle") return <MoonIcon />;
-            return (
-              <div className={`w-2 h-2 rounded-full shrink-0 ${
-                online ? (STATUS_COLORS[status] || "bg-green-500") : "bg-[var(--muted)]"
-              }`} />
-            );
-          })()}
-          <span
-            className={`text-sm truncate ${online ? "text-[var(--text)]" : "text-[var(--muted)]"}`}
-            style={roleColor ? { color: roleColor } : undefined}
-            title={`${displayName(m.username)}${roleLabel ? ` (${roleLabel})` : ""}${m.statusMessage ? `\n${m.statusMessage}` : ""}`}
-          >
-            {truncateName(m.username)}
-          </span>
-          {roleLabel && (
-            <span className="text-[10px] px-1 py-0.5 rounded shrink-0" style={{ color: roleColor, backgroundColor: roleColor ? `${roleColor}20` : undefined }}>
-              {roleLabel}
+        <div className="flex flex-col min-w-0">
+          <div className="flex items-center gap-1.5 min-w-0">
+            {(() => {
+              const status = online ? (memberStatuses?.get(m.id) || "online") : "offline";
+              if (status === "idle") return <MoonIcon />;
+              return (
+                <div className={`w-2 h-2 rounded-full shrink-0 ${
+                  online ? (STATUS_COLORS[status] || "bg-green-500") : "bg-[var(--muted)]"
+                }`} />
+              );
+            })()}
+            <span
+              className={`text-sm truncate ${online ? "text-[var(--text)]" : "text-[var(--muted)]"}`}
+              style={roleColor ? { color: roleColor } : undefined}
+              title={`${displayName(m.username)}${roleLabel ? ` (${roleLabel})` : ""}${m.statusMessage ? `\n${m.statusMessage}` : ""}`}
+            >
+              {truncateName(m.username)}
             </span>
-          )}
+            {roleLabel && (
+              <span className="text-[10px] px-1 py-0.5 rounded shrink-0" style={{ color: roleColor, backgroundColor: roleColor ? `${roleColor}20` : undefined }}>
+                {roleLabel}
+              </span>
+            )}
+          </div>
           {m.statusMessage && (
-            <span className="text-[10px] text-[var(--muted)] truncate ml-auto max-w-[80px] shrink-0" title={m.statusMessage}>
+            <p
+              className="text-xs italic text-[var(--muted)] truncate max-w-[150px]"
+              title={m.statusMessage}
+            >
               {m.statusMessage}
-            </span>
+            </p>
           )}
         </div>
       </div>
@@ -311,6 +316,7 @@ export default function MemberList({ serverId, currentUserId, currentUserRole, o
           avatar={profileCard.member.avatar}
           role={profileCard.member.role}
           joinedAt={profileCard.member.joinedAt}
+          statusMessage={profileCard.member.statusMessage}
           anchorX={profileCard.x}
           anchorY={profileCard.y}
           onClose={() => setProfileCard(null)}
