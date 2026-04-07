@@ -16,8 +16,10 @@ export default function SettingsModal({ open, onClose, username, currentAvatar, 
   const [tab, setTab] = useState<"audio" | "account">("audio");
   const [inputDevices, setInputDevices] = useState<MediaDeviceInfo[]>([]);
   const [outputDevices, setOutputDevices] = useState<MediaDeviceInfo[]>([]);
+  const [videoDevices, setVideoDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedInput, setSelectedInput] = useState<string>("");
   const [selectedOutput, setSelectedOutput] = useState<string>("");
+  const [selectedVideo, setSelectedVideo] = useState<string>("");
   const [inputVolume, setInputVolume] = useState(100);
   const [outputVolume, setOutputVolume] = useState(100);
   const [testing, setTesting] = useState(false);
@@ -38,6 +40,7 @@ export default function SettingsModal({ open, onClose, username, currentAvatar, 
         const s = JSON.parse(saved);
         if (s.inputDevice) setSelectedInput(s.inputDevice);
         if (s.outputDevice) setSelectedOutput(s.outputDevice);
+        if (s.videoDevice) setSelectedVideo(s.videoDevice);
         if (s.inputVolume !== undefined) setInputVolume(s.inputVolume);
         if (s.outputVolume !== undefined) setOutputVolume(s.outputVolume);
         if (s.inputSensitivity !== undefined) {
@@ -53,11 +56,12 @@ export default function SettingsModal({ open, onClose, username, currentAvatar, 
     localStorage.setItem("campfire-audio-settings", JSON.stringify({
       inputDevice: selectedInput,
       outputDevice: selectedOutput,
+      videoDevice: selectedVideo,
       inputVolume,
       outputVolume,
       inputSensitivity,
     }));
-  }, [selectedInput, selectedOutput, inputVolume, outputVolume, inputSensitivity]);
+  }, [selectedInput, selectedOutput, selectedVideo, inputVolume, outputVolume, inputSensitivity]);
 
   useEffect(() => { saveSettings(); }, [saveSettings]);
 
@@ -67,13 +71,14 @@ export default function SettingsModal({ open, onClose, username, currentAvatar, 
 
     async function loadDevices() {
       try {
-        // Request permission first so labels are populated
+        // Request audio permission so labels are populated; video is optional
         const tempStream = await navigator.mediaDevices.getUserMedia({ audio: true });
         tempStream.getTracks().forEach((t) => t.stop());
 
         const devices = await navigator.mediaDevices.enumerateDevices();
         setInputDevices(devices.filter((d) => d.kind === "audioinput"));
         setOutputDevices(devices.filter((d) => d.kind === "audiooutput"));
+        setVideoDevices(devices.filter((d) => d.kind === "videoinput"));
       } catch (err) {
         console.error("[Settings] Failed to enumerate devices:", err);
       }
@@ -294,6 +299,32 @@ export default function SettingsModal({ open, onClose, username, currentAvatar, 
                 <p className="text-xs text-[var(--muted)] mt-1">
                   Lower = more sensitive (picks up quiet sounds). Higher = less sensitive (only loud speech triggers).
                 </p>
+              </div>
+
+              <hr className="border-[var(--accent-2)]/20" />
+
+              {/* Video Device (Webcam) */}
+              <div>
+                <label className="block text-sm font-semibold text-[var(--text)] mb-2">
+                  Video Device (Webcam)
+                </label>
+                <select
+                  value={selectedVideo}
+                  onChange={(e) => setSelectedVideo(e.target.value)}
+                  className="w-full px-3 py-2 bg-[var(--panel-2)] text-[var(--text)] border border-[var(--accent-2)]/30 rounded text-sm focus:outline-none focus:border-[var(--accent)]"
+                >
+                  <option value="">System Default</option>
+                  {videoDevices.map((d) => (
+                    <option key={d.deviceId} value={d.deviceId}>
+                      {d.label || `Camera ${d.deviceId.slice(0, 8)}`}
+                    </option>
+                  ))}
+                </select>
+                {videoDevices.length === 0 && (
+                  <p className="text-xs text-[var(--muted)] mt-1">
+                    No cameras detected. Connect a webcam and reopen settings.
+                  </p>
+                )}
               </div>
 
               <hr className="border-[var(--accent-2)]/20" />
