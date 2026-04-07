@@ -3,19 +3,19 @@ import { getSession } from "@/lib/auth";
 
 export async function PATCH(
   request: Request,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ serverId: string }> }
 ) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
-  const { id } = await params;
+  const { serverId } = await params;
   const body = await request.json();
   const { name, regenerateInvite } = body;
 
   try {
     const { prisma } = await import("@/lib/db");
 
-    const server = await prisma.server.findUnique({ where: { id } });
+    const server = await prisma.server.findUnique({ where: { id: serverId } });
     if (!server) return NextResponse.json({ error: "Server not found" }, { status: 404 });
     if (server.ownerId !== session.userId) {
       return NextResponse.json({ error: "Only the server owner can do this" }, { status: 403 });
@@ -29,7 +29,7 @@ export async function PATCH(
       return NextResponse.json({ error: "Nothing to update" }, { status: 400 });
     }
 
-    const updated = await prisma.server.update({ where: { id }, data: updates });
+    const updated = await prisma.server.update({ where: { id: serverId }, data: updates });
     return NextResponse.json({ server: updated });
   } catch (err) {
     console.error("[Campfire] Failed to update server:", err);
@@ -39,17 +39,17 @@ export async function PATCH(
 
 export async function DELETE(
   _request: Request,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ serverId: string }> }
 ) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
-  const { id } = await params;
+  const { serverId } = await params;
 
   try {
     const { prisma } = await import("@/lib/db");
 
-    const server = await prisma.server.findUnique({ where: { id } });
+    const server = await prisma.server.findUnique({ where: { id: serverId } });
     if (!server) return NextResponse.json({ error: "Server not found" }, { status: 404 });
     if (server.ownerId !== session.userId) {
       return NextResponse.json({ error: "Only the server owner can do this" }, { status: 403 });
@@ -58,7 +58,7 @@ export async function DELETE(
     // Cascade-delete manually (schema has no onDelete:Cascade on server relations)
     await prisma.$transaction(async (tx) => {
       const channels = await tx.channel.findMany({
-        where: { serverId: id },
+        where: { serverId },
         select: { id: true },
       });
       const channelIds = channels.map((c) => c.id);
@@ -68,11 +68,11 @@ export async function DELETE(
           where: { message: { channelId: { in: channelIds } } },
         });
         await tx.message.deleteMany({ where: { channelId: { in: channelIds } } });
-        await tx.channel.deleteMany({ where: { serverId: id } });
+        await tx.channel.deleteMany({ where: { serverId } });
       }
 
-      await tx.serverMember.deleteMany({ where: { serverId: id } });
-      await tx.server.delete({ where: { id } });
+      await tx.serverMember.deleteMany({ where: { serverId } });
+      await tx.server.delete({ where: { id: serverId } });
     });
 
     return NextResponse.json({ success: true });
