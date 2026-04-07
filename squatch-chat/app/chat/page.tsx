@@ -16,6 +16,7 @@ import AmbientSounds from "@/components/AmbientSounds";
 import ShareLink from "@/components/ShareLink";
 import ConnectionStatus from "@/components/ConnectionStatus";
 import DMPanel from "@/components/DMPanel";
+import UserProfileModal from "@/components/UserProfileModal";
 import FriendPanel from "@/components/FriendPanel";
 import { connectSocket, disconnectSocket } from "@/lib/socket";
 import { displayName } from "@/lib/utils";
@@ -57,6 +58,7 @@ function ChatPageInner() {
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [dmOpen, setDmOpen] = useState(false);
   const [friendsOpen, setFriendsOpen] = useState(false);
+  const [profileUserId, setProfileUserId] = useState<string | null>(null);
 
   useKeyboardShortcuts({
     activeVoiceChannel: voice.activeVoiceChannel,
@@ -284,6 +286,7 @@ function ChatPageInner() {
           memberStatuses={presence.memberStatuses}
           currentUserId={auth.user?.id}
           currentUserRole={presence.userRole}
+          onViewProfile={setProfileUserId}
         />
       )}
       {searchOpen && srv.activeServer && (
@@ -398,6 +401,26 @@ function ChatPageInner() {
           </button>
         </div>
       </div>
+
+      {/* User profile modal */}
+      {profileUserId && auth.user && (
+        <UserProfileModal
+          userId={profileUserId}
+          currentUserId={auth.user.id}
+          onClose={() => setProfileUserId(null)}
+          onMessageUser={async (uid) => {
+            const res = await fetch("/api/dm", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ targetUserId: uid }),
+            });
+            if (res.ok) {
+              setProfileUserId(null);
+              setDmOpen(true);
+            }
+          }}
+        />
+      )}
 
       {/* Settings modal */}
       <SettingsModal
