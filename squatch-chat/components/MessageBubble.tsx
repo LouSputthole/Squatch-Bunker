@@ -298,10 +298,12 @@ interface MessageBubbleProps {
   onScrollToMessage?: (messageId: string) => void;
   onPin?: (messageId: string, pinned: boolean) => void;
   onThread?: (messageId: string, author: { id: string; username: string }) => void;
+  onBookmark?: (messageId: string, bookmarked: boolean) => void;
+  isBookmarked?: boolean;
   highlighted?: boolean;
 }
 
-export default function MessageBubble({ message, isOwn, currentUserId, authorColor, canPin, onEdit, onDelete, onReact, onReply, onScrollToMessage, onPin, onThread, highlighted }: MessageBubbleProps) {
+export default function MessageBubble({ message, isOwn, currentUserId, authorColor, canPin, onEdit, onDelete, onReact, onReply, onScrollToMessage, onPin, onThread, onBookmark, isBookmarked, highlighted }: MessageBubbleProps) {
   const [editing, setEditing] = useState(false);
   const [glowing, setGlowing] = useState(false);
 
@@ -534,6 +536,15 @@ export default function MessageBubble({ message, isOwn, currentUserId, authorCol
               title="Start Thread"
             >
               Thread
+            </button>
+          )}
+          {onBookmark && (
+            <button
+              onClick={() => onBookmark(message.id, !isBookmarked)}
+              className={`text-xs px-1.5 py-0.5 ${isBookmarked ? "text-yellow-400" : "text-[var(--muted)] hover:text-yellow-400"}`}
+              title={isBookmarked ? "Remove bookmark" : "Bookmark"}
+            >
+              ★
             </button>
           )}
           {isOwn && (

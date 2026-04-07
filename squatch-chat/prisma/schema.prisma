@@ -27,6 +27,7 @@ model User {
   memberships    ServerMember[]
   messages       Message[]
   reactions      Reaction[]
+  bookmarks      Bookmark[]
   ownedServers   Server[]
   conversations1 Conversation[] @relation("ConvUser1")
   conversations2 Conversation[] @relation("ConvUser2")
@@ -97,6 +98,7 @@ model Message {
   replyTo   Message?   @relation("MessageReplies", fields: [replyToId], references: [id])
   replies   Message[]  @relation("MessageReplies")
   reactions Reaction[]
+  bookmarks Bookmark[]
   parent    Message?   @relation("thread", fields: [parentMessageId], references: [id])
   children  Message[]  @relation("thread")
 }
@@ -112,6 +114,18 @@ model Reaction {
   user    User    @relation(fields: [userId], references: [id])
 
   @@unique([messageId, userId, emoji])
+}
+
+model Bookmark {
+  id        String   @id @default(uuid())
+  userId    String
+  messageId String
+  createdAt DateTime @default(now())
+
+  user    User    @relation(fields: [userId], references: [id])
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, messageId])
 }
 
 model Conversation {
