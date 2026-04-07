@@ -277,6 +277,18 @@ export default function ServerList({
         >
           &#8618;
         </button>
+
+        {/* Explore public servers button */}
+        <button
+          onClick={() => { window.location.href = "/explore"; }}
+          className="w-12 h-12 rounded-2xl flex items-center justify-center transition-all hover:rounded-xl bg-[var(--panel-2)] text-[var(--accent-2)] hover:bg-[var(--accent-2)] hover:text-[var(--text)]"
+          title="Explore public servers"
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="10" />
+            <path d="m16.24 7.76-1.804 5.411a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.411a2 2 0 0 1 1.265-1.265z" />
+          </svg>
+        </button>
       </div>
 
       {/* Slide-out panel for create/join */}
