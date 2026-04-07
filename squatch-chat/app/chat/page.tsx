@@ -210,7 +210,7 @@ function ChatPageInner() {
   }
 
   return (
-    <div className="h-screen flex bg-[var(--bg)] relative">
+    <div id="main-content" className="h-screen flex bg-[var(--bg)] relative">
       <ConnectionStatusBar status={socketStatus} queuedCount={offlineQueue.queuedCount} />
 
       {/* Server rail — desktop only; mobile uses bottom tab bar */}

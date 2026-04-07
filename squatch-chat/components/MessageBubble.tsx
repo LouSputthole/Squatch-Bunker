@@ -313,6 +313,7 @@ interface MessageBubbleProps {
     author: { id: string; username: string; avatar?: string | null };
     reactions?: Record<string, ReactionGroup>;
     replyTo?: ReplySnippet | null;
+    isSystem?: boolean;
   };
   isOwn: boolean;
   currentUserId?: string;
@@ -410,6 +411,16 @@ export default function MessageBubble({ message, isOwn, currentUserId, authorCol
         emoji === emojiSearch
       )
     : EMOJI_DATA;
+
+  if (message.isSystem) {
+    return (
+      <div className="flex items-center gap-3 py-1 px-2 my-1">
+        <div className="flex-1 h-px bg-[var(--accent-2)]/20" />
+        <span className="text-xs text-[var(--muted)] italic shrink-0">{message.content}</span>
+        <div className="flex-1 h-px bg-[var(--accent-2)]/20" />
+      </div>
+    );
+  }
 
   return (
     <div

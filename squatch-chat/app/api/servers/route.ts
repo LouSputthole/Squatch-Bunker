@@ -60,6 +60,19 @@ export async function POST(request: Request) {
       },
     });
 
+    // Post welcome system message to the default channel
+    const defaultChannel = server.channels[0];
+    if (defaultChannel) {
+      await prisma.message.create({
+        data: {
+          channelId: defaultChannel.id,
+          authorId: session.userId,
+          content: `Welcome to #${defaultChannel.name}!`,
+          isSystem: true,
+        },
+      });
+    }
+
     return NextResponse.json({ server }, { status: 201 });
   } catch (err) {
     console.error("[Campfire] Failed to create server:", err);

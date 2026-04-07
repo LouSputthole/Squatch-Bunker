@@ -131,6 +131,7 @@ export default function ChannelList({
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const [localChannels, setLocalChannels] = useState<Channel[]>(channels);
+  const [focusedChannelIndex, setFocusedChannelIndex] = useState<number>(-1);
 
   // Sync localChannels when parent channels prop changes
   useEffect(() => {
@@ -299,6 +300,41 @@ export default function ChannelList({
     return { categoryMap: map, sortedCategories: cats };
   }, [localChannels]);
 
+  // Flat list of navigable channels for keyboard nav (visible text channels first, then voice)
+  const navigableChannels: Channel[] = [
+    ...sortedCategories.flatMap((cat) =>
+      collapsedCategories.has(cat) ? [] : categoryMap.get(cat)!
+    ),
+    ...voiceChannels,
+  ];
+
+  function handleChannelListKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setFocusedChannelIndex((prev) =>
+        prev < navigableChannels.length - 1 ? prev + 1 : 0
+      );
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setFocusedChannelIndex((prev) =>
+        prev > 0 ? prev - 1 : navigableChannels.length - 1
+      );
+    } else if (e.key === "Enter" && focusedChannelIndex >= 0) {
+      const focused = navigableChannels[focusedChannelIndex];
+      if (focused) {
+        if (focused.type === "voice") {
+          if (activeVoiceChannelId === focused.id) {
+            onVoiceLeave?.();
+          } else {
+            onVoiceJoin?.(focused);
+          }
+        } else {
+          onChannelSelect(focused);
+        }
+      }
+    }
+  }
+
   async function handleChannelDrop(targetChannelId: string) {
     if (!draggingId || draggingId === targetChannelId) return;
     const currentOrder = sortedLocalChannels.map((c) => c.id);
@@ -320,7 +356,13 @@ export default function ChannelList({
   }
 
   return (
-    <div className="w-60 bg-[var(--panel)] flex flex-col border-r border-[var(--accent-2)]/30 shrink-0">
+    <div
+      className="w-60 bg-[var(--panel)] flex flex-col border-r border-[var(--accent-2)]/30 shrink-0 outline-none"
+      tabIndex={0}
+      onKeyDown={handleChannelListKeyDown}
+      onBlur={() => setFocusedChannelIndex(-1)}
+      aria-label="Channel list"
+    >
       {serverBanner && (
         <div className="h-16 overflow-hidden shrink-0">
           <img src={serverBanner} alt="Server banner" className="w-full h-full object-cover" />

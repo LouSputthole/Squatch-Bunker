@@ -274,6 +274,7 @@ interface Message {
   reactions?: Record<string, ReactionGroup>;
   replyTo?: ReplySnippet | null;
   pending?: boolean;
+  isSystem?: boolean;
 }
 
 interface ChatPanelProps {

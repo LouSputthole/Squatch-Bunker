@@ -12,6 +12,7 @@ const SHORTCUTS = [
   { keys: ["Ctrl", "M"], description: "Toggle microphone mute (in voice)" },
   { keys: ["Ctrl", "D"], description: "Toggle deafen (in voice)" },
   { keys: ["Space"], description: "Push-to-talk while held (PTT mode)" },
+  { keys: ["Ctrl", "/"], description: "Show keyboard shortcuts panel" },
   { keys: ["?"], description: "Show this shortcuts panel" },
   { keys: ["Esc"], description: "Close open panels / search" },
   { keys: ["Enter"], description: "Send message" },
