@@ -24,6 +24,8 @@ interface Message {
   attachmentUrl?: string | null;
   attachmentName?: string | null;
   pinned?: boolean;
+  parentMessageId?: string | null;
+  replyCount?: number;
   createdAt: string;
   updatedAt?: string;
   author: { id: string; username: string; avatar?: string | null };
@@ -56,6 +58,10 @@ export default function ChatPanel({
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
   const [firstUnreadId, setFirstUnreadId] = useState<string | null>(null);
   const [showPinned, setShowPinned] = useState(false);
+  const [threadParent, setThreadParent] = useState<{ id: string; author: { id: string; username: string } } | null>(null);
+  const [threadMessages, setThreadMessages] = useState<Message[]>([]);
+  const [threadInput, setThreadInput] = useState("");
+  const [threadLoading, setThreadLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messageRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const prevChannelRef = useRef<string | null>(null);
@@ -345,6 +351,38 @@ export default function ChatPanel({
     }
   }
 
+  async function openThread(messageId: string, author: { id: string; username: string }) {
+    setThreadParent({ id: messageId, author });
+    setThreadLoading(true);
+    const res = await fetch(`/api/messages?channelId=${channelId}&parentId=${messageId}`);
+    if (res.ok) {
+      const { messages: replies } = await res.json();
+      setThreadMessages(replies || []);
+    }
+    setThreadLoading(false);
+  }
+
+  async function sendThreadMessage(e: React.FormEvent) {
+    e.preventDefault();
+    if (!threadInput.trim() || !threadParent) return;
+    const content = threadInput.trim();
+    setThreadInput("");
+    const res = await fetch("/api/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ channelId, content, parentMessageId: threadParent.id }),
+    });
+    if (res.ok) {
+      const { message } = await res.json();
+      setThreadMessages((prev) => [...prev, message]);
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === threadParent.id ? { ...m, replyCount: (m.replyCount ?? 0) + 1 } : m
+        )
+      );
+    }
+  }
+
   async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -404,7 +442,9 @@ export default function ChatPanel({
           : null;
 
   return (
-    <div className="flex-1 flex flex-col bg-[var(--panel-2)]">
+    <div className="flex-1 flex bg-[var(--panel-2)] min-w-0">
+      {/* Main chat column */}
+      <div className="flex-1 flex flex-col min-w-0">
       <div className="h-12 px-4 flex items-center border-b border-[var(--accent-2)]/30 bg-[var(--panel-2)] shrink-0 justify-between">
         <div className="flex items-center gap-1">
           <span className="text-[var(--accent-2)]">#</span>
@@ -447,7 +487,7 @@ export default function ChatPanel({
             </div>
           </div>
         ) : (
-          messages.map((msg) => (
+          messages.filter((m) => !m.parentMessageId).map((msg) => (
             <div
               key={msg.id}
               ref={(el) => { if (el) messageRefs.current.set(msg.id, el); else messageRefs.current.delete(msg.id); }}
@@ -470,6 +510,7 @@ export default function ChatPanel({
                 onReply={setReplyingTo}
                 onScrollToMessage={scrollToMessage}
                 onPin={handlePin}
+                onThread={openThread}
               />
             </div>
           ))
@@ -544,6 +585,60 @@ export default function ChatPanel({
           </button>
         </div>
       </form>
+      </div>{/* end main chat column */}
+
+      {/* Thread panel */}
+      {threadParent && (
+        <div className="w-72 flex flex-col border-l border-[var(--accent-2)]/30 bg-[var(--panel)] shrink-0">
+          <div className="h-12 px-3 flex items-center justify-between border-b border-[var(--accent-2)]/30 shrink-0">
+            <span className="text-sm font-semibold text-[var(--text)]">Thread</span>
+            <button onClick={() => setThreadParent(null)} className="text-[var(--muted)] hover:text-[var(--text)] text-lg leading-none">&times;</button>
+          </div>
+          <div className="px-3 py-2 border-b border-[var(--accent-2)]/10 text-xs text-[var(--muted)]">
+            Reply to <span className="text-[var(--text)] font-medium">{threadParent.author.username}</span>
+          </div>
+          <div className="flex-1 overflow-y-auto px-2 py-2 space-y-1">
+            {threadLoading ? (
+              <div className="text-xs text-[var(--muted)] italic px-1">Loading...</div>
+            ) : threadMessages.length === 0 ? (
+              <div className="text-xs text-[var(--muted)] italic px-1">No replies yet</div>
+            ) : (
+              threadMessages.map((msg) => (
+                <MessageBubble
+                  key={msg.id}
+                  message={msg}
+                  isOwn={msg.author.id === currentUserId}
+                  currentUserId={currentUserId}
+                  onEdit={handleEdit}
+                  onDelete={(id) => {
+                    handleDelete(id);
+                    setThreadMessages((prev) => prev.filter((m) => m.id !== id));
+                  }}
+                  onReact={handleReact}
+                />
+              ))
+            )}
+          </div>
+          <form onSubmit={sendThreadMessage} className="px-3 pb-3 pt-1 shrink-0">
+            <div className="flex items-center bg-[var(--panel-2)] rounded-lg border border-[var(--accent-2)]/30">
+              <input
+                type="text"
+                value={threadInput}
+                onChange={(e) => setThreadInput(e.target.value)}
+                placeholder="Reply in thread..."
+                className="flex-1 px-2 py-2 bg-transparent text-[var(--text)] focus:outline-none placeholder:text-[var(--muted)] text-sm"
+              />
+              <button
+                type="submit"
+                disabled={!threadInput.trim()}
+                className="px-3 py-2 text-[var(--accent-2)] hover:text-[var(--accent)] disabled:opacity-30 transition-colors text-sm"
+              >
+                Send
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   );
 }
