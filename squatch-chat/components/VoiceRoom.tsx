@@ -11,6 +11,7 @@ interface VoiceParticipant {
   deafened?: boolean;
   speaking?: boolean;
   avatar?: string | null;
+  connectionQuality?: "good" | "fair" | "poor";
 }
 
 interface VoiceRoomProps {
@@ -203,14 +204,26 @@ export default function VoiceRoom({
                     </div>
                   </div>
 
-                  {/* Name */}
-                  <span
-                    className={`text-sm font-medium truncate max-w-[100px] ${
-                      isSelf ? "text-[var(--accent)]" : "text-[var(--text)]"
-                    } ${p.muted ? "opacity-60" : ""}`}
-                  >
-                    {displayName(p.username)}
-                  </span>
+                  {/* Name + quality */}
+                  <div className="flex items-center gap-1.5 max-w-[100px]">
+                    <span
+                      className={`text-sm font-medium truncate ${
+                        isSelf ? "text-[var(--accent)]" : "text-[var(--text)]"
+                      } ${p.muted ? "opacity-60" : ""}`}
+                    >
+                      {displayName(p.username)}
+                    </span>
+                    {!isSelf && (
+                      <span
+                        className={`w-2 h-2 rounded-full shrink-0 ${
+                          p.connectionQuality === "good" ? "bg-green-400" :
+                          p.connectionQuality === "fair" ? "bg-yellow-400" :
+                          "bg-red-400"
+                        }`}
+                        title={`Connection: ${p.connectionQuality ?? "unknown"}`}
+                      />
+                    )}
+                  </div>
 
                   {/* Per-user volume slider */}
                   {volumePopup?.userId === p.userId && !isSelf && (
