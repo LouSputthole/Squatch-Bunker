@@ -12,6 +12,19 @@ interface Participant {
   speaking?: boolean;
   camera?: boolean;
   avatar?: string | null;
+  connectionQuality?: "good" | "fair" | "poor";
+}
+
+function QualityDot({ quality }: { quality?: "good" | "fair" | "poor" }) {
+  if (!quality || quality === "good") return null;
+  const color = quality === "fair" ? "bg-amber-400" : "bg-red-500";
+  const label = quality === "fair" ? "Weak connection" : "Poor connection";
+  return (
+    <div
+      className={`absolute -top-1 -left-1 w-3 h-3 ${color} rounded-full border border-[#1a1a1e] z-10`}
+      title={label}
+    />
+  );
 }
 
 interface CircleViewProps {
@@ -71,22 +84,52 @@ function EmberCenter() {
   );
 }
 
+interface LeavingUser {
+  participant: Participant;
+  angle: number;
+  leaveTime: number;
+}
+
 export default function CircleView({ participants, currentUserId, onContextMenu }: CircleViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const prevIdsRef = useRef<Set<string>>(new Set());
+  const prevParticipantsRef = useRef<Participant[]>([]);
   const [newIds, setNewIds] = useState<Set<string>>(new Set());
+  const [leavingUsers, setLeavingUsers] = useState<LeavingUser[]>([]);
 
-  // Track arrivals for animation
+  // Track arrivals and departures for animations
   useEffect(() => {
     const currentIds = new Set(participants.map((p) => p.userId));
     const arriving = new Set<string>();
+    const leaving: LeavingUser[] = [];
+
     for (const id of currentIds) {
       if (!prevIdsRef.current.has(id)) arriving.add(id);
     }
+
+    const prevCount = prevParticipantsRef.current.length;
+    for (const prev of prevParticipantsRef.current) {
+      if (!currentIds.has(prev.userId)) {
+        const idx = prevParticipantsRef.current.indexOf(prev);
+        const angle = prevCount > 0 ? (2 * Math.PI * idx) / prevCount - Math.PI / 2 : 0;
+        leaving.push({ participant: prev, angle, leaveTime: Date.now() });
+      }
+    }
+
     prevIdsRef.current = currentIds;
+    prevParticipantsRef.current = participants;
+
     if (arriving.size > 0) {
       setNewIds(arriving);
       const timeout = setTimeout(() => setNewIds(new Set()), 800);
+      return () => clearTimeout(timeout);
+    }
+
+    if (leaving.length > 0) {
+      setLeavingUsers((prev) => [...prev, ...leaving]);
+      const timeout = setTimeout(() => {
+        setLeavingUsers((prev) => prev.filter((l) => Date.now() - l.leaveTime < 500));
+      }, 600);
       return () => clearTimeout(timeout);
     }
   }, [participants]);
@@ -116,6 +159,10 @@ export default function CircleView({ participants, currentUserId, onContextMenu 
         @keyframes speak-ripple {
           0% { transform: translate(-50%, -50%) scale(1); opacity: 0.4; }
           100% { transform: translate(-50%, -50%) scale(1.8); opacity: 0; }
+        }
+        @keyframes seat-leave {
+          0% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+          100% { opacity: 0; transform: translate(-50%, -50%) scale(0.3); }
         }
       `}</style>
 
@@ -212,6 +259,7 @@ export default function CircleView({ participants, currentUserId, onContextMenu 
                   {/* Status badges */}
                   {p.muted && <MicOffDot />}
                   {p.deafened && <DeafDot />}
+                  <QualityDot quality={p.connectionQuality} />
 
                   {/* Camera indicator */}
                   {p.camera && (
@@ -236,6 +284,36 @@ export default function CircleView({ participants, currentUserId, onContextMenu 
                   }`}
                 >
                   {isSelf ? "You" : displayName(p.username)}
+                </span>
+              </div>
+            </div>
+          );
+        })}
+
+        {/* Leaving users — fade out animation */}
+        {leavingUsers.map((l) => {
+          const prevRadius = Math.max(120, Math.min(200, 80 + (participants.length + leavingUsers.length) * 25));
+          const x = prevRadius * Math.cos(l.angle) + radius;
+          const y = prevRadius * Math.sin(l.angle) + radius;
+          return (
+            <div
+              key={`leaving-${l.participant.userId}`}
+              className="absolute pointer-events-none"
+              style={{
+                left: x + seatSize / 2,
+                top: y + seatSize / 2,
+                animation: "seat-leave 0.5s ease-in forwards",
+              }}
+            >
+              <div className="flex flex-col items-center gap-1.5 opacity-50">
+                <Avatar
+                  username={l.participant.username}
+                  avatarUrl={l.participant.avatar}
+                  size={seatSize}
+                  className="bg-[#2a2a2e] text-[var(--text)]"
+                />
+                <span className="text-xs text-[var(--muted)]/50 truncate max-w-[80px]">
+                  {displayName(l.participant.username)}
                 </span>
               </div>
             </div>

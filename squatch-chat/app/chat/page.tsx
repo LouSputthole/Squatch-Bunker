@@ -14,6 +14,7 @@ import SearchPanel from "@/components/SearchPanel";
 import Avatar from "@/components/Avatar";
 import AmbientSounds from "@/components/AmbientSounds";
 import ShareLink from "@/components/ShareLink";
+import ConnectionStatus from "@/components/ConnectionStatus";
 import DMPanel from "@/components/DMPanel";
 import FriendPanel from "@/components/FriendPanel";
 import { connectSocket, disconnectSocket } from "@/lib/socket";
@@ -141,7 +142,8 @@ function ChatPageInner() {
   }
 
   return (
-    <div className="h-screen flex bg-[var(--bg)]">
+    <div className="h-screen flex bg-[var(--bg)] relative">
+      <ConnectionStatus />
       {/* Server rail */}
       <ServerList
         servers={srv.servers}

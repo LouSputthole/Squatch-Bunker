@@ -77,3 +77,21 @@ body::before {
   animation: search-highlight 2s ease-out forwards;
   border-radius: 4px;
 }
+
+/* Voice toast slide-in */
+@keyframes toast-in {
+  0% { opacity: 0; transform: translateX(20px); }
+  100% { opacity: 1; transform: translateX(0); }
+}
+.animate-pulse-once {
+  animation: toast-in 0.3s ease-out forwards;
+}
+
+/* Connection status bar */
+@keyframes slide-down {
+  0% { transform: translateY(-100%); opacity: 0; }
+  100% { transform: translateY(0); opacity: 1; }
+}
+.animate-slide-down {
+  animation: slide-down 0.3s ease-out forwards;
+}

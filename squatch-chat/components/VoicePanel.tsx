@@ -125,6 +125,7 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
   onStateChange,
 }, ref) {
   const [joined, setJoined] = useState(false);
+  const joinedRef = useRef(false);
   const [muted, setMuted] = useState(false);
   const [deafened, setDeafened] = useState(false);
   const [pttMode, setPttMode] = useState(false);
@@ -547,6 +548,39 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
           if (state === "closed") { next.delete(uid); } else { next.set(uid, quality); }
           return next;
         });
+
+        // ─── Peer Reconnection ───
+        // If the connection fails or stays disconnected, retry
+        if (state === "failed") {
+          console.log(`[Campfire] Peer connection failed for ${uid}, reconnecting...`);
+          pc.close();
+          peersRef.current.delete(remoteSocketId);
+          audioElementsRef.current.get(remoteSocketId)?.remove();
+          audioElementsRef.current.delete(remoteSocketId);
+          // Re-create as initiator after a short delay
+          setTimeout(() => {
+            if (!joinedRef.current) return;
+            createPeer(remoteSocketId, true, uid);
+          }, 1000);
+        } else if (state === "disconnected") {
+          // Disconnected can recover on its own — wait 5s before forcing reconnect
+          const timer = setTimeout(() => {
+            if (pc.connectionState === "disconnected") {
+              console.log(`[Campfire] Peer still disconnected for ${uid}, reconnecting...`);
+              pc.close();
+              peersRef.current.delete(remoteSocketId);
+              audioElementsRef.current.get(remoteSocketId)?.remove();
+              audioElementsRef.current.delete(remoteSocketId);
+              if (joinedRef.current) createPeer(remoteSocketId, true, uid);
+            }
+          }, 5000);
+          // If it reconnects, cancel the timer
+          const origHandler = pc.onconnectionstatechange;
+          pc.onconnectionstatechange = () => {
+            if (pc.connectionState === "connected") clearTimeout(timer);
+            if (origHandler) (origHandler as () => void)();
+          };
+        }
       };
 
       if (initiator) {
@@ -558,6 +592,7 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
       peersRef.current.set(remoteSocketId, pc);
       return pc;
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     []
   );
 
@@ -579,6 +614,7 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
         socket.emit("voice:join", { channelId, serverId, avatar: currentUserAvatar });
         joinedChannelRef.current = channelId;
         setJoined(true);
+        joinedRef.current = true;
         playNotificationSound("join");
       } catch (err) {
         console.error("[Voice] Mic access failed:", err);
@@ -624,6 +660,7 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
     cleanupPeers();
     joinedChannelRef.current = null;
     setJoined(false);
+    joinedRef.current = false;
     setMuted(false);
     setDeafened(false);
     setParticipants([]);
