@@ -15,6 +15,7 @@ interface ServerListProps {
   activeServerId?: string;
   dmActive?: boolean;
   friendsActive?: boolean;
+  unreadServerIds?: Set<string>;
   onDmClick?: () => void;
   onFriendsClick?: () => void;
   onServerSelect: (server: Server) => void;
@@ -27,6 +28,7 @@ export default function ServerList({
   activeServerId,
   dmActive,
   friendsActive,
+  unreadServerIds,
   onDmClick,
   onFriendsClick,
   onServerSelect,
@@ -178,33 +180,39 @@ export default function ServerList({
         {servers.map((server) => {
           const isActive = activeServerId === server.id;
           const isUploading = iconUploading === server.id;
+          const hasUnread = !isActive && unreadServerIds?.has(server.id);
           return (
             <div key={server.id} className="relative flex items-center">
               {isActive && (
                 <div className="absolute -left-3 w-1 h-8 bg-white rounded-r-full" />
               )}
-              <button
-                onClick={() => onServerSelect(server)}
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  setIconMenu({ serverId: server.id, x: e.clientX, y: e.clientY });
-                }}
-                disabled={isUploading}
-                className={`w-12 h-12 flex items-center justify-center text-lg font-bold text-white transition-all duration-200 overflow-hidden ${
-                  isActive
-                    ? "bg-[var(--accent-2)] rounded-[16px]"
-                    : "bg-[var(--panel-2)] rounded-[24px] hover:rounded-[16px] hover:bg-[var(--accent-2)]"
-                }`}
-                title={server.name}
-              >
-                {isUploading ? (
-                  <span className="text-xs opacity-60">...</span>
-                ) : server.icon ? (
-                  <img src={server.icon} alt={server.name} className="w-full h-full object-cover" />
-                ) : (
-                  server.name[0].toUpperCase()
+              <div className="relative">
+                <button
+                  onClick={() => onServerSelect(server)}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    setIconMenu({ serverId: server.id, x: e.clientX, y: e.clientY });
+                  }}
+                  disabled={isUploading}
+                  className={`w-12 h-12 flex items-center justify-center text-lg font-bold text-white transition-all duration-200 overflow-hidden ${
+                    isActive
+                      ? "bg-[var(--accent-2)] rounded-[16px]"
+                      : "bg-[var(--panel-2)] rounded-[24px] hover:rounded-[16px] hover:bg-[var(--accent-2)]"
+                  }`}
+                  title={server.name}
+                >
+                  {isUploading ? (
+                    <span className="text-xs opacity-60">...</span>
+                  ) : server.icon ? (
+                    <img src={server.icon} alt={server.name} className="w-full h-full object-cover" />
+                  ) : (
+                    server.name[0].toUpperCase()
+                  )}
+                </button>
+                {hasUnread && (
+                  <span className="w-2.5 h-2.5 bg-white rounded-full absolute -bottom-0.5 -right-0.5 border border-[var(--bg)] pointer-events-none" />
                 )}
-              </button>
+              </div>
             </div>
           );
         })}

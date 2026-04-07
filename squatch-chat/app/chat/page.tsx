@@ -150,6 +150,17 @@ function ChatPageInner() {
         activeServerId={dmOpen ? undefined : srv.activeServer?.id}
         dmActive={dmOpen}
         friendsActive={friendsOpen}
+        unreadServerIds={(() => {
+          if (ch.unreadCounts.size === 0) return undefined;
+          const unreadChannelIds = new Set(ch.unreadCounts.keys());
+          const result = new Set<string>();
+          for (const server of srv.servers) {
+            if (server.channels.some((c) => unreadChannelIds.has(c.id))) {
+              result.add(server.id);
+            }
+          }
+          return result.size > 0 ? result : undefined;
+        })()}
         onDmClick={() => { setDmOpen((p) => !p); setFriendsOpen(false); }}
         onFriendsClick={() => { setFriendsOpen((p) => !p); setDmOpen(false); }}
         onServerSelect={(s) => { setDmOpen(false); setFriendsOpen(false); handleServerSelect(s); }}
