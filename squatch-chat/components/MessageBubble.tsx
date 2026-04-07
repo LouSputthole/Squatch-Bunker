@@ -4,6 +4,7 @@ import { useState } from "react";
 import { displayName, truncateName } from "@/lib/utils";
 import Avatar from "@/components/Avatar";
 import ProfileCard from "@/components/ProfileCard";
+import ImageLightbox from "@/components/ImageLightbox";
 
 const EMOJI_DATA: { emoji: string; keywords: string }[] = [
   // Smileys & emotion
@@ -277,6 +278,7 @@ export default function MessageBubble({ message, isOwn, currentUserId, canPin, o
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [emojiSearch, setEmojiSearch] = useState("");
   const [profileCard, setProfileCard] = useState<{ x: number; y: number } | null>(null);
+  const [lightbox, setLightbox] = useState<{ src: string; allSrcs: string[] } | null>(null);
 
   const shown = truncateName(message.author.username, 20);
 
@@ -390,7 +392,16 @@ export default function MessageBubble({ message, isOwn, currentUserId, canPin, o
               <p className="text-[var(--text)] text-sm break-words">{renderContent(message.content)}</p>
             )}
             {message.attachmentUrl && (
-              <Attachment url={message.attachmentUrl} name={message.attachmentName} />
+              <Attachment
+                url={message.attachmentUrl}
+                name={message.attachmentName}
+                onImageClick={(src) => {
+                  const all = Array.from(document.querySelectorAll<HTMLImageElement>("[data-lightbox-src]"))
+                    .map((el) => el.getAttribute("data-lightbox-src")!)
+                    .filter(Boolean);
+                  setLightbox({ src, allSrcs: all.length > 0 ? all : [src] });
+                }}
+              />
             )}
           </>
         )}
@@ -539,23 +550,36 @@ export default function MessageBubble({ message, isOwn, currentUserId, canPin, o
           onClose={() => setProfileCard(null)}
         />
       )}
+      {lightbox && (
+        <ImageLightbox
+          src={lightbox.src}
+          allSrcs={lightbox.allSrcs}
+          onClose={() => setLightbox(null)}
+          onNavigate={(src) => setLightbox((prev) => prev ? { ...prev, src } : null)}
+        />
+      )}
     </div>
   );
 }
 
-function Attachment({ url, name }: { url: string; name?: string | null }) {
+function Attachment({ url, name, onImageClick }: { url: string; name?: string | null; onImageClick?: (src: string) => void }) {
   const isImage = /\.(jpg|jpeg|png|gif|webp)$/i.test(url);
   const displayName = name || url.split("/").pop() || "file";
 
   if (isImage) {
     return (
-      <a href={url} target="_blank" rel="noopener noreferrer" className="block mt-1">
+      <button
+        type="button"
+        onClick={() => onImageClick?.(url)}
+        className="block mt-1 text-left"
+      >
         <img
           src={url}
           alt={displayName}
-          className="max-w-xs max-h-64 rounded-lg border border-[var(--accent-2)]/30 object-cover hover:opacity-90 transition-opacity"
+          data-lightbox-src={url}
+          className="max-w-xs max-h-64 rounded-lg border border-[var(--accent-2)]/30 object-cover hover:opacity-80 transition-opacity cursor-zoom-in"
         />
-      </a>
+      </button>
     );
   }
 
