@@ -308,6 +308,140 @@
 
 ---
 
+## Campfire Identity — What Makes Us Different
+
+> This is the flag in the dirt. Without the circle, Campfire risks being "Discord but moodier." With it, we have a real identity.
+
+### C1. The Circle [ ]
+**Priority: HIGHEST — Phase 1**
+
+Circular seat layout around a warm central glow. Users occupy seats, not list items. Speaking brightens your seat. Joining is sitting down.
+
+- [ ] Circle layout with seat positions (SVG/CSS)
+- [ ] Central ember glow focal point
+- [ ] Active speaker glow radiates from seat
+- [ ] Auto-seat on join, drag to reorder
+- [ ] Muted/away/listening micro-status per seat
+- [ ] Shared object slot in center (screen share, music, emblem)
+- [ ] Scales gracefully: 2 people → 12 people
+
+### C2. Arrival / Departure Animations [ ]
+**Priority: Phase 1**
+
+- [ ] Empty seat fills with fade-in + ember pulse on join
+- [ ] Seat cools + empties on leave
+- [ ] Subtle in active rooms, more visible in quiet rooms
+- [ ] "Stepped away" state for disconnects (may return)
+- [ ] Reconnect feels like sitting back down
+
+### C3. Ember Reactions [ ]
+**Priority: Phase 1**
+
+Quick ambient reactions that dissolve, not stack. Rise softly toward center, flicker near reacting user's seat.
+
+- [ ] Reaction set: laugh, applause, agree, wow, skull, clink, nod
+- [ ] Soft rise animation toward center
+- [ ] Spark trail + quick fade
+- [ ] Rate limit spam, cluster duplicates
+- [ ] User toggle to tone down
+- [ ] Works in voice, watch parties, passive hangouts
+
+### C4. Room Types [ ]
+**Priority: Phase 1**
+
+Rooms have a purpose — not just generic channels with labels.
+
+- [ ] Hangout: circle-first, low pressure
+- [ ] Game Night: party tools, lobby codes
+- [ ] Watch Together: shared video in center, circle wraps
+- [ ] Workshop: screen share, whiteboard, queue to speak
+- [ ] Quiet Room: minimal notifications, subdued visuals
+- [ ] Story Time: lantern built in, speaking queue
+- [ ] Room type selector on create
+- [ ] UI shifts per type (layout, glow, animation level)
+
+### C5. Leave-No-Trace Rooms [ ]
+**Priority: Phase 1**
+
+- [ ] Messages auto-delete: 24h / 7d / 30d configurable
+- [ ] Voice never recorded by default
+- [ ] Uploads expire unless pinned
+- [ ] Side trails auto-expire
+- [ ] Privacy labels visible: "Fades in 24h", "Voice is live only"
+- [ ] Pair with camp journal (save what matters)
+
+### C6. Offshoots (Side Conversations) [ ]
+**Priority: Phase 2**
+
+Temporary branch from main room. Two people peel off into side audio bubble.
+
+- [ ] "Step aside" action from circle
+- [ ] Mini-circle or attached card UI
+- [ ] Easy to start, easy to rejoin
+- [ ] Temporary by default (expire in 24h unless saved)
+- [ ] Visually attached to parent room
+
+### C7. Pass the Lantern [ ]
+**Priority: Phase 2**
+
+Lightweight floor-control. Holder gets brighter seat + optional background ducking.
+
+- [ ] Lantern visual on active speaker seat
+- [ ] Pass directly, drop to reopen floor
+- [ ] "Lean in" to request next
+- [ ] Loose mode (interruptions softened) vs strict mode
+- [ ] Host can enable/disable
+
+### C8. Shared Object Slot [ ]
+**Priority: Phase 2**
+
+Central focal point can hold: screen share, music player, video, room emblem.
+
+- [ ] Object appears in circle center
+- [ ] Watch Together: video synced for all
+- [ ] Music: shared playback in center
+- [ ] Screen share: central with circle wrapping
+
+### C9. Camp Journal [ ]
+**Priority: Phase 2**
+
+Save system for ephemeral rooms. "This room fades by default. Save what matters."
+
+- [ ] Pin messages to journal
+- [ ] Journal per server / per room
+- [ ] Pinned items look like tucked notes / postcards
+
+### C10. Ambient Sound Themes [ ]
+**Priority: Phase 3**
+
+Ultra-low-key room tone. Off by default, auto-ducks under voices.
+
+- [ ] Fire crackle, distant rain, porch night, cabin wind, café, vinyl hiss
+- [ ] Very low mix, user-level toggle
+- [ ] Short curated list (not 400 fantasy presets)
+- [ ] Auto-duck under speech
+- [ ] Per-room theme setting
+
+### Design Language
+
+| Element | Style |
+|---|---|
+| Background | Deep charcoal |
+| Highlights | Warm amber |
+| Activity | Burnt orange accents |
+| Idle | Cooler muted tones |
+| Gradients | Soft, not neon |
+| Geometry | Rounded, mature proportions |
+| Motion | Heat and breath, not RGB seizure |
+| Unread | Embers |
+| Active room | Warms up visually |
+| Idle room | Cools and dims |
+| Typing | Spark drift |
+| Pinned | Tucked notes / postcards |
+| Privacy | Blunt, readable labels |
+
+---
+
 ## Engineering Epics
 
 1. **Identity, membership, and room model**

@@ -6,7 +6,56 @@
 
 ## What Is This?
 
-**Campfire** is a Discord-like private chat app with text channels, voice chat (WebRTC), server/channel management, and user profiles. It was originally called "SquatchChat" — some internal identifiers (cookie name, guest IDs) still reflect that.
+**Campfire** is NOT a Discord clone. It's a social presence platform built around the metaphor of gathering around a fire. Voice rooms are circles, not participant lists. Arrivals feel like sitting down, not spawning. Reactions are embers, not emoji slot machines.
+
+The product identity: **deep charcoal, warm amber, restrained motion, embodied presence.**
+
+---
+
+## Product Vision — What Makes Campfire Different
+
+### The Circle (Core Identity)
+Voice rooms use a **circular seat layout** around a central focal point (warm ember glow). Users occupy seats. Speaking brightens your seat. Joining is sitting down. This gives presence *shape* — people understand group dynamics faster with visual structure.
+
+### Offshoots (Side Conversations)
+Temporary branches from the main room. Two people can peel off into a side audio bubble without leaving the circle. Not a new channel — a social side pocket. Auto-expires unless saved.
+
+### Arrival/Departure
+Joining fills an empty seat with a fade-in + ember pulse. Leaving cools the seat. Quiet rooms show arrivals more; active rooms keep them subtle. Disconnects show "stepped away" state, reconnects feel like sitting back down.
+
+### Pass the Lantern
+Lightweight floor-control for voice. One person holds conversational focus (brighter seat, ducked background). Others can request next. Not parliamentary — warm and social. Perfect for story time, D&D recaps, group decisions.
+
+### Ember Reactions
+Quick ambient reactions that rise softly toward the center and dissolve. No emoji confetti. Reactions flicker near the reacting user's seat, leave a faint spark trail, fade quickly. Rate-limited, clustered elegantly.
+
+### Room Types (Rooms with a Purpose)
+Instead of generic channels, rooms have types with different defaults:
+- **Hangout** — circle-first, low pressure
+- **Game Night** — party tools, lobby codes, side chatter
+- **Watch Together** — shared video in center, circle wraps around
+- **Workshop** — screen share, whiteboard, queue to speak
+- **Quiet Room** — minimal notifications, subdued visuals
+- **Story Time** — lantern built in, speaking queue
+
+### Leave-No-Trace Rooms
+Ephemeral by default. Messages auto-delete after configurable period. Voice never recorded. Frame as "casual by default, memory is intentional."
+
+### Ambient Sound Themes
+Ultra-low-key room tone: fire crackle, distant rain, vinyl hiss. Off by default, auto-ducks under voices, user-level toggle. Treat like lighting, not content.
+
+### Design Grammar
+- Deep charcoal base, warm amber highlights, burnt orange activity accents
+- Cooler muted tones when idle
+- Soft gradients, rounded geometry, shadows/glow used sparingly
+- Motion feels like heat and breath, not RGB seizure
+- Unread messages as embers, active rooms warm up, idle rooms cool/dim
+- Privacy labels are blunt and readable
+
+### Build Phases
+**Phase 1:** Circle presence, arrival animations, ember reactions, room types, leave-no-trace
+**Phase 2:** Offshoots, pass the lantern, shared object slot, journal save flow
+**Phase 3:** Ambient sound themes, mood controls, richer privacy, self-hosted options
 
 ---
 
@@ -18,8 +67,11 @@
 | Database | PostgreSQL + Prisma v7 (`@prisma/adapter-pg`) |
 | Realtime | Socket.IO (separate server on port 3001) |
 | Voice | WebRTC peer-to-peer audio, Socket.IO signaling |
+| Video | WebRTC camera via existing voice peer connections |
+| Screen Share | WebRTC via separate peer connections |
 | Auth | JWT in HttpOnly cookies (`squatch-token` cookie name kept for backward compat) |
 | Styling | Tailwind CSS with CSS custom properties for theming |
+| Desktop | Electron + electron-builder (Win/Mac/Linux installers) |
 
 ---
 
@@ -31,48 +83,54 @@ squatch-chat/
 │   ├── api/
 │   │   ├── auth/           # login, register, guest, me, logout, avatar upload
 │   │   ├── channels/       # create channels (text or voice)
-│   │   ├── messages/       # CRUD messages, pagination
-│   │   ├── servers/        # create servers, join via invite, list members
+│   │   ├── messages/       # CRUD messages, pagination, reactions, search
+│   │   ├── servers/        # create, join, settings, members
+│   │   └── servers/[id]/   # rename, delete, regenerate invite (owner only)
 │   ├── chat/               # Main chat page (SPA-style with query params)
 │   ├── login/              # Login page
 │   ├── register/           # Register page
 │   └── join/[inviteCode]/  # Invite link handler
 ├── components/
 │   ├── Avatar.tsx           # Shared avatar (image or initials fallback)
-│   ├── ChannelList.tsx      # Sidebar: text channels (#) + voice channels (speaker icon)
-│   ├── ChatPanel.tsx        # Text chat: messages, typing indicators, optimistic sends
-│   ├── MemberList.tsx       # Right sidebar: online/offline members, role badges, context menu
-│   ├── MessageBubble.tsx    # Single message: edit/delete, avatar, reactions, attachments
+│   ├── ChannelList.tsx      # Sidebar: text/voice channels, server settings gear
+│   ├── ChatPanel.tsx        # Text chat: messages, typing, replies, notifications
+│   ├── MemberList.tsx       # Right sidebar: online/offline, roles, context menu, skeletons
+│   ├── MessageBubble.tsx    # Message: edit/delete, reactions, replies, emoji picker, timestamps
 │   ├── SearchPanel.tsx      # Debounced message search across server
-│   ├── ServerList.tsx       # Left rail: server icons, create/join
-│   ├── SettingsModal.tsx    # Settings: Audio tab + Account tab (avatar upload)
-│   ├── VoicePanel.tsx       # Headless WebRTC engine (forwardRef, VAD, PTT)
-│   └── VoiceRoom.tsx        # Voice room view: participant grid, speaking indicators
-├── hooks/                   # Modular state hooks (extracted from chat page)
+│   ├── ServerList.tsx       # Left rail: server icons with initials, active indicator
+│   ├── SettingsModal.tsx    # Settings: Audio/Account/Theme tabs
+│   ├── VoicePanel.tsx       # Headless WebRTC engine (voice + camera + screen share)
+│   └── VoiceRoom.tsx        # Voice room: participant grid, video, screen viewer, mod tools
+├── hooks/
 │   ├── useAuth.ts           # User state, login check, logout, avatar updates
-│   ├── useServers.ts        # Server list, active server, create/join/select
+│   ├── useServers.ts        # Server list, active server, create/join/select/rename/delete
 │   ├── useChannels.ts       # Active channel, URL sync, unread counts
-│   ├── usePresence.ts       # Online members, user role in server
-│   ├── useVoice.ts          # Voice channel, participants, PTT, state, ref
-│   └── useKeyboardShortcuts.ts # All hotkeys (Ctrl+K, Ctrl+M, Ctrl+D, Esc)
+│   ├── usePresence.ts       # Online members, statuses, user role, auto-idle
+│   ├── useVoice.ts          # Voice, camera, screen share, mod actions
+│   └── useKeyboardShortcuts.ts # All hotkeys
 ├── types/
 │   └── chat.ts              # Shared interfaces: Channel, Server, User, VoiceParticipant
 ├── lib/
-│   ├── auth.ts              # JWT token/session management, cookie helpers
+│   ├── auth.ts              # JWT token/session, production-aware cookie flags
+│   ├── config.ts            # Centralized env var config (all shared constants)
 │   ├── db.ts                # Prisma singleton with PrismaPg adapter
 │   ├── permissions.ts       # Role hierarchy, permission checks, colors, labels
-│   ├── socket.ts            # Client-side Socket.IO singleton
+│   ├── socket.ts            # Client-side Socket.IO singleton + heartbeat + presence
 │   └── utils.ts             # displayName(), truncateName(), initials()
 ├── realtime/
-│   └── server.ts            # Socket.IO server: presence, chat, voice signaling
+│   └── server.ts            # Socket.IO: presence, chat, voice, screen, moderation
 ├── prisma/
-│   ├── schema.prisma        # Models: User, Server, ServerMember, Channel, Message
-│   └── migrations/          # SQL migrations
+│   ├── schema.prisma        # Models: User, Server, ServerMember, Channel, Message, Reaction
+│   └── migrations/
+├── desktop/                 # Electron desktop app wrapper
+│   ├── main.js              # Electron entry point
+│   ├── package.json         # electron-builder config
+│   └── scripts/build.sh     # Build script
 ├── public/
-│   └── avatars/             # Uploaded profile pictures (userId.ext)
-├── Dockerfile               # Multi-stage production build
-├── docker-compose.prod.yml  # Full stack: postgres + app
-└── ROADMAP.md               # 20-section voice product roadmap with status
+│   └── campfire-logo.png    # Logo
+├── Dockerfile
+├── docker-compose.prod.yml
+└── ROADMAP.md
 ```
 
 ---
@@ -80,248 +138,121 @@ squatch-chat/
 ## Key Architecture Decisions
 
 ### Authentication
-- JWT stored in HttpOnly cookie named `squatch-token` (legacy name, kept for session compat)
-- Guest access: JWT-only session, no DB row required. Guest usernames are `{name}#{hex}` format
-- `displayName()` in `lib/utils.ts` strips the `#discriminator` suffix for display
+- JWT stored in HttpOnly cookie named `squatch-token`
+- Guest access: JWT-only session, no DB row required
+- `displayName()` in `lib/utils.ts` strips `#discriminator` suffix
 
 ### Realtime (Socket.IO)
-- Separate server on port 3001 (`realtime/server.ts`)
-- JWT verified at handshake from cookie — no separate auth step
-- Socket rooms: `server:{id}` (presence), `channel:{id}` (text messages), `voice:{id}` (voice)
-- Events: `message:send`, `message:edit`, `message:delete`, `typing:start/stop`, `voice:join/leave/mute/deafen`
-- Voice participant updates broadcast to both `voice:{channelId}` and `server:{serverId}` rooms
+- Separate server on port 3001, JWT verified at handshake
+- Heartbeat: 15s interval, 45s timeout, stale session cleanup
+- Presence statuses: online, idle, DND, invisible (auto-idle after 5min)
+- Single voice room enforcement (server-side)
 
 ### Voice Chat (WebRTC)
-- **VoicePanel** (`components/VoicePanel.tsx`): Headless WebRTC connection manager
-  - Uses `forwardRef` + `useImperativeHandle` to expose `toggleMute`, `toggleDeafen`, `disconnect`, `togglePTT`, `isPTT`
-  - Reports state via `onStateChange` callback (includes speaking state per participant)
-  - Voice activity detection (VAD) using AudioContext AnalyserNode — emits `voice:speaking` events
-  - Push-to-talk mode: mic stays muted, Space bar hold to transmit
-  - Renders `null` — all UI is in VoiceRoom
-- **VoiceRoom** (`components/VoiceRoom.tsx`): Visual participant grid + controls
-  - Takes over the main panel when user joins a voice channel
-  - Control buttons delegate to VoicePanel via ref
-- P2P audio via Google STUN servers, SDP offer/answer exchange through Socket.IO
-- Notification tones generated with Web Audio API (no audio files)
+- **VoicePanel**: Headless engine — voice, camera, screen share all managed here
+- **VoiceRoom**: Visual UI — participant grid, video tiles, screen viewer, mod menu
+- Voice activity detection (VAD) via AudioContext AnalyserNode
+- Push-to-talk (Space bar), per-user volume, input sensitivity
+- ICE restart on failed connections, Socket.IO reconnect auto-rejoins voice
 
-### Profile Pictures
-- `avatar` field on User model (nullable string URL)
-- Upload endpoint: `POST /api/auth/avatar` — saves to `public/avatars/{userId}.{ext}`
-- Delete endpoint: `DELETE /api/auth/avatar`
-- Max 2MB, accepts JPEG/PNG/GIF/WebP
-- `Avatar` component shows uploaded image or falls back to initials circle
+### Camera/Video
+- Video track added to existing voice peer connections with SDP renegotiation
+- Self-view mirrored, responsive grid layout
+- Camera state synced via `voice:camera` event
+
+### Screen Share
+- Separate RTCPeerConnection set (won't disrupt audio)
+- `getDisplayMedia` for capture, signaling via `screen:*` events
+- Fullscreen viewer, multi-share tabs, compact participant strip
+
+### Voice Moderation
+- Server mute/deafen, kick from voice, move between rooms
+- Role validation: mod(2+) required, can't target equal/higher rank
+- Force-mute/deafen syncs to target's VoicePanel
 
 ### Roles & Permissions
-- `role` field on ServerMember: `owner`, `admin`, `mod`, `member`
-- Hierarchy in `lib/permissions.ts`: owner(4) > admin(3) > mod(2) > member(1)
-- Server creator auto-assigned `owner`
-- MemberList shows colored role badges + right-click context menu for role management
-- API guards: `PATCH /api/servers/:id/members/:userId` (change role), `DELETE` (kick)
-- Higher roles can manage lower roles only
+- `role` on ServerMember: owner(4) > admin(3) > mod(2) > member(1)
+- Server creator auto-assigned owner
+- Right-click context menu for role management + kick
 
-### Channels
-- Two types: `text` (default) and `voice` — stored in `Channel.type` field
-- Text channels show `#` icon, voice channels show speaker icon
-- Voice channels show connected participant count and inline names in sidebar
-
-### Messages
-- Optimistic rendering with temp IDs, replaced on server confirmation
-- Edit/delete with realtime broadcast
-- Unread badges on text channels (tracked per-channel)
-- Emoji reactions with toggle semantics (click to add/remove)
-- File/image attachments (10MB max, inline image preview, file download cards)
-- Message search: `GET /api/messages/search?serverId=X&q=term` with debounced UI
+### Config Centralization
+All env vars in `lib/config.ts`. Realtime server reads same vars directly. Nothing hardcoded.
 
 ---
 
 ## Running Locally
 
 ```bash
-# 1. Start PostgreSQL (or use Docker)
 docker compose -f docker-compose.prod.yml up -d postgres
-
-# 2. Install dependencies
 pnpm install
-
-# 3. Run migrations
 npx prisma migrate deploy
-
-# 4. Generate Prisma client
 npx prisma generate
-
-# 5. Start the realtime server
 npx tsx realtime/server.ts &
-
-# 6. Start Next.js dev server
 pnpm dev
 ```
 
-The app runs at `http://localhost:3000`, realtime server at `http://localhost:3001`.
+App at `http://localhost:3000`, realtime at `http://localhost:3001`.
 
 ---
 
 ## Environment Variables
 
+See `.env.example` for full list. Key ones:
+
 | Variable | Default | Purpose |
 |---|---|---|
-| `DATABASE_URL` | `postgresql://postgres:postgres@localhost:5432/campfire?schema=public` | PostgreSQL connection |
+| `DATABASE_URL` | (required) | PostgreSQL connection |
 | `JWT_SECRET` | `campfire-secret-change-me` | JWT signing secret |
 | `NEXT_PUBLIC_SOCKET_URL` | `http://localhost:3001` | Socket.IO server URL |
-| `NEXT_PUBLIC_APP_URL` | `http://localhost:3000` | CORS origin for Socket.IO |
+| `NEXT_PUBLIC_APP_URL` | `http://localhost:3000` | CORS origin |
 | `SOCKET_PORT` | `3001` | Realtime server port |
+| `CORS_ORIGINS` | (app URL) | Comma-separated allowed origins |
+| `COOKIE_NAME` | `squatch-token` | Session cookie name |
+| `NODE_ENV` | `development` | `production` enables Secure cookies |
 
 ---
 
-## Common Patterns
-
-### Adding a new field to User
-1. Add field in `prisma/schema.prisma`
-2. Create migration: `npx prisma migrate dev --name describe-change`
-3. Update API `select` clauses (auth/me, members, messages) to include the new field
-4. Update TypeScript interfaces in components
-
-### Dynamic imports for DB resilience
-Guest users work without a database. API routes use `try { const { prisma } = await import("@/lib/db"); ... } catch { /* fallback */ }` pattern.
-
-### Modular hooks architecture
-The chat page (`app/chat/page.tsx`) is a thin composition layer. All logic lives in `hooks/`:
+## Modular Hooks Architecture
 
 | Hook | Owns | Touch when... |
 |---|---|---|
 | `useAuth` | user, login, logout, avatar | changing auth flow |
-| `useServers` | server list, create/join | adding server features |
+| `useServers` | server list, create/join/rename/delete | adding server features |
 | `useChannels` | active channel, URL, unreads | changing channel behavior |
-| `usePresence` | online members, user role | updating presence/roles |
-| `useVoice` | voice state, PTT, participants | working on voice features |
+| `usePresence` | online members, statuses, role | updating presence/roles |
+| `useVoice` | voice, camera, screen, mod actions | working on media features |
 | `useKeyboardShortcuts` | all hotkeys | adding shortcuts |
 
-Shared types live in `types/chat.ts`. Each hook is self-contained — work on one without reading the others.
-
-### forwardRef + useImperativeHandle
-Used by VoicePanel to expose methods to the parent chat page. The parent holds a ref (`voicePanelRef`) and calls methods like `voicePanelRef.current?.toggleMute()` from VoiceRoom's button callbacks.
-
 ---
 
-## What's Built vs. What's Next
+## Deployment
 
-See `ROADMAP.md` for the full 20-section voice product roadmap with `[x]` built / `[~]` partial / `[ ]` not started annotations.
+All config via env vars. See `.env.example`.
 
-**Recently completed (v0.0.5):**
-- Roles & permissions (owner/admin/mod/member hierarchy)
-- Role badges with color coding in member list
-- Right-click context menu for role management + kick
-- Speaking indicators via voice activity detection (VAD)
-- Push-to-talk (Space bar hold, toggle in voice room)
-- Emoji reactions with toggle semantics
-- File/image uploads with inline preview
-- Message search with debounced API
-- Keyboard shortcuts (Ctrl+K search, Ctrl+M mute, Ctrl+D deafen)
-
-**High-priority next items (P0):**
-- Reconnect/reliability for voice
-- Per-user volume control
-- Input sensitivity slider
-- SFU for scalable voice (currently P2P, won't scale past ~6 users)
-- Channel-specific permissions
-
-**Future:**
-- DMs, mentions, link previews
-- Screen share, camera
-- Stage mode, shared activities
-
----
-
-## Deployment / Hosting
-
-All server config lives in env vars — nothing hardcoded. See `.env.example` for full list.
-
-### Quick deploy checklist
-1. Copy `.env.example` → `.env`, update all values
-2. Set `NODE_ENV=production` (enables Secure cookies)
-3. Generate strong `JWT_SECRET`: `openssl rand -hex 32`
-4. Set `NEXT_PUBLIC_APP_URL` to your domain (`https://campfire.yourdomain.com`)
-5. Set `NEXT_PUBLIC_SOCKET_URL` to socket endpoint
-6. Set `CORS_ORIGINS` if frontend/socket on different domains
-7. Use strong DB credentials
-
-### Config centralization
-All shared constants live in `lib/config.ts`. Server URLs, cookie settings, CORS, upload limits — change one place, applies everywhere. The realtime server (`realtime/server.ts`) reads the same env vars directly since it runs as a separate Node process.
-
-### Key env vars
-| Variable | Used By | Purpose |
-|---|---|---|
-| `NEXT_PUBLIC_APP_URL` | Client + CORS | Frontend URL |
-| `NEXT_PUBLIC_SOCKET_URL` | Client | Socket.IO server URL |
-| `SOCKET_PORT` | Realtime server | Port for Socket.IO |
-| `SOCKET_PATH` / `NEXT_PUBLIC_SOCKET_PATH` | Both | Socket.IO endpoint path |
-| `CORS_ORIGINS` | Realtime server | Comma-separated allowed origins |
-| `COOKIE_NAME` | Auth + middleware + realtime | Session cookie name |
-| `JWT_SECRET` | Auth + realtime | Token signing key |
-| `NODE_ENV` | Cookie flags | `production` enables Secure flag |
-
-### Docker
 ```bash
-# Production with docker compose
+# Docker
 docker compose -f docker-compose.prod.yml up -d
 
-# All config via env vars or .env file
-APP_PORT=8080 SOCKET_PORT=8081 docker compose -f docker-compose.prod.yml up -d
-```
-
-### Reverse proxy (nginx example)
-```nginx
-server {
-    server_name campfire.yourdomain.com;
-
-    location / {
-        proxy_pass http://localhost:3000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-    }
-
-    location /api/socketio {
-        proxy_pass http://localhost:3001;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-    }
-}
+# Reverse proxy (nginx)
+# See .env.example for nginx config example
 ```
 
 ---
 
 ## Gotchas
 
-- **Next.js 16 breaking changes**: `params` is a Promise (must `await params`), `cookies()` is async, middleware is deprecated. Check `node_modules/next/dist/docs/` if unsure.
-- **Prisma v7**: Requires adapter-based constructor (`@prisma/adapter-pg`), explicit output path in schema.
-- **Cookie name**: Still `squatch-token` for backward session compatibility after the rename to Campfire.
-- **Guest usernames**: Stored as `alice#a1b2c3d4`. Always use `displayName()` from `lib/utils.ts` for display.
-- **Voice P2P limit**: Current WebRTC mesh topology won't scale past ~6 concurrent users in one voice channel.
-- **No HTTPS locally**: WebRTC requires a secure context in production. Works on localhost for dev.
-
----
-
-## Delegated Tasks (in progress by other devs)
-
-Do NOT modify these files/features — separate branches pending merge:
-
-| Branch | Task | Files |
-|---|---|---|
-| `feat/member-list-skeletons` | Loading skeleton placeholders | `components/MemberList.tsx` |
-| `feat/typing-indicator` | Typing "X is typing..." display | `components/ChatPanel.tsx` |
-| `feat/message-timestamps` | Hover tooltip with full date/time | `components/MessageBubble.tsx` |
-| `feat/server-initials` | Server letter icons + hover animation | `components/ServerList.tsx` |
-| `feat/channel-descriptions` | Optional description field + tooltip | `schema.prisma`, `api/channels`, `ChannelList.tsx` |
+- **Next.js 16**: `params` is a Promise, `cookies()` is async, middleware deprecated
+- **Prisma v7**: Adapter-based constructor, explicit output path
+- **Cookie name**: `squatch-token` (legacy, kept for compat)
+- **Voice P2P limit**: WebRTC mesh won't scale past ~6 users (needs SFU)
+- **Camera renegotiation**: Adding/removing video track triggers SDP renegotiation on all peers
 
 ---
 
 ## Dev Communication Style
 
-Short 3-6 word sentences. No filler, preamble, or pleasantries. Run tools first, show result, then stop. Do not narrate. Drop articles ("me fix code" not "I will fix the code").
+Short 3-6 word sentences. No filler, preamble, or pleasantries. Run tools first, show result, then stop. Do not narrate. Drop articles.
 
 ---
 
-*Last updated: April 2026 — v0.0.5*
+*Last updated: April 2026 — v0.0.6*
