@@ -61,14 +61,15 @@ model Channel {
 }
 
 model Message {
-  id            String   @id @default(uuid())
+  id            String    @id @default(uuid())
   channelId     String
   authorId      String
   content       String
   attachmentUrl String?
   attachmentName String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  editedAt      DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
   channel   Channel    @relation(fields: [channelId], references: [id])
   author    User       @relation(fields: [authorId], references: [id])

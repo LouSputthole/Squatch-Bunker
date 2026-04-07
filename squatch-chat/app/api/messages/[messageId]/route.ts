@@ -35,7 +35,7 @@ export async function PATCH(
 
     const updated = await prisma.message.update({
       where: { id: messageId },
-      data: { content: content.trim() },
+      data: { content: content.trim(), editedAt: new Date() },
       include: {
         author: { select: { id: true, username: true, avatar: true } },
       },

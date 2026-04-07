@@ -74,6 +74,7 @@ interface MessageBubbleProps {
     attachmentName?: string | null;
     createdAt: string;
     updatedAt?: string;
+    editedAt?: string | null;
     author: { id: string; username: string; avatar?: string | null };
     reactions?: Record<string, ReactionGroup>;
   };
@@ -97,7 +98,7 @@ export default function MessageBubble({ message, isOwn, currentUserId, onEdit, o
     minute: "2-digit",
   });
 
-  const wasEdited = message.updatedAt && message.updatedAt !== message.createdAt;
+  const wasEdited = !!(message.editedAt || (message.updatedAt && message.updatedAt !== message.createdAt));
   const reactions = message.reactions || {};
   const reactionEntries = Object.entries(reactions);
 
