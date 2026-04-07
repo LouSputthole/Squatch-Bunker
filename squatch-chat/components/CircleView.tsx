@@ -73,7 +73,7 @@ function EmberCenter() {
 
 export default function CircleView({ participants, currentUserId, onContextMenu }: CircleViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [prevIds, setPrevIds] = useState<Set<string>>(new Set());
+  const prevIdsRef = useRef<Set<string>>(new Set());
   const [newIds, setNewIds] = useState<Set<string>>(new Set());
 
   // Track arrivals for animation
@@ -81,15 +81,15 @@ export default function CircleView({ participants, currentUserId, onContextMenu 
     const currentIds = new Set(participants.map((p) => p.userId));
     const arriving = new Set<string>();
     for (const id of currentIds) {
-      if (!prevIds.has(id)) arriving.add(id);
+      if (!prevIdsRef.current.has(id)) arriving.add(id);
     }
+    prevIdsRef.current = currentIds;
     if (arriving.size > 0) {
       setNewIds(arriving);
       const timeout = setTimeout(() => setNewIds(new Set()), 800);
       return () => clearTimeout(timeout);
     }
-    setPrevIds(currentIds);
-  }, [participants, prevIds]);
+  }, [participants]);
 
   const count = participants.length;
   // Circle radius scales with participant count

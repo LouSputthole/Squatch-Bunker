@@ -16,6 +16,7 @@ interface VoicePanelProps {
   channelName: string;
   serverId: string;
   currentUserId: string;
+  currentUserAvatar?: string | null;
   onParticipantsChange?: (channelId: string, participants: VoiceParticipant[]) => void;
   onDisconnect?: () => void;
   onStateChange?: (state: { muted: boolean; deafened: boolean; reconnecting: boolean; participants: VoiceParticipant[]; sharing: boolean; cameraOn: boolean }) => void;
@@ -44,6 +45,7 @@ export interface VoicePanelHandle {
   toggleCamera: () => Promise<void>;
   getVideoStreams: () => Map<string, MediaStream>;
   getLocalCameraStream: () => MediaStream | null;
+  getLocalScreenStream: () => MediaStream | null;
 }
 
 const ICE_SERVERS: RTCConfiguration = {
@@ -99,6 +101,7 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
   channelName,
   serverId,
   currentUserId,
+  currentUserAvatar,
   onParticipantsChange,
   onDisconnect,
   onScreenShareChange,
@@ -541,7 +544,7 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
         localStreamRef.current = stream;
         startVAD(stream);
         const socket = getSocket();
-        socket.emit("voice:join", { channelId, serverId });
+        socket.emit("voice:join", { channelId, serverId, avatar: currentUserAvatar });
         joinedChannelRef.current = channelId;
         setJoined(true);
         playNotificationSound("join");
@@ -652,6 +655,7 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
     toggleCamera,
     getVideoStreams: () => remoteVideoStreamsRef.current,
     getLocalCameraStream: () => cameraStreamRef.current,
+    getLocalScreenStream: () => screenStreamRef.current,
   }), [toggleMute, toggleDeafen, leaveVoice, togglePTT, muted, deafened, startScreenShare, stopScreenShare, toggleCamera]);
 
   // Report state changes to parent — merge speaking state into participants
@@ -776,7 +780,7 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
     function handleReconnect() {
       setReconnecting(false);
       // Rejoin voice channel
-      socket.emit("voice:join", { channelId, serverId });
+      socket.emit("voice:join", { channelId, serverId, avatar: currentUserAvatar });
       // Re-sync mute/deafen state
       if (muted) socket.emit("voice:mute", { channelId, muted: true });
       if (deafened) socket.emit("voice:deafen", { channelId, deafened: true });

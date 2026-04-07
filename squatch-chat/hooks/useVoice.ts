@@ -13,6 +13,7 @@ export function useVoice(activeServer: Server | null) {
   const [incomingScreenShares, setIncomingScreenShares] = useState<ScreenShareInfo[]>([]);
   const [remoteVideoStreams, setRemoteVideoStreams] = useState<Map<string, MediaStream>>(new Map());
   const [localCameraStream, setLocalCameraStream] = useState<MediaStream | null>(null);
+  const [localScreenStream, setLocalScreenStream] = useState<MediaStream | null>(null);
   const voicePanelRef = useRef<VoicePanelHandle>(null);
 
   // Global voice participants listener
@@ -103,6 +104,12 @@ export function useVoice(activeServer: Server | null) {
     setLocalCameraStream(stream);
   }, [voiceState.cameraOn]);
 
+  // Track local screen stream from voiceState
+  useEffect(() => {
+    const stream = voicePanelRef.current?.getLocalScreenStream?.() || null;
+    setLocalScreenStream(stream);
+  }, [voiceState.sharing]);
+
   // ─── Mod Actions ───
 
   const serverMuteUser = useCallback((channelId: string, targetUserId: string, muted: boolean) => {
@@ -185,5 +192,6 @@ export function useVoice(activeServer: Server | null) {
     handleVideoStreamsChange,
     remoteVideoStreams,
     localCameraStream,
+    localScreenStream,
   };
 }

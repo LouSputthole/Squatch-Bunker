@@ -50,6 +50,7 @@ interface VoiceRoomProps {
   incomingScreenShares?: ScreenShareInfo[];
   remoteVideoStreams?: Map<string, MediaStream>;
   localCameraStream?: MediaStream | null;
+  localScreenStream?: MediaStream | null;
 }
 
 // SVG Icons (larger versions for the room view)
@@ -243,6 +244,31 @@ function ScreenViewer({ shares }: { shares: ScreenShareInfo[] }) {
   );
 }
 
+function SelfScreenPreview({ stream }: { stream: MediaStream }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    if (videoRef.current) {
+      videoRef.current.srcObject = stream;
+    }
+  }, [stream]);
+
+  return (
+    <div className="absolute top-14 right-3 z-30 w-48 rounded-lg overflow-hidden border border-amber-600/20 shadow-xl bg-black">
+      <video
+        ref={videoRef}
+        autoPlay
+        playsInline
+        muted
+        className="w-full h-auto object-contain"
+      />
+      <span className="absolute bottom-1 left-1 text-[10px] bg-black/70 text-amber-300 px-1.5 py-0.5 rounded">
+        Your screen
+      </span>
+    </div>
+  );
+}
+
 interface Toast {
   id: number;
   message: string;
@@ -277,6 +303,7 @@ export default function VoiceRoom({
   incomingScreenShares,
   remoteVideoStreams,
   localCameraStream,
+  localScreenStream,
 }: VoiceRoomProps) {
   const [volumePopup, setVolumePopup] = useState<{ userId: string; volume: number } | null>(null);
   const [modMenu, setModMenu] = useState<{ userId: string; username: string; x: number; y: number; muted: boolean; deafened?: boolean } | null>(null);
@@ -342,6 +369,11 @@ export default function VoiceRoom({
       {/* Screen Share Viewer — takes priority over participant grid */}
       {(incomingScreenShares && incomingScreenShares.length > 0) && (
         <ScreenViewer shares={incomingScreenShares} />
+      )}
+
+      {/* Screen share self-preview — small PiP when you're sharing */}
+      {sharing && localScreenStream && (
+        <SelfScreenPreview stream={localScreenStream} />
       )}
 
       {/* Video Grid — shows when any cameras are on */}

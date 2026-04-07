@@ -24,8 +24,8 @@ const io = new Server(httpServer, {
 // Track online users per server: serverId -> Map<userId, {username, socketId}>
 const onlineUsers = new Map<string, Map<string, { username: string; socketId: string }>>();
 
-// Track voice channel participants: channelId -> Map<userId, {username, socketId, muted, deafened, camera}>
-const voiceRooms = new Map<string, Map<string, { username: string; socketId: string; muted: boolean; deafened: boolean; camera: boolean }>>();
+// Track voice channel participants: channelId -> Map<userId, {username, socketId, muted, deafened, camera, avatar}>
+const voiceRooms = new Map<string, Map<string, { username: string; socketId: string; muted: boolean; deafened: boolean; camera: boolean; avatar?: string | null }>>();
 
 // Track which server each voice channel belongs to: channelId -> serverId
 const voiceChannelServer = new Map<string, string>();
@@ -231,10 +231,11 @@ io.on("connection", (socket) => {
   // ─── Voice Chat (WebRTC Signaling) ───
 
   // Join a voice channel
-  socket.on("voice:join", (data: string | { channelId: string; serverId?: string }) => {
-    // Support both old format (just channelId string) and new format ({channelId, serverId})
+  socket.on("voice:join", (data: string | { channelId: string; serverId?: string; avatar?: string | null }) => {
+    // Support both old format (just channelId string) and new format ({channelId, serverId, avatar})
     const channelId = typeof data === "string" ? data : data.channelId;
     const serverId = typeof data === "string" ? undefined : data.serverId;
+    const avatar = typeof data === "string" ? undefined : data.avatar;
 
     // Enforce single voice room — auto-leave previous
     const prevChannel = userVoiceChannel.get(currentUserId);
@@ -255,7 +256,7 @@ io.on("connection", (socket) => {
 
     // Tell the new user about existing participants (so they can create offers)
     const existing = Array.from(voiceRooms.get(channelId)!.entries()).map(
-      ([userId, info]) => ({ userId, username: info.username, socketId: info.socketId, muted: info.muted, deafened: info.deafened, camera: info.camera })
+      ([userId, info]) => ({ userId, username: info.username, socketId: info.socketId, muted: info.muted, deafened: info.deafened, camera: info.camera, avatar: info.avatar })
     );
     socket.emit("voice:participants", { channelId, participants: existing });
 
@@ -266,6 +267,7 @@ io.on("connection", (socket) => {
       muted: false,
       deafened: false,
       camera: false,
+      avatar: avatar || null,
     });
 
     // Notify others that someone joined
@@ -490,6 +492,7 @@ io.on("connection", (socket) => {
       muted: targetEntry.muted,
       deafened: targetEntry.deafened,
       camera: targetEntry.camera,
+      avatar: targetEntry.avatar,
     });
     userVoiceChannel.set(data.targetUserId, data.toChannelId);
     voiceChannelServer.set(data.toChannelId, ctx.serverId);
@@ -570,6 +573,7 @@ io.on("connection", (socket) => {
           muted: info.muted,
           deafened: info.deafened,
           camera: info.camera,
+          avatar: info.avatar,
         }))
       : [];
     const payload = { channelId, participants };

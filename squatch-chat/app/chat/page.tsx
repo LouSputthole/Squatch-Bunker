@@ -200,6 +200,7 @@ function ChatPageInner() {
           incomingScreenShares={voice.incomingScreenShares}
           remoteVideoStreams={voice.remoteVideoStreams}
           localCameraStream={voice.localCameraStream}
+          localScreenStream={voice.localScreenStream}
         />
       ) : ch.activeChannel && auth.user ? (
         <ChatPanel
@@ -256,6 +257,7 @@ function ChatPageInner() {
           channelName={voice.activeVoiceChannel.name}
           serverId={srv.activeServer?.id || ""}
           currentUserId={auth.user.id}
+          currentUserAvatar={auth.user.avatar}
           onParticipantsChange={voice.handleParticipantsChange}
           onDisconnect={voice.leaveVoice}
           onStateChange={voice.setVoiceState}

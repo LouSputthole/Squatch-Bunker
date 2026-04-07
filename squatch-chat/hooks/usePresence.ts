@@ -33,7 +33,7 @@ export function usePresence(activeServer: Server | null, user: User | null) {
         .then((r) => r.ok ? r.json() : null)
         .then((data) => {
           if (data?.members) {
-            const me = data.members.find((m: { userId: string; role?: string }) => m.userId === user.id);
+            const me = data.members.find((m: { id: string; role?: string }) => m.id === user.id);
             const role = me?.role || "member";
             setUserRole(role);
             socket.emit("server:join", { serverId: activeServer.id, role });
@@ -52,10 +52,23 @@ export function usePresence(activeServer: Server | null, user: User | null) {
       if (data.serverId !== activeServerIdRef.current) return;
       // Filter out invisible users (unless it's ourselves)
       const visible = data.members.filter((m) => m.status !== "invisible" || m.userId === user?.id);
-      setOnlineMembers(new Set(visible.map((m) => m.userId)));
+      const ids = new Set(visible.map((m) => m.userId));
+      // Always include current user as online (they're using the app)
+      if (user) ids.add(user.id);
+      setOnlineMembers(ids);
       setMemberStatuses(new Map(data.members.map((m) => [m.userId, m.status])));
     }
     socket.on("presence:update", handlePresence);
+
+    // Optimistically show current user as online immediately
+    if (user) {
+      setOnlineMembers((prev) => {
+        if (prev.has(user.id)) return prev;
+        const next = new Set(prev);
+        next.add(user.id);
+        return next;
+      });
+    }
 
     return () => {
       socket.off("presence:update", handlePresence);
