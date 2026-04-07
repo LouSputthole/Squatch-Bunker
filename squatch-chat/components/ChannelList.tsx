@@ -8,6 +8,7 @@ interface Channel {
   id: string;
   name: string;
   type?: string;
+  category?: string | null;
   description?: string;
 }
 
@@ -92,6 +93,8 @@ export default function ChannelList({
   const [renameValue, setRenameValue] = useState(serverName);
   const [settingsError, setSettingsError] = useState("");
   const [settingsLoading, setSettingsLoading] = useState(false);
+  const [newCategory, setNewCategory] = useState("");
+  const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set());
   const [localVoiceParticipants, setLocalVoiceParticipants] = useState<Map<string, VoiceParticipant[]>>(
     voiceParticipants || new Map()
   );
@@ -130,13 +133,14 @@ export default function ChannelList({
     const res = await fetch("/api/channels", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ serverId, name: newName.trim(), type: creating }),
+      body: JSON.stringify({ serverId, name: newName.trim(), type: creating, category: newCategory.trim() || undefined }),
     });
 
     if (res.ok) {
       const { channel } = await res.json();
       onChannelCreated(channel);
       setNewName("");
+      setNewCategory("");
       setCreating(null);
     }
   }
@@ -175,7 +179,6 @@ export default function ChannelList({
       const data = await res.json();
       setSettingsError(data.error || "Failed");
     }
-    // Invite code change has no visible effect here — MemberList will pick it up on next open
   }
 
   async function handleDeleteServer() {
@@ -191,8 +194,30 @@ export default function ChannelList({
     }
   }
 
+  function toggleCategory(cat: string) {
+    setCollapsedCategories((prev) => {
+      const next = new Set(prev);
+      if (next.has(cat)) next.delete(cat); else next.add(cat);
+      return next;
+    });
+  }
+
   const textChannels = channels.filter((c) => !c.type || c.type === "text");
   const voiceChannels = channels.filter((c) => c.type === "voice");
+
+  // Group text channels by category
+  const categoryMap = new Map<string, Channel[]>();
+  for (const ch of textChannels) {
+    const cat = ch.category || "";
+    if (!categoryMap.has(cat)) categoryMap.set(cat, []);
+    categoryMap.get(cat)!.push(ch);
+  }
+  // Sort: uncategorized ("") last
+  const sortedCategories = Array.from(categoryMap.keys()).sort((a, b) => {
+    if (a === "") return 1;
+    if (b === "") return -1;
+    return a.localeCompare(b);
+  });
 
   return (
     <div className="w-60 bg-[var(--panel)] flex flex-col border-r border-[var(--accent-2)]/30 shrink-0">
@@ -255,22 +280,76 @@ export default function ChannelList({
       )}
 
       <div className="flex-1 overflow-y-auto py-2">
-        {/* Text Channels */}
-        <div className="px-2 mb-1 flex items-center justify-between">
-          <span className="text-xs font-semibold text-[var(--muted)] uppercase tracking-wide">
-            Text Channels
-          </span>
-          <button
-            onClick={() => setCreating("text")}
-            className="text-[var(--muted)] hover:text-[var(--text)] text-lg leading-none"
-            title="Create Text Channel"
-          >
-            +
-          </button>
-        </div>
+        {/* Text Channels grouped by category */}
+        {sortedCategories.map((cat) => {
+          const catChannels = categoryMap.get(cat)!;
+          const label = cat || "Text Channels";
+          const isCollapsed = collapsedCategories.has(cat);
+          return (
+            <div key={cat}>
+              <div className="px-2 mb-1 flex items-center justify-between mt-1">
+                <button
+                  onClick={() => toggleCategory(cat)}
+                  className="flex items-center gap-1 text-xs font-semibold text-[var(--muted)] uppercase tracking-wide hover:text-[var(--text)] transition-colors"
+                >
+                  <span className="text-[8px]">{isCollapsed ? "▶" : "▼"}</span>
+                  {label}
+                </button>
+                {cat === "" && (
+                  <button
+                    onClick={() => setCreating("text")}
+                    className="text-[var(--muted)] hover:text-[var(--text)] text-lg leading-none"
+                    title="Create Text Channel"
+                  >
+                    +
+                  </button>
+                )}
+              </div>
+              {!isCollapsed && catChannels.map((channel) => {
+                const unread = unreadCounts?.get(channel.id) || 0;
+                return (
+                  <button
+                    key={channel.id}
+                    onClick={() => onChannelSelect(channel)}
+                    title={channel.description || undefined}
+                    className={`w-full text-left px-2 py-1 rounded text-sm flex items-center gap-1.5 ${
+                      activeChannelId === channel.id
+                        ? "bg-[var(--panel-2)] text-[var(--text)]"
+                        : unread > 0
+                          ? "text-[var(--text)] font-semibold hover:bg-[var(--panel-2)]/50"
+                          : "text-[var(--muted)] hover:bg-[var(--panel-2)]/50 hover:text-[var(--text)]"
+                    }`}
+                  >
+                    <HashIcon />
+                    <span className="flex-1 truncate">{channel.name}</span>
+                    {unread > 0 && (
+                      <span className="ml-auto bg-[var(--accent)] text-[var(--bg)] text-xs font-bold rounded-full min-w-[1.25rem] h-5 flex items-center justify-center px-1">
+                        {unread > 99 ? "99+" : unread}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          );
+        })}
+
+        {/* Add channel button (when no uncategorized section exists) */}
+        {!categoryMap.has("") && (
+          <div className="px-2 mb-1 flex items-center justify-between mt-1">
+            <span className="text-xs font-semibold text-[var(--muted)] uppercase tracking-wide">Text Channels</span>
+            <button
+              onClick={() => setCreating("text")}
+              className="text-[var(--muted)] hover:text-[var(--text)] text-lg leading-none"
+              title="Create Text Channel"
+            >
+              +
+            </button>
+          </div>
+        )}
 
         {creating === "text" && (
-          <form onSubmit={handleCreate} className="px-2 mb-1">
+          <form onSubmit={handleCreate} className="px-2 mb-1 space-y-1">
             <input
               type="text"
               value={newName}
@@ -280,34 +359,15 @@ export default function ChannelList({
               autoFocus
               onBlur={() => { if (!newName.trim()) setCreating(null); }}
             />
+            <input
+              type="text"
+              value={newCategory}
+              onChange={(e) => setNewCategory(e.target.value)}
+              placeholder="Category (optional)"
+              className="w-full text-xs px-2 py-1 bg-[var(--panel-2)] text-[var(--text)] border border-[var(--accent-2)]/50 rounded focus:outline-none"
+            />
           </form>
         )}
-
-        {textChannels.map((channel) => {
-          const unread = unreadCounts?.get(channel.id) || 0;
-          return (
-            <button
-              key={channel.id}
-              onClick={() => onChannelSelect(channel)}
-              title={channel.description || undefined}
-              className={`w-full text-left px-2 py-1 rounded text-sm flex items-center gap-1.5 ${
-                activeChannelId === channel.id
-                  ? "bg-[var(--panel-2)] text-[var(--text)]"
-                  : unread > 0
-                    ? "text-[var(--text)] font-semibold hover:bg-[var(--panel-2)]/50"
-                    : "text-[var(--muted)] hover:bg-[var(--panel-2)]/50 hover:text-[var(--text)]"
-              }`}
-            >
-              <HashIcon />
-              <span className="flex-1 truncate">{channel.name}</span>
-              {unread > 0 && (
-                <span className="ml-auto bg-[var(--accent)] text-[var(--bg)] text-xs font-bold rounded-full min-w-[1.25rem] h-5 flex items-center justify-center px-1">
-                  {unread > 99 ? "99+" : unread}
-                </span>
-              )}
-            </button>
-          );
-        })}
 
         {/* Voice Channels */}
         <div className="px-2 mb-1 mt-4 flex items-center justify-between">
