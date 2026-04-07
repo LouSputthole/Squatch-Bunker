@@ -13,13 +13,13 @@ services:
     container_name: campfire-db
     restart: unless-stopped
     environment:
-      POSTGRES_USER: postgres
+      POSTGRES_USER: ${DB_USER:-postgres}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
-      POSTGRES_DB: campfire
+      POSTGRES_DB: ${DB_NAME:-campfire}
     volumes:
       - campfire-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres}"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -35,12 +35,17 @@ services:
       - "${APP_PORT:-3000}:3000"
       - "${SOCKET_PORT:-3001}:3001"
     environment:
-      DATABASE_URL: "postgresql://postgres:${DB_PASSWORD:-postgres}@db:5432/campfire?schema=public"
+      NODE_ENV: ${NODE_ENV:-production}
+      DATABASE_URL: "postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@db:5432/${DB_NAME:-campfire}?schema=public"
       JWT_SECRET: ${JWT_SECRET:-campfire-secret-change-me-in-production}
-      SOCKET_PORT: "3001"
+      COOKIE_NAME: ${COOKIE_NAME:-squatch-token}
+      SOCKET_PORT: ${SOCKET_PORT:-3001}
+      SOCKET_PATH: ${SOCKET_PATH:-/api/socketio}
       NEXT_PUBLIC_SOCKET_URL: ${NEXT_PUBLIC_SOCKET_URL:-http://localhost:3001}
+      NEXT_PUBLIC_SOCKET_PATH: ${NEXT_PUBLIC_SOCKET_PATH:-/api/socketio}
       NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
-      PORT: "3000"
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+      PORT: ${APP_PORT:-3000}
 
 volumes:
   campfire-data:

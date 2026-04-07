@@ -4,17 +4,21 @@ import jwt from "jsonwebtoken";
 import { parse } from "cookie";
 
 const PORT = parseInt(process.env.SOCKET_PORT || "3001", 10);
-const CLIENT_ORIGIN = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 const JWT_SECRET = process.env.JWT_SECRET || "campfire-secret-change-me";
-const COOKIE_NAME = "squatch-token";
+const COOKIE_NAME = process.env.COOKIE_NAME || "squatch-token";
+const SOCKET_PATH = process.env.SOCKET_PATH || "/api/socketio";
+
+// CORS — supports comma-separated origins via CORS_ORIGINS, falls back to app URL
+const rawOrigins = process.env.CORS_ORIGINS || process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+const CORS_ORIGIN = rawOrigins.includes(",") ? rawOrigins.split(",").map((s) => s.trim()) : rawOrigins;
 
 const httpServer = createServer();
 const io = new Server(httpServer, {
   cors: {
-    origin: CLIENT_ORIGIN,
+    origin: CORS_ORIGIN,
     credentials: true,
   },
-  path: "/api/socketio",
+  path: SOCKET_PATH,
 });
 
 // Track online users per server: serverId -> Map<userId, {username, socketId}>

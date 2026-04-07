@@ -54,6 +54,7 @@ exec npx next start -p ${PORT:-3000}
 EOF
 RUN chmod +x /app/start.sh
 
-EXPOSE 3000 3001
+# Ports are configurable via APP_PORT and SOCKET_PORT env vars
+EXPOSE ${APP_PORT:-3000} ${SOCKET_PORT:-3001}
 
 CMD ["/app/start.sh"]

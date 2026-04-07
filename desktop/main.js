@@ -9,8 +9,8 @@ const SERVER_DIR = IS_DEV
   ? path.join(__dirname, "..", "squatch-chat")
   : path.join(process.resourcesPath, "server");
 
-const APP_PORT = 3000;
-const SOCKET_PORT = 3001;
+const APP_PORT = parseInt(process.env.APP_PORT || "3000", 10);
+const SOCKET_PORT = parseInt(process.env.SOCKET_PORT || "3001", 10);
 
 let mainWindow = null;
 let splashWindow = null;

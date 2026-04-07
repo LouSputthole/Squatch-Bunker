@@ -3,6 +3,7 @@
 import { io, Socket } from "socket.io-client";
 
 const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || "http://localhost:3001";
+const SOCKET_PATH = process.env.NEXT_PUBLIC_SOCKET_PATH || "/api/socketio";
 
 let socket: Socket | null = null;
 let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
@@ -10,7 +11,7 @@ let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
 export function getSocket(): Socket {
   if (!socket) {
     socket = io(SOCKET_URL, {
-      path: "/api/socketio",
+      path: SOCKET_PATH,
       autoConnect: false,
       withCredentials: true,
       reconnection: true,

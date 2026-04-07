@@ -1,9 +1,10 @@
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 import { cookies } from "next/headers";
+import { config } from "@/lib/config";
 
-const JWT_SECRET = process.env.JWT_SECRET || "campfire-secret-change-me";
-const COOKIE_NAME = "squatch-token";
+const JWT_SECRET = config.jwtSecret;
+const COOKIE_NAME = config.cookieName;
 
 export interface TokenPayload {
   userId: string;
@@ -43,7 +44,7 @@ export async function getSession(): Promise<TokenPayload | null> {
 export function setTokenCookie(response: Response, token: string): void {
   response.headers.append(
     "Set-Cookie",
-    `${COOKIE_NAME}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${60 * 60 * 24 * 7}`
+    `${COOKIE_NAME}=${token}; ${config.cookieFlags}`
   );
 }
 

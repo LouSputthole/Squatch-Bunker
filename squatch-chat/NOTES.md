@@ -231,6 +231,68 @@ See `ROADMAP.md` for the full 20-section voice product roadmap with `[x]` built 
 
 ---
 
+## Deployment / Hosting
+
+All server config lives in env vars — nothing hardcoded. See `.env.example` for full list.
+
+### Quick deploy checklist
+1. Copy `.env.example` → `.env`, update all values
+2. Set `NODE_ENV=production` (enables Secure cookies)
+3. Generate strong `JWT_SECRET`: `openssl rand -hex 32`
+4. Set `NEXT_PUBLIC_APP_URL` to your domain (`https://campfire.yourdomain.com`)
+5. Set `NEXT_PUBLIC_SOCKET_URL` to socket endpoint
+6. Set `CORS_ORIGINS` if frontend/socket on different domains
+7. Use strong DB credentials
+
+### Config centralization
+All shared constants live in `lib/config.ts`. Server URLs, cookie settings, CORS, upload limits — change one place, applies everywhere. The realtime server (`realtime/server.ts`) reads the same env vars directly since it runs as a separate Node process.
+
+### Key env vars
+| Variable | Used By | Purpose |
+|---|---|---|
+| `NEXT_PUBLIC_APP_URL` | Client + CORS | Frontend URL |
+| `NEXT_PUBLIC_SOCKET_URL` | Client | Socket.IO server URL |
+| `SOCKET_PORT` | Realtime server | Port for Socket.IO |
+| `SOCKET_PATH` / `NEXT_PUBLIC_SOCKET_PATH` | Both | Socket.IO endpoint path |
+| `CORS_ORIGINS` | Realtime server | Comma-separated allowed origins |
+| `COOKIE_NAME` | Auth + middleware + realtime | Session cookie name |
+| `JWT_SECRET` | Auth + realtime | Token signing key |
+| `NODE_ENV` | Cookie flags | `production` enables Secure flag |
+
+### Docker
+```bash
+# Production with docker compose
+docker compose -f docker-compose.prod.yml up -d
+
+# All config via env vars or .env file
+APP_PORT=8080 SOCKET_PORT=8081 docker compose -f docker-compose.prod.yml up -d
+```
+
+### Reverse proxy (nginx example)
+```nginx
+server {
+    server_name campfire.yourdomain.com;
+
+    location / {
+        proxy_pass http://localhost:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+    }
+
+    location /api/socketio {
+        proxy_pass http://localhost:3001;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+    }
+}
+```
+
+---
+
 ## Gotchas
 
 - **Next.js 16 breaking changes**: `params` is a Promise (must `await params`), `cookies()` is async, middleware is deprecated. Check `node_modules/next/dist/docs/` if unsure.

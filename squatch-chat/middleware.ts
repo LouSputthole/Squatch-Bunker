@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
+const COOKIE_NAME = process.env.COOKIE_NAME || "squatch-token";
 const PUBLIC_PATHS = ["/login", "/register", "/api/auth/login", "/api/auth/register", "/api/auth/guest", "/join"];
 
 export function middleware(request: NextRequest) {
@@ -17,7 +18,7 @@ export function middleware(request: NextRequest) {
   }
 
   // Check for auth cookie
-  const token = request.cookies.get("squatch-token")?.value;
+  const token = request.cookies.get(COOKIE_NAME)?.value;
 
   // Protect /chat routes
   if (pathname.startsWith("/chat") && !token) {
