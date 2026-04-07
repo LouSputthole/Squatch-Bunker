@@ -77,13 +77,15 @@ export default function ChatPanel({
   const lastReadIdRef = useRef<string | null>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isTypingRef = useRef(false);
-  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const uploading = uploadProgress > 0 && uploadProgress < 100;
   const [isDragging, setIsDragging] = useState(false);
+  const [multiFileToast, setMultiFileToast] = useState(false);
   const [slowRemaining, setSlowRemaining] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dragCounterRef = useRef(0);
   const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  let pendingIdCounter = useRef(0);
+  const pendingIdCounter = useRef(0);
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -418,27 +420,47 @@ export default function ChatPanel({
     }
   }
 
+  function uploadWithProgress(formData: FormData, onProgress: (pct: number) => void): Promise<{ url: string; name: string }> {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.upload.addEventListener("progress", (e) => {
+        if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
+      });
+      xhr.addEventListener("load", () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve(JSON.parse(xhr.responseText));
+        } else {
+          reject(new Error("Upload failed"));
+        }
+      });
+      xhr.addEventListener("error", () => reject(new Error("Upload failed")));
+      xhr.open("POST", "/api/upload");
+      xhr.send(formData);
+    });
+  }
+
   async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
     if (fileInputRef.current) fileInputRef.current.value = "";
 
     if (file.size > 10 * 1024 * 1024) {
-      alert("File too large. Maximum size is 10MB.");
+      alert("File too large. Maximum size is 10MB. Videos are supported but must be under 10MB.");
       return;
     }
 
-    setUploading(true);
+    setUploadProgress(1);
     try {
       const formData = new FormData();
       formData.append("file", file);
-      const uploadRes = await fetch("/api/upload", { method: "POST", body: formData });
-      if (!uploadRes.ok) {
-        const data = await uploadRes.json();
-        alert(data.error || "Upload failed");
+      let uploadResult: { url: string; name: string };
+      try {
+        uploadResult = await uploadWithProgress(formData, (pct) => setUploadProgress(pct));
+      } catch {
+        alert("Upload failed");
         return;
       }
-      const { url, name } = await uploadRes.json();
+      const { url, name } = uploadResult;
 
       // Create message with attachment
       const res = await fetch("/api/messages", {
@@ -462,26 +484,27 @@ export default function ChatPanel({
     } catch {
       alert("Upload failed. Please try again.");
     } finally {
-      setUploading(false);
+      setUploadProgress(0);
     }
   }
 
   async function handleFileDrop(file: File) {
     if (file.size > 10 * 1024 * 1024) {
-      alert("File too large. Maximum size is 10MB.");
+      alert("File too large. Maximum size is 10MB. Videos are supported but must be under 10MB.");
       return;
     }
-    setUploading(true);
+    setUploadProgress(1);
     try {
       const formData = new FormData();
       formData.append("file", file);
-      const uploadRes = await fetch("/api/upload", { method: "POST", body: formData });
-      if (!uploadRes.ok) {
-        const data = await uploadRes.json();
-        alert(data.error || "Upload failed");
+      let uploadResult: { url: string; name: string };
+      try {
+        uploadResult = await uploadWithProgress(formData, (pct) => setUploadProgress(pct));
+      } catch {
+        alert("Upload failed");
         return;
       }
-      const { url, name } = await uploadRes.json();
+      const { url, name } = uploadResult;
       const res = await fetch("/api/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -497,7 +520,7 @@ export default function ChatPanel({
     } catch {
       alert("Upload failed. Please try again.");
     } finally {
-      setUploading(false);
+      setUploadProgress(0);
     }
   }
 
@@ -541,17 +564,31 @@ export default function ChatPanel({
         e.preventDefault();
         dragCounterRef.current = 0;
         setIsDragging(false);
-        const file = e.dataTransfer.files[0];
-        if (file) handleFileDrop(file);
+        const files = e.dataTransfer.files;
+        if (files.length > 1) {
+          setMultiFileToast(true);
+          setTimeout(() => setMultiFileToast(false), 3000);
+        }
+        if (files[0]) handleFileDrop(files[0]);
       }}
     >
       {/* Drop zone overlay */}
       {isDragging && (
-        <div className="absolute inset-0 z-30 flex items-center justify-center bg-[var(--accent)]/10 border-2 border-dashed border-[var(--accent)] rounded pointer-events-none">
+        <div className="absolute inset-0 z-30 flex items-center justify-center bg-[var(--accent)]/10 border-2 border-dashed border-[var(--accent)] rounded-lg pointer-events-none">
           <div className="text-center">
-            <p className="text-lg font-semibold text-[var(--accent)]">Drop file to upload</p>
-            <p className="text-sm text-[var(--muted)] mt-1">Supports images, PDF, TXT, ZIP (max 10MB)</p>
+            <svg className="mx-auto mb-3 text-[var(--accent)]" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+            </svg>
+            <p className="text-xl font-bold text-[var(--accent)]">📁 Drop to upload</p>
+            <p className="text-sm text-[var(--muted)] mt-1">Drop files to upload — images, video, audio, documents</p>
           </div>
+        </div>
+      )}
+
+      {/* Multi-file toast */}
+      {multiFileToast && (
+        <div className="absolute bottom-20 left-1/2 -translate-x-1/2 z-40 px-4 py-2 bg-[var(--panel)] border border-[var(--accent-2)]/40 rounded-lg text-sm text-[var(--text)] shadow-lg pointer-events-none">
+          Only one file can be uploaded at a time
         </div>
       )}
 
@@ -696,6 +733,14 @@ export default function ChatPanel({
       )}
 
       <form onSubmit={handleSend} className={`px-4 pb-4 shrink-0 ${replyingTo ? "pt-0" : "pt-1"}`}>
+        {uploading && (
+          <div className="mb-2 h-1.5 bg-[var(--panel)] rounded-full overflow-hidden">
+            <div
+              className="h-full bg-[var(--accent-2)] transition-all duration-100"
+              style={{ width: `${uploadProgress}%` }}
+            />
+          </div>
+        )}
         <div className="flex items-center bg-[var(--panel)] rounded-lg border border-[var(--accent-2)]/30">
           <button
             type="button"
@@ -711,7 +756,7 @@ export default function ChatPanel({
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/*,.pdf,.txt,.zip"
+            accept="image/*,video/*,.pdf,.txt,.zip,.doc,.docx,.mp3,.wav"
             onChange={handleFileUpload}
             className="hidden"
           />
