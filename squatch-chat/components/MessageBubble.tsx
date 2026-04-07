@@ -72,6 +72,8 @@ interface MessageBubbleProps {
     content: string;
     attachmentUrl?: string | null;
     attachmentName?: string | null;
+    parentMessageId?: string | null;
+    replyCount?: number;
     createdAt: string;
     updatedAt?: string;
     author: { id: string; username: string; avatar?: string | null };
@@ -82,9 +84,10 @@ interface MessageBubbleProps {
   onEdit?: (messageId: string, newContent: string) => void;
   onDelete?: (messageId: string) => void;
   onReact?: (messageId: string, emoji: string) => void;
+  onThread?: (messageId: string, author: { id: string; username: string }) => void;
 }
 
-export default function MessageBubble({ message, isOwn, currentUserId, onEdit, onDelete, onReact }: MessageBubbleProps) {
+export default function MessageBubble({ message, isOwn, currentUserId, onEdit, onDelete, onReact, onThread }: MessageBubbleProps) {
   const [editing, setEditing] = useState(false);
   const [editContent, setEditContent] = useState(message.content);
   const [showActions, setShowActions] = useState(false);
@@ -178,6 +181,16 @@ export default function MessageBubble({ message, isOwn, currentUserId, onEdit, o
           </>
         )}
 
+        {/* Thread reply count */}
+        {!message.parentMessageId && (message.replyCount ?? 0) > 0 && (
+          <button
+            onClick={() => onThread?.(message.id, message.author)}
+            className="mt-1 text-xs text-[var(--accent-2)] hover:text-[var(--accent)] hover:underline"
+          >
+            {message.replyCount} {message.replyCount === 1 ? "reply" : "replies"}
+          </button>
+        )}
+
         {/* Reaction badges */}
         {reactionEntries.length > 0 && (
           <div className="flex flex-wrap gap-1 mt-1">
@@ -213,6 +226,15 @@ export default function MessageBubble({ message, isOwn, currentUserId, onEdit, o
           >
             😀
           </button>
+          {!message.parentMessageId && onThread && (
+            <button
+              onClick={() => onThread(message.id, message.author)}
+              className="text-xs text-[var(--muted)] hover:text-[var(--text)] px-1.5 py-0.5"
+              title="Start Thread"
+            >
+              Thread
+            </button>
+          )}
           {isOwn && (
             <>
               <button

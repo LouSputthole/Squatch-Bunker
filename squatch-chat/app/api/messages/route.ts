@@ -9,6 +9,7 @@ export async function GET(request: Request) {
 
   const { searchParams } = new URL(request.url);
   const channelId = searchParams.get("channelId");
+  const parentId = searchParams.get("parentId");
   const cursor = searchParams.get("cursor");
   const limit = 50;
 
@@ -42,7 +43,7 @@ export async function GET(request: Request) {
     }
 
     const messages = await prisma.message.findMany({
-      where: { channelId },
+      where: { channelId, parentMessageId: parentId ?? null },
       include: {
         author: { select: { id: true, username: true, avatar: true } },
         reactions: {
@@ -82,7 +83,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
 
-  const { channelId, content, attachmentUrl, attachmentName } = await request.json();
+  const { channelId, content, attachmentUrl, attachmentName, parentMessageId } = await request.json();
   if (!channelId || (!content?.trim() && !attachmentUrl)) {
     return NextResponse.json(
       { error: "channelId and content or attachment are required" },
@@ -118,6 +119,7 @@ export async function POST(request: Request) {
         authorId: session.userId,
         content: content?.trim() || "",
         ...(attachmentUrl ? { attachmentUrl, attachmentName } : {}),
+        ...(parentMessageId ? { parentMessageId } : {}),
       },
       include: {
         author: { select: { id: true, username: true, avatar: true } },

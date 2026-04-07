@@ -61,18 +61,21 @@ model Channel {
 }
 
 model Message {
-  id            String   @id @default(uuid())
-  channelId     String
-  authorId      String
-  content       String
-  attachmentUrl String?
-  attachmentName String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id              String   @id @default(uuid())
+  channelId       String
+  authorId        String
+  content         String
+  attachmentUrl   String?
+  attachmentName  String?
+  parentMessageId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   channel   Channel    @relation(fields: [channelId], references: [id])
   author    User       @relation(fields: [authorId], references: [id])
   reactions Reaction[]
+  parent    Message?   @relation("thread", fields: [parentMessageId], references: [id])
+  replies   Message[]  @relation("thread")
 }
 
 model Reaction {
