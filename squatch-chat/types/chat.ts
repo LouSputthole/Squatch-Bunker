@@ -2,6 +2,7 @@ export interface Channel {
   id: string;
   name: string;
   type?: string;
+  topic?: string | null;
 }
 
 export interface Server {
