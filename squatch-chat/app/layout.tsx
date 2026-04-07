@@ -17,6 +17,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="h-full antialiased">
+      {/* Apply saved theme before first paint to prevent flash */}
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: `(function(){try{var t=localStorage.getItem('campfire-theme');if(t)document.documentElement.setAttribute('data-theme',t);}catch(e){}})();` }} />
+      </head>
       <body className="min-h-full flex flex-col font-sans">{children}</body>
     </html>
   );

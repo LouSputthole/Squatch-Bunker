@@ -11,6 +11,18 @@
   --danger: #7a2f2f;
 }
 
+/* Light theme — applied via data-theme="light" on <html> */
+[data-theme="light"] {
+  --bg: #f0ece4;
+  --panel: #e6e1d8;
+  --panel-2: #d9d3c8;
+  --text: #1a2220;
+  --muted: #5a6a63;
+  --accent: #3a5a50;
+  --accent-2: #4a7a6a;
+  --danger: #a83232;
+}
+
 @theme inline {
   --color-background: var(--bg);
   --color-foreground: var(--text);
