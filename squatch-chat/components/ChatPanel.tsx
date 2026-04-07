@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { getSocket } from "@/lib/socket";
 import { truncateName } from "@/lib/utils";
 import MessageBubble from "./MessageBubble";
+import PinnedMessagesPanel from "./PinnedMessagesPanel";
 
 interface ReactionGroup {
   count: number;
@@ -63,7 +64,7 @@ export default function ChatPanel({
   const [typingUsers, setTypingUsers] = useState<Map<string, string>>(new Map());
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
   const [firstUnreadId, setFirstUnreadId] = useState<string | null>(null);
-  const [showPinned, setShowPinned] = useState(false);
+  const [showPinnedPanel, setShowPinnedPanel] = useState(false);
   const [threadParent, setThreadParent] = useState<{ id: string; author: { id: string; username: string } } | null>(null);
   const [threadMessages, setThreadMessages] = useState<Message[]>([]);
   const [threadInput, setThreadInput] = useState("");
@@ -524,6 +525,8 @@ export default function ChatPanel({
           ? `${typingNames[0]} and ${typingNames.length - 1} others are typing`
           : null;
 
+  const pinnedCount = messages.filter((m) => m.pinned).length;
+
   return (
     <div
       className="flex-1 flex bg-[var(--panel-2)] min-w-0 relative"
@@ -597,29 +600,14 @@ export default function ChatPanel({
             </svg>
           </button>
         )}
-        {messages.some((m) => m.pinned) && (
-          <button
-            onClick={() => setShowPinned((p) => !p)}
-            className={`text-xs px-2 py-1 rounded transition-colors ${showPinned ? "bg-yellow-500/20 text-yellow-400" : "text-[var(--muted)] hover:text-yellow-400"}`}
-            title="Pinned messages"
-          >
-            📌 {messages.filter((m) => m.pinned).length}
-          </button>
-        )}
+        <button
+          onClick={() => setShowPinnedPanel((p) => !p)}
+          className={`text-xs px-2 py-1 rounded transition-colors ${showPinnedPanel ? "bg-yellow-500/20 text-yellow-400" : "text-[var(--muted)] hover:text-yellow-400"}`}
+          title="Pinned messages"
+        >
+          {pinnedCount > 0 ? `📌 ${pinnedCount}` : "📌"}
+        </button>
       </div>
-
-      {/* Pinned messages panel */}
-      {showPinned && (
-        <div className="border-b border-[var(--accent-2)]/30 bg-[var(--panel)] max-h-48 overflow-y-auto">
-          <div className="px-4 py-2 text-xs font-semibold text-yellow-400 uppercase tracking-wide">Pinned Messages</div>
-          {messages.filter((m) => m.pinned).map((msg) => (
-            <div key={msg.id} className="px-4 py-1.5 border-t border-[var(--accent-2)]/10 hover:bg-[var(--panel-2)]/50">
-              <span className="text-xs font-medium text-[var(--accent-2)] mr-2">{msg.author.username}</span>
-              <span className="text-xs text-[var(--text)] break-words">{msg.content || "[attachment]"}</span>
-            </div>
-          ))}
-        </div>
-      )}
 
       <div className="flex-1 overflow-y-auto px-4 py-2">
         {loading ? (
@@ -733,6 +721,20 @@ export default function ChatPanel({
         </div>
       </form>
       </div>{/* end main chat column */}
+
+      {/* Pinned messages side panel */}
+      {showPinnedPanel && (
+        <PinnedMessagesPanel
+          channelId={channelId}
+          canPin={canPin ?? false}
+          onClose={() => setShowPinnedPanel(false)}
+          onJumpToMessage={(messageId) => {
+            scrollToMessage(messageId);
+            setShowPinnedPanel(false);
+          }}
+          onUnpin={(messageId) => handlePin(messageId, false)}
+        />
+      )}
 
       {/* Thread panel */}
       {threadParent && (
