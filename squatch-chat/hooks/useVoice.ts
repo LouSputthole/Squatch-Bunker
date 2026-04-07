@@ -3,13 +3,14 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { getSocket } from "@/lib/socket";
 import type { Channel, Server, VoiceParticipant } from "@/types/chat";
-import type { VoicePanelHandle } from "@/components/VoicePanel";
+import type { VoicePanelHandle, ScreenShareInfo } from "@/components/VoicePanel";
 
 export function useVoice(activeServer: Server | null) {
   const [activeVoiceChannel, setActiveVoiceChannel] = useState<Channel | null>(null);
   const [voiceParticipants, setVoiceParticipants] = useState<Map<string, VoiceParticipant[]>>(new Map());
-  const [voiceState, setVoiceState] = useState({ muted: false, deafened: false, reconnecting: false, participants: [] as VoiceParticipant[] });
+  const [voiceState, setVoiceState] = useState({ muted: false, deafened: false, reconnecting: false, sharing: false, participants: [] as VoiceParticipant[] });
   const [pttMode, setPttMode] = useState(false);
+  const [incomingScreenShares, setIncomingScreenShares] = useState<ScreenShareInfo[]>([]);
   const voicePanelRef = useRef<VoicePanelHandle>(null);
 
   // Global voice participants listener
@@ -70,6 +71,20 @@ export function useVoice(activeServer: Server | null) {
   }, []);
   const setInputSensitivity = useCallback((threshold: number) => {
     voicePanelRef.current?.setInputSensitivity(threshold);
+  }, []);
+
+  // ─── Screen Share ───
+
+  const startScreenShare = useCallback(async () => {
+    await voicePanelRef.current?.startScreenShare();
+  }, []);
+
+  const stopScreenShare = useCallback(() => {
+    voicePanelRef.current?.stopScreenShare();
+  }, []);
+
+  const handleScreenShareChange = useCallback((shares: ScreenShareInfo[]) => {
+    setIncomingScreenShares(shares);
   }, []);
 
   // ─── Mod Actions ───
@@ -146,5 +161,9 @@ export function useVoice(activeServer: Server | null) {
     serverDeafenUser,
     kickFromVoice,
     moveUser,
+    startScreenShare,
+    stopScreenShare,
+    handleScreenShareChange,
+    incomingScreenShares,
   };
 }

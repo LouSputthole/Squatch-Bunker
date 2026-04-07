@@ -18,7 +18,14 @@ interface VoicePanelProps {
   currentUserId: string;
   onParticipantsChange?: (channelId: string, participants: VoiceParticipant[]) => void;
   onDisconnect?: () => void;
-  onStateChange?: (state: { muted: boolean; deafened: boolean; reconnecting: boolean; participants: VoiceParticipant[] }) => void;
+  onStateChange?: (state: { muted: boolean; deafened: boolean; reconnecting: boolean; participants: VoiceParticipant[]; sharing: boolean }) => void;
+  onScreenShareChange?: (shares: ScreenShareInfo[]) => void;
+}
+
+export interface ScreenShareInfo {
+  userId: string;
+  username: string;
+  stream: MediaStream;
 }
 
 export interface VoicePanelHandle {
@@ -31,6 +38,8 @@ export interface VoicePanelHandle {
   setInputSensitivity: (threshold: number) => void;
   forceMute: () => void;
   forceDeafen: () => void;
+  startScreenShare: () => Promise<void>;
+  stopScreenShare: () => void;
 }
 
 const ICE_SERVERS: RTCConfiguration = {
@@ -88,6 +97,7 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
   currentUserId,
   onParticipantsChange,
   onDisconnect,
+  onScreenShareChange,
   onStateChange,
 }, ref) {
   const [joined, setJoined] = useState(false);
@@ -97,6 +107,7 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
   const [participants, setParticipants] = useState<VoiceParticipant[]>([]);
   const [connecting, setConnecting] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
+  const [sharing, setSharing] = useState(false);
 
   const [speakingUsers, setSpeakingUsers] = useState<Set<string>>(new Set());
 
@@ -111,6 +122,12 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
   const userVolumesRef = useRef<Map<string, number>>(new Map());
   const socketToUserRef = useRef<Map<string, string>>(new Map());
   const vadThresholdRef = useRef(15);
+
+  // Screen share state
+  const screenStreamRef = useRef<MediaStream | null>(null);
+  const screenPeersRef = useRef<Map<string, RTCPeerConnection>>(new Map());
+  const incomingScreensRef = useRef<Map<string, ScreenShareInfo>>(new Map());
+  const [incomingScreens, setIncomingScreens] = useState<ScreenShareInfo[]>([]);
 
   const cleanupPeers = useCallback(() => {
     peersRef.current.forEach((pc) => pc.close());
@@ -162,6 +179,153 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
     analyserRef.current = null;
     wasSpeakingRef.current = false;
   }, []);
+
+  // ─── Screen Share Logic ───
+
+  const cleanupScreenPeers = useCallback(() => {
+    screenPeersRef.current.forEach((pc) => pc.close());
+    screenPeersRef.current.clear();
+  }, []);
+
+  const createScreenPeer = useCallback((remoteSocketId: string, initiator: boolean) => {
+    const pc = new RTCPeerConnection(ICE_SERVERS);
+    const socket = getSocket();
+
+    if (initiator && screenStreamRef.current) {
+      screenStreamRef.current.getTracks().forEach((track) => {
+        pc.addTrack(track, screenStreamRef.current!);
+      });
+    }
+
+    pc.ontrack = (event) => {
+      const [stream] = event.streams;
+      if (!stream) return;
+      const userId = socketToUserRef.current.get(remoteSocketId) || remoteSocketId;
+      // Find username from participants
+      const participant = participants.find((p) => p.userId === userId);
+      const info: ScreenShareInfo = {
+        userId,
+        username: participant?.username || "Unknown",
+        stream,
+      };
+      incomingScreensRef.current.set(userId, info);
+      setIncomingScreens(Array.from(incomingScreensRef.current.values()));
+    };
+
+    pc.onicecandidate = (event) => {
+      if (event.candidate) {
+        socket.emit("screen:ice-candidate", { to: remoteSocketId, candidate: event.candidate.toJSON() });
+      }
+    };
+
+    if (initiator) {
+      pc.createOffer()
+        .then((offer) => pc.setLocalDescription(offer))
+        .then(() => { socket.emit("screen:offer", { to: remoteSocketId, offer: pc.localDescription! }); });
+    }
+
+    screenPeersRef.current.set(remoteSocketId, pc);
+    return pc;
+  }, [participants]);
+
+  const startScreenShare = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        video: { cursor: "always" } as MediaTrackConstraints,
+        audio: true,
+      });
+
+      screenStreamRef.current = stream;
+      setSharing(true);
+
+      const socket = getSocket();
+      socket.emit("screen:start", { channelId });
+
+      // Send screen to all existing voice peers
+      for (const [socketId] of peersRef.current) {
+        createScreenPeer(socketId, true);
+      }
+
+      // Handle user stopping share via browser UI
+      stream.getVideoTracks()[0].onended = () => {
+        stopScreenShare();
+      };
+    } catch (err) {
+      console.error("[Screen] Share failed:", err);
+    }
+  }, [channelId, createScreenPeer]);
+
+  const stopScreenShare = useCallback(() => {
+    if (screenStreamRef.current) {
+      screenStreamRef.current.getTracks().forEach((t) => t.stop());
+      screenStreamRef.current = null;
+    }
+    cleanupScreenPeers();
+    setSharing(false);
+    const socket = getSocket();
+    socket.emit("screen:stop", { channelId });
+  }, [channelId, cleanupScreenPeers]);
+
+  // Screen share signaling handlers
+  useEffect(() => {
+    if (!joined) return;
+    const socket = getSocket();
+
+    function handleScreenStarted(data: { userId: string; username: string; socketId: string }) {
+      if (data.userId === currentUserId) return;
+      // The sharer will send us an offer — we just wait
+    }
+
+    function handleScreenStopped(data: { userId: string }) {
+      incomingScreensRef.current.delete(data.userId);
+      setIncomingScreens(Array.from(incomingScreensRef.current.values()));
+      // Cleanup peer
+      for (const [socketId, uid] of socketToUserRef.current) {
+        if (uid === data.userId) {
+          const pc = screenPeersRef.current.get(socketId);
+          if (pc) { pc.close(); screenPeersRef.current.delete(socketId); }
+        }
+      }
+    }
+
+    function handleScreenOffer(data: { from: string; fromUserId: string; fromUsername: string; offer: RTCSessionDescriptionInit }) {
+      socketToUserRef.current.set(data.from, data.fromUserId);
+      const pc = createScreenPeer(data.from, false);
+      pc.setRemoteDescription(new RTCSessionDescription(data.offer))
+        .then(() => pc.createAnswer())
+        .then((answer) => pc.setLocalDescription(answer))
+        .then(() => { socket.emit("screen:answer", { to: data.from, answer: pc.localDescription! }); });
+    }
+
+    function handleScreenAnswer(data: { from: string; answer: RTCSessionDescriptionInit }) {
+      const pc = screenPeersRef.current.get(data.from);
+      if (pc) pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+    }
+
+    function handleScreenIce(data: { from: string; candidate: RTCIceCandidateInit }) {
+      const pc = screenPeersRef.current.get(data.from);
+      if (pc) pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+    }
+
+    socket.on("screen:started", handleScreenStarted);
+    socket.on("screen:stopped", handleScreenStopped);
+    socket.on("screen:offer", handleScreenOffer);
+    socket.on("screen:answer", handleScreenAnswer);
+    socket.on("screen:ice-candidate", handleScreenIce);
+
+    return () => {
+      socket.off("screen:started", handleScreenStarted);
+      socket.off("screen:stopped", handleScreenStopped);
+      socket.off("screen:offer", handleScreenOffer);
+      socket.off("screen:answer", handleScreenAnswer);
+      socket.off("screen:ice-candidate", handleScreenIce);
+    };
+  }, [joined, currentUserId, createScreenPeer]);
+
+  // Report screen shares to parent
+  useEffect(() => {
+    onScreenShareChange?.(incomingScreens);
+  }, [incomingScreens, onScreenShareChange]);
 
   const pttModeRef = useRef(false);
 
@@ -309,6 +473,15 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
     if (joinedChannelRef.current) {
       socket.emit("voice:leave", joinedChannelRef.current);
     }
+    // Stop screen share if active
+    if (screenStreamRef.current) {
+      screenStreamRef.current.getTracks().forEach((t) => t.stop());
+      screenStreamRef.current = null;
+      cleanupScreenPeers();
+      setSharing(false);
+    }
+    incomingScreensRef.current.clear();
+    setIncomingScreens([]);
     stopVAD();
     localStreamRef.current?.getTracks().forEach((t) => t.stop());
     localStreamRef.current = null;
@@ -321,7 +494,7 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
     setSpeakingUsers(new Set());
     playNotificationSound("leave");
     onDisconnect?.();
-  }, [cleanupPeers, stopVAD, onDisconnect]);
+  }, [cleanupPeers, cleanupScreenPeers, stopVAD, onDisconnect]);
 
   const toggleMute = useCallback(() => {
     if (!localStreamRef.current) return;
@@ -373,7 +546,9 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
     forceDeafen: () => {
       if (!deafened) toggleDeafen();
     },
-  }), [toggleMute, toggleDeafen, leaveVoice, togglePTT, muted, deafened]);
+    startScreenShare,
+    stopScreenShare,
+  }), [toggleMute, toggleDeafen, leaveVoice, togglePTT, muted, deafened, startScreenShare, stopScreenShare]);
 
   // Report state changes to parent — merge speaking state into participants
   useEffect(() => {
@@ -381,8 +556,8 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
       ...p,
       speaking: speakingUsers.has(p.userId),
     }));
-    onStateChange?.({ muted, deafened, reconnecting, participants: withSpeaking });
-  }, [muted, deafened, reconnecting, participants, speakingUsers, onStateChange]);
+    onStateChange?.({ muted, deafened, reconnecting, participants: withSpeaking, sharing });
+  }, [muted, deafened, reconnecting, participants, speakingUsers, sharing, onStateChange]);
 
   // Participant updates — register BEFORE joining so we don't miss the initial broadcast
   useEffect(() => {
@@ -434,6 +609,10 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
     function handleUserJoined(data: { channelId: string; userId: string; socketId: string }) {
       if (data.channelId !== channelId || data.userId === currentUserId) return;
       playNotificationSound("join");
+      // If we're sharing screen, send it to the new peer
+      if (screenStreamRef.current) {
+        createScreenPeer(data.socketId, true);
+      }
     }
 
     function handleUserLeft(data: { channelId: string; socketId: string }) {

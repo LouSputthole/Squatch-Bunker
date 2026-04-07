@@ -311,6 +311,48 @@ io.on("connection", (socket) => {
     });
   });
 
+  // ─── Screen Share ───
+
+  // Notify room that a user started sharing screen
+  socket.on("screen:start", (data: { channelId: string }) => {
+    socket.to(`voice:${data.channelId}`).emit("screen:started", {
+      userId: currentUserId,
+      username: currentUsername,
+      socketId: socket.id,
+    });
+  });
+
+  // Notify room that a user stopped sharing
+  socket.on("screen:stop", (data: { channelId: string }) => {
+    socket.to(`voice:${data.channelId}`).emit("screen:stopped", {
+      userId: currentUserId,
+    });
+  });
+
+  // Relay screen share offer (separate from voice offers to avoid collision)
+  socket.on("screen:offer", (data: { to: string; offer: RTCSessionDescriptionInit }) => {
+    io.to(data.to).emit("screen:offer", {
+      from: socket.id,
+      fromUserId: currentUserId,
+      fromUsername: currentUsername,
+      offer: data.offer,
+    });
+  });
+
+  socket.on("screen:answer", (data: { to: string; answer: RTCSessionDescriptionInit }) => {
+    io.to(data.to).emit("screen:answer", {
+      from: socket.id,
+      answer: data.answer,
+    });
+  });
+
+  socket.on("screen:ice-candidate", (data: { to: string; candidate: RTCIceCandidateInit }) => {
+    io.to(data.to).emit("screen:ice-candidate", {
+      from: socket.id,
+      candidate: data.candidate,
+    });
+  });
+
   // ─── Moderation Actions ───
 
   // Helper: get caller's role in a voice channel's server

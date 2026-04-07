@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { displayName } from "@/lib/utils";
 import Avatar from "@/components/Avatar";
+import type { ScreenShareInfo } from "@/components/VoicePanel";
 
 interface VoiceParticipant {
   userId: string;
@@ -39,6 +40,10 @@ interface VoiceRoomProps {
   onMoveUser?: (fromChannelId: string, toChannelId: string, targetUserId: string) => void;
   voiceChannels?: VoiceChannel[];
   reconnecting?: boolean;
+  sharing?: boolean;
+  onStartScreenShare?: () => void;
+  onStopScreenShare?: () => void;
+  incomingScreenShares?: ScreenShareInfo[];
 }
 
 // SVG Icons (larger versions for the room view)
@@ -122,6 +127,74 @@ function PushToTalkIcon({ active }: { active: boolean }) {
   );
 }
 
+function ScreenShareIcon({ active }: { active: boolean }) {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+      <line x1="8" y1="21" x2="16" y2="21" />
+      <line x1="12" y1="17" x2="12" y2="21" />
+      {active && <path d="M8 10l3 3 5-6" stroke="currentColor" strokeWidth="2" />}
+    </svg>
+  );
+}
+
+function ScreenViewer({ shares }: { shares: ScreenShareInfo[] }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [activeIdx, setActiveIdx] = useState(0);
+  const [fullscreen, setFullscreen] = useState(false);
+  const activeShare = shares[activeIdx] || shares[0];
+
+  useEffect(() => {
+    if (videoRef.current && activeShare) {
+      videoRef.current.srcObject = activeShare.stream;
+    }
+  }, [activeShare]);
+
+  if (!activeShare) return null;
+
+  return (
+    <div className={`flex flex-col ${fullscreen ? "fixed inset-0 z-50 bg-black" : "flex-1"}`}>
+      {/* Shared screen tabs (if multiple) */}
+      {shares.length > 1 && (
+        <div className="flex gap-1 px-2 py-1 bg-[var(--bg)]/80">
+          {shares.map((s, i) => (
+            <button
+              key={s.userId}
+              onClick={() => setActiveIdx(i)}
+              className={`text-xs px-2 py-1 rounded ${
+                i === activeIdx ? "bg-[var(--accent)] text-[var(--bg)]" : "bg-[var(--panel-2)] text-[var(--muted)]"
+              }`}
+            >
+              {displayName(s.username)}
+            </button>
+          ))}
+        </div>
+      )}
+      {/* Video */}
+      <div className="flex-1 relative bg-black flex items-center justify-center min-h-0">
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          className="max-w-full max-h-full object-contain"
+        />
+        {/* Overlay controls */}
+        <div className="absolute bottom-2 right-2 flex gap-1">
+          <span className="text-xs bg-black/70 text-white px-2 py-1 rounded">
+            {displayName(activeShare.username)}&apos;s screen
+          </span>
+          <button
+            onClick={() => setFullscreen((f) => !f)}
+            className="text-xs bg-black/70 text-white px-2 py-1 rounded hover:bg-black/90"
+          >
+            {fullscreen ? "Exit Fullscreen" : "Fullscreen"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function VoiceRoom({
   channelId,
   channelName,
@@ -142,6 +215,10 @@ export default function VoiceRoom({
   onMoveUser,
   voiceChannels,
   reconnecting,
+  sharing,
+  onStartScreenShare,
+  onStopScreenShare,
+  incomingScreenShares,
 }: VoiceRoomProps) {
   const [volumePopup, setVolumePopup] = useState<{ userId: string; volume: number } | null>(null);
   const [modMenu, setModMenu] = useState<{ userId: string; username: string; x: number; y: number; muted: boolean; deafened?: boolean } | null>(null);
@@ -168,8 +245,13 @@ export default function VoiceRoom({
         )}
       </div>
 
-      {/* Participant Grid */}
-      <div className="flex-1 overflow-y-auto p-6">
+      {/* Screen Share Viewer — takes priority over participant grid */}
+      {(incomingScreenShares && incomingScreenShares.length > 0) && (
+        <ScreenViewer shares={incomingScreenShares} />
+      )}
+
+      {/* Participant Grid (compact when screen sharing) */}
+      <div className={`${incomingScreenShares && incomingScreenShares.length > 0 ? "h-28 shrink-0 overflow-x-auto overflow-y-hidden px-4 py-2" : "flex-1 overflow-y-auto p-6"}`}>
         {participants.length === 0 ? (
           <div className="flex items-center justify-center h-full text-[var(--muted)]">
             <div className="text-center">
@@ -387,6 +469,18 @@ export default function VoiceRoom({
               <PushToTalkIcon active={!!pttMode} />
             </button>
           )}
+          {/* Screen share */}
+          <button
+            onClick={sharing ? onStopScreenShare : onStartScreenShare}
+            className={`p-3 rounded-full transition-colors ${
+              sharing
+                ? "bg-green-600/20 text-green-400 hover:bg-green-600/30"
+                : "bg-[var(--panel-2)] text-[var(--text)] hover:bg-[var(--accent-2)]/30"
+            }`}
+            title={sharing ? "Stop Sharing" : "Share Screen"}
+          >
+            <ScreenShareIcon active={!!sharing} />
+          </button>
           <button
             onClick={onDisconnect}
             className="p-3 rounded-full bg-red-600 hover:bg-red-700 text-white transition-colors"

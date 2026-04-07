@@ -180,6 +180,10 @@ function ChatPageInner() {
           onMoveUser={voice.moveUser}
           voiceChannels={srv.activeServer?.channels.filter((c) => c.type === "voice")}
           reconnecting={voice.voiceState.reconnecting}
+          sharing={voice.voiceState.sharing}
+          onStartScreenShare={voice.startScreenShare}
+          onStopScreenShare={voice.stopScreenShare}
+          incomingScreenShares={voice.incomingScreenShares}
         />
       ) : ch.activeChannel && auth.user ? (
         <ChatPanel
@@ -239,6 +243,7 @@ function ChatPageInner() {
           onParticipantsChange={voice.handleParticipantsChange}
           onDisconnect={voice.leaveVoice}
           onStateChange={voice.setVoiceState}
+          onScreenShareChange={voice.handleScreenShareChange}
         />
       )}
 
