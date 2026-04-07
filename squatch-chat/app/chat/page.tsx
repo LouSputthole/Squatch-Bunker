@@ -12,6 +12,8 @@ import KeyboardShortcutsPanel from "@/components/KeyboardShortcutsPanel";
 import { SettingsIcon } from "@/components/VoicePanel";
 import SearchPanel from "@/components/SearchPanel";
 import Avatar from "@/components/Avatar";
+import AmbientSounds from "@/components/AmbientSounds";
+import DMPanel from "@/components/DMPanel";
 import { connectSocket, disconnectSocket } from "@/lib/socket";
 import { displayName } from "@/lib/utils";
 
@@ -24,13 +26,13 @@ import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 
 import type { Channel } from "@/types/chat";
 
-const APP_VERSION = "v0.0.6";
+const APP_VERSION = "v0.0.7";
 
 export default function ChatPage() {
   return (
     <Suspense fallback={
       <div className="min-h-screen flex flex-col items-center justify-center bg-[var(--bg)] text-[var(--muted)] gap-3">
-        <img src="/campfire-logo.png" alt="Campfire" className="w-16 h-16 animate-pulse" />
+        <img src="/Campfire-Logo.png" alt="Campfire" className="w-16 h-16 animate-pulse" />
         <span>Following tracks into the woods...</span>
       </div>
     }>
@@ -50,6 +52,7 @@ function ChatPageInner() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [dmOpen, setDmOpen] = useState(false);
 
   useKeyboardShortcuts({
     activeVoiceChannel: voice.activeVoiceChannel,
@@ -128,7 +131,7 @@ function ChatPageInner() {
   if (auth.loading) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-[var(--bg)] text-[var(--muted)] gap-3">
-        <img src="/campfire-logo.png" alt="Campfire" className="w-16 h-16 animate-pulse" />
+        <img src="/Campfire-Logo.png" alt="Campfire" className="w-16 h-16 animate-pulse" />
         <span>Following tracks into the woods...</span>
       </div>
     );
@@ -139,12 +142,26 @@ function ChatPageInner() {
       {/* Server rail */}
       <ServerList
         servers={srv.servers}
-        activeServerId={srv.activeServer?.id}
-        onServerSelect={handleServerSelect}
+        activeServerId={dmOpen ? undefined : srv.activeServer?.id}
+        dmActive={dmOpen}
+        onDmClick={() => setDmOpen((p) => !p)}
+        onServerSelect={(s) => { setDmOpen(false); handleServerSelect(s); }}
         onServerCreated={handleServerCreated}
         onServerJoined={handleServerJoined}
       />
 
+      {/* DM panel */}
+      {dmOpen && auth.user ? (
+        <div className="flex-1 flex">
+          <DMPanel
+            currentUserId={auth.user.id}
+            currentUsername={auth.user.username}
+            currentAvatar={auth.user.avatar}
+            onClose={() => setDmOpen(false)}
+          />
+        </div>
+      ) : (
+      <>
       {/* Channel sidebar */}
       {srv.activeServer ? (
         <ChannelList
@@ -220,7 +237,7 @@ function ChatPageInner() {
       ) : (
         <div className="flex-1 flex items-center justify-center bg-[var(--panel-2)] text-[var(--muted)]">
           <div className="text-center max-w-sm">
-            <img src="/campfire-logo.png" alt="Campfire" className="w-20 h-20 mx-auto mb-4 opacity-80" />
+            <img src="/Campfire-Logo.png" alt="Campfire" className="w-20 h-20 mx-auto mb-4 opacity-80" />
             <p className="text-2xl mb-2 text-[var(--text)]">Welcome to Campfire</p>
             {srv.servers.length === 0 ? (
               <p className="text-sm">
@@ -254,6 +271,8 @@ function ChatPageInner() {
             setSearchOpen(false);
           }}
         />
+      )}
+      </>
       )}
 
       {/* Headless voice engine */}
@@ -329,6 +348,7 @@ function ChatPageInner() {
               <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
             </svg>
           </button>
+          <AmbientSounds />
           <button
             onClick={() => setShortcutsOpen((p) => !p)}
             className="text-[var(--muted)] hover:text-[var(--text)] transition-colors font-bold text-sm"

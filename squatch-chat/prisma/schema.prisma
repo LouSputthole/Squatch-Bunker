@@ -16,10 +16,13 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  memberships ServerMember[]
-  messages    Message[]
-  reactions   Reaction[]
-  ownedServers Server[]
+  memberships    ServerMember[]
+  messages       Message[]
+  reactions      Reaction[]
+  ownedServers   Server[]
+  conversations1 Conversation[] @relation("ConvUser1")
+  conversations2 Conversation[] @relation("ConvUser2")
+  directMessages DirectMessage[]
 }
 
 model Server {
@@ -84,7 +87,7 @@ model Message {
   replies   Message[]  @relation("MessageReplies")
   reactions Reaction[]
   parent    Message?   @relation("thread", fields: [parentMessageId], references: [id])
-  replies   Message[]  @relation("thread")
+  children  Message[]  @relation("thread")
 }
 
 model Reaction {
@@ -98,4 +101,31 @@ model Reaction {
   user    User    @relation(fields: [userId], references: [id])
 
   @@unique([messageId, userId, emoji])
+}
+
+model Conversation {
+  id        String   @id @default(uuid())
+  user1Id   String
+  user2Id   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user1    User             @relation("ConvUser1", fields: [user1Id], references: [id])
+  user2    User             @relation("ConvUser2", fields: [user2Id], references: [id])
+  messages DirectMessage[]
+
+  @@unique([user1Id, user2Id])
+}
+
+model DirectMessage {
+  id             String   @id @default(uuid())
+  conversationId String
+  authorId       String
+  content        String
+  attachmentUrl  String?
+  attachmentName String?
+  createdAt      DateTime @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id])
+  author       User         @relation(fields: [authorId], references: [id])
 }

@@ -39,10 +39,14 @@ export async function PATCH(
     }
 
     const body = await req.json();
-    const data: { topic?: string | null } = {};
-    if ("topic" in body) data.topic = typeof body.topic === "string" ? body.topic.trim() || null : null;
-
-    const updated = await prisma.channel.update({ where: { id: channelId }, data });
+    const updated = await prisma.channel.update({
+      where: { id: channelId },
+      data: {
+        topic: "topic" in body
+          ? (typeof body.topic === "string" ? body.topic.trim() || null : null)
+          : undefined,
+      },
+    });
 
     return NextResponse.json({ channel: updated });
   } catch (err) {

@@ -18,15 +18,17 @@ const ROLE_COLORS: Record<string, string> = {
 
 export interface ProfileCardProps {
   username: string;
+  userId?: string;
   avatar?: string | null;
   role?: string;
   joinedAt?: string;
   anchorX: number;
   anchorY: number;
   onClose: () => void;
+  onMessageUser?: (userId: string) => void;
 }
 
-export default function ProfileCard({ username, avatar, role, joinedAt, anchorX, anchorY, onClose }: ProfileCardProps) {
+export default function ProfileCard({ username, userId, avatar, role, joinedAt, anchorX, anchorY, onClose, onMessageUser }: ProfileCardProps) {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -95,6 +97,14 @@ export default function ProfileCard({ username, avatar, role, joinedAt, anchorX,
             <span className="font-medium text-[var(--text)]">Joined</span> {joinDate}
           </p>
         </div>
+      )}
+      {userId && onMessageUser && (
+        <button
+          onClick={() => { onMessageUser(userId); onClose(); }}
+          className="mt-2 w-full text-xs px-3 py-1.5 bg-amber-600/20 text-amber-300 rounded-lg hover:bg-amber-600/30 transition-colors"
+        >
+          Message
+        </button>
       )}
     </div>
   );

@@ -70,7 +70,7 @@ export default function LoginPage() {
     <div className="min-h-screen flex items-center justify-center bg-[var(--bg)]">
       <div className="w-full max-w-md p-8 bg-[var(--panel)] rounded-lg border border-[var(--accent-2)]">
         <div className="flex flex-col items-center mb-6">
-          <img src="/campfire-logo.png" alt="Campfire" className="w-24 h-24 mb-3" />
+          <img src="/Campfire-Logo.png" alt="Campfire" className="w-24 h-24 mb-3" />
           <h1 className="text-3xl font-bold text-[var(--text)] mb-1">
             Campfire
           </h1>

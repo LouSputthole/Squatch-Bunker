@@ -13,6 +13,8 @@ interface Server {
 interface ServerListProps {
   servers: Server[];
   activeServerId?: string;
+  dmActive?: boolean;
+  onDmClick?: () => void;
   onServerSelect: (server: Server) => void;
   onServerCreated: (server: Server) => void;
   onServerJoined: (server: Server) => void;
@@ -21,6 +23,8 @@ interface ServerListProps {
 export default function ServerList({
   servers,
   activeServerId,
+  dmActive,
+  onDmClick,
   onServerSelect,
   onServerCreated,
   onServerJoined,
@@ -132,7 +136,21 @@ export default function ServerList({
       />
       <div className="w-[72px] bg-[var(--bg)] flex flex-col items-center py-3 gap-2 border-r border-[var(--accent-2)]/30 shrink-0">
         {/* Campfire logo */}
-        <img src="/campfire-logo.png" alt="Campfire" className="w-10 h-10 mb-1 opacity-90" title="Campfire" />
+        <img src="/Campfire-Logo.png" alt="Campfire" className="w-10 h-10 mb-1 opacity-90" title="Campfire" />
+        {/* DM button */}
+        <button
+          onClick={onDmClick}
+          className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all ${
+            dmActive
+              ? "bg-amber-600/30 text-amber-300 rounded-xl"
+              : "bg-[var(--panel)] text-[var(--muted)] hover:bg-amber-600/20 hover:text-amber-300 hover:rounded-xl"
+          }`}
+          title="Direct Messages"
+        >
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+          </svg>
+        </button>
         <div className="w-8 h-[1px] bg-[var(--accent-2)]/30 mb-1" />
 
         {servers.map((server) => {

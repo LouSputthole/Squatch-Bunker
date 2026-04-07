@@ -210,7 +210,7 @@ function renderInline(text: string): React.ReactNode {
 
 function renderContent(text: string): React.ReactNode {
   // Extract ``` code blocks first
-  const CODE_BLOCK_RE = /```([^`]*)```/gs;
+  const CODE_BLOCK_RE = /```([^`]*)```/g;
   const segments: Array<{ isBlock: boolean; content: string }> = [];
   let last = 0;
   let bm: RegExpExecArray | null;

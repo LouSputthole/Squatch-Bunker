@@ -5,8 +5,8 @@ export const metadata: Metadata = {
   title: "Campfire",
   description: "Gather around the fire",
   icons: {
-    icon: "/campfire-logo.png",
-    apple: "/campfire-logo.png",
+    icon: "/Campfire-Icon.png",
+    apple: "/Campfire-Icon.png",
   },
 };
 
