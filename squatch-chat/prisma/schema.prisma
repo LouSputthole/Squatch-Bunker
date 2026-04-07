@@ -53,6 +53,7 @@ model Channel {
   serverId    String
   name        String
   type        String   @default("text")
+  category    String?
   description String?
   createdAt   DateTime @default(now())
 

@@ -7,7 +7,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
 
-  const { serverId, name, type, description } = await request.json();
+  const { serverId, name, type, description, category } = await request.json();
   if (!serverId || !name || !name.trim()) {
     return NextResponse.json(
       { error: "Server ID and channel name are required" },
@@ -34,11 +34,13 @@ export async function POST(request: Request) {
         name: name.trim().toLowerCase().replace(/\s+/g, "-"),
         type: channelType,
         ...(description?.trim() ? { description: description.trim() } : {}),
+        ...(category?.trim() ? { category: category.trim() } : {}),
       },
       select: {
         id: true,
         name: true,
         type: true,
+        category: true,
         description: true,
         serverId: true,
         createdAt: true,
