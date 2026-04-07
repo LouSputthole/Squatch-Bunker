@@ -16,8 +16,14 @@ export function isStripeEnabled(): boolean {
 
 async function getStripe() {
   if (!STRIPE_SECRET_KEY) return null;
-  const Stripe = (await import("stripe")).default;
-  return new Stripe(STRIPE_SECRET_KEY);
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const Stripe = require("stripe") as { new (key: string): unknown };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return new Stripe(STRIPE_SECRET_KEY) as any;
+  } catch {
+    return null;
+  }
 }
 
 export async function createCheckoutSession(userId: string, email: string, priceId: string) {

@@ -27,6 +27,7 @@ function createPrismaClient(): InstanceType<typeof PrismaClient> {
     if (!process.env.DATABASE_URL) {
       process.env.DATABASE_URL = "file:./data/campfire.db";
     }
+    // @ts-expect-error SQLite mode uses built-in driver, no adapter needed at runtime
     return new PrismaClient();
   }
 

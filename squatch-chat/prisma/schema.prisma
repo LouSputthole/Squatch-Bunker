@@ -34,8 +34,12 @@ model User {
   directMessages DirectMessage[]
   sentRequests   Friendship[]   @relation("FriendRequester")
   recvRequests   Friendship[]   @relation("FriendAddressee")
-  dmReactions    DirectMessageReaction[]
-  oauthAccounts  OAuthAccount[]
+  dmReactions             DirectMessageReaction[]
+  oauthAccounts           OAuthAccount[]
+  scheduledMessages       ScheduledMessage[]
+  notificationPreferences NotificationPreference[]
+  authoredNotes           UserNote[] @relation("NoteAuthor")
+  targetedNotes           UserNote[] @relation("NoteTarget")
 }
 
 model OAuthAccount {
@@ -58,8 +62,10 @@ model Server {
   ownerId     String
   createdAt   DateTime @default(now())
   inviteCode  String   @unique @default(uuid())
-  isPublic    Boolean  @default(false)
-  description String?
+  isPublic          Boolean  @default(false)
+  description       String?
+  welcomeMessage    String?
+  welcomeChannelIds String?
 
   owner        User           @relation(fields: [ownerId], references: [id])
   members      ServerMember[]
@@ -93,12 +99,14 @@ model Channel {
   description     String?
   topic           String?
   slowModeSeconds Int      @default(0)
+  position        Int      @default(0)
   createdAt       DateTime @default(now())
 
-  server      Server              @relation(fields: [serverId], references: [id])
-  messages    Message[]
-  permissions ChannelPermission[]
-  webhooks    Webhook[]
+  server            Server              @relation(fields: [serverId], references: [id])
+  messages          Message[]
+  permissions       ChannelPermission[]
+  webhooks          Webhook[]
+  scheduledMessages ScheduledMessage[]
 }
 
 model Message {
@@ -111,6 +119,7 @@ model Message {
   replyToId       String?
   pinned          Boolean   @default(false)
   parentMessageId String?
+  isSystem        Boolean   @default(false)
   editedAt        DateTime?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
@@ -255,4 +264,44 @@ model Friendship {
   addressee User @relation("FriendAddressee", fields: [addresseeId], references: [id])
 
   @@unique([requesterId, addresseeId])
+}
+
+model ScheduledMessage {
+  id        String   @id @default(uuid())
+  channelId String
+  authorId  String
+  content   String
+  sendAt    DateTime
+  sent      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  channel Channel @relation(fields: [channelId], references: [id])
+  author  User    @relation(fields: [authorId], references: [id])
+}
+
+model NotificationPreference {
+  id        String   @id @default(uuid())
+  userId    String
+  serverId  String?
+  channelId String?
+  level     String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([userId, serverId, channelId])
+}
+
+model UserNote {
+  id           String   @id @default(uuid())
+  authorId     String
+  targetUserId String
+  content      String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  author     User @relation("NoteAuthor", fields: [authorId], references: [id])
+  targetUser User @relation("NoteTarget", fields: [targetUserId], references: [id])
+
+  @@unique([authorId, targetUserId])
 }
