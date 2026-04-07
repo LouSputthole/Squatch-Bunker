@@ -384,7 +384,7 @@ export default function ChannelList({
                     <span className="flex-1 truncate">{channel.name}</span>
                     {muted && <MuteIcon />}
                     {showBadge && (
-                      <span className="ml-auto bg-[var(--accent)] text-[var(--bg)] text-xs font-bold rounded-full min-w-[1.25rem] h-5 flex items-center justify-center px-1">
+                      <span className="ml-auto text-xs font-bold text-white bg-[var(--accent)] rounded-full px-1.5 py-0.5 min-w-[18px] text-center">
                         {unread > 99 ? "99+" : unread}
                       </span>
                     )}

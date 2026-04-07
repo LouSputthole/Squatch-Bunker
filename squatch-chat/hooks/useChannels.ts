@@ -105,11 +105,24 @@ export function useChannels(activeServer: Server | null) {
     };
   }, [activeServer]);
 
+  const markChannelRead = useCallback((channelId: string) => {
+    setUnreadCounts((prev) => {
+      if (!prev.has(channelId)) return prev;
+      const next = new Map(prev);
+      next.delete(channelId);
+      return next;
+    });
+    try {
+      localStorage.setItem(`lastRead:${channelId}`, new Date().toISOString());
+    } catch { /* ignore */ }
+  }, []);
+
   const selectChannel = useCallback((channel: Channel) => {
     if (!channel.type || channel.type === "text") {
       setActiveChannel(channel);
+      markChannelRead(channel.id);
     }
-  }, []);
+  }, [markChannelRead]);
 
   const resetUnreads = useCallback(() => {
     setUnreadCounts(new Map());
@@ -120,6 +133,7 @@ export function useChannels(activeServer: Server | null) {
     activeChannel,
     setActiveChannel,
     unreadCounts,
+    markChannelRead,
     urlServerId,
     urlChannelId,
     selectChannel,
