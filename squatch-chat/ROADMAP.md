@@ -120,14 +120,14 @@
 - [x] Kick member from server
 
 **Still needed:**
-- [ ] Server mute (mod forces mute on user)
-- [ ] Server deafen
-- [ ] Kick from voice
-- [ ] Move between rooms
+- [x] Server mute (mod forces mute on user)
+- [x] Server deafen
+- [x] Kick from voice
+- [x] Move between rooms
 - [ ] Temporary speaking suppression
 - [ ] Block screen share / camera
 - [ ] Report abuse flow
-- [ ] Clear UI state when user is force-muted
+- [x] Clear UI state when user is force-muted
 
 ### 7. Reconnect / Reliability [~]
 
@@ -195,20 +195,33 @@
 - [ ] Split-pane or tabbed UI
 - [ ] Unread indicators inside voice room
 
-### 12. Screen Share / App Streaming [ ]
-- [ ] Screen capture pipeline
-- [ ] Window capture
-- [ ] Audio capture for shared content
-- [ ] Stream start/stop/pause
-- [ ] SFU support for screen video tracks
-- [ ] Viewer grid or pinned layout
-- [ ] Fullscreen mode
+### 12. Screen Share / App Streaming [~]
 
-### 13. Camera / Video [ ]
-- [ ] Webcam device selection
-- [ ] Video track publishing
-- [ ] Grid/speaker/pinned layouts
-- [ ] Camera toggle with preview
+**What exists:**
+- [x] Screen capture pipeline (getDisplayMedia)
+- [x] Window/tab/screen capture
+- [x] Audio capture for shared content
+- [x] Stream start/stop
+- [x] Viewer with pinned layout
+- [x] Fullscreen mode
+- [x] Multiple share tabs
+
+**Still needed:**
+- [ ] SFU support for screen video tracks
+- [ ] Pause/resume
+
+### 13. Camera / Video [~]
+
+**What exists:**
+- [x] Video track publishing (via existing voice peer connections)
+- [x] Grid layout (auto-fit responsive grid)
+- [x] Camera toggle button
+- [x] Self-view (mirrored)
+- [x] Camera state synced to server
+
+**Still needed:**
+- [ ] Webcam device selection (Settings)
+- [ ] Speaker/pinned layout modes
 - [ ] Low-bandwidth mode
 - [ ] Per-user video subscriptions
 
@@ -328,3 +341,4 @@
 - v0.0.3 — Separate voice/text channels, WebRTC voice, mute/deafen icons, settings modal, notification sounds, Docker hosting
 - v0.0.4 — Profile pictures, emoji reactions, file/image uploads, message search, keyboard shortcuts, logo integration
 - v0.0.5 — Roles & permissions (owner/admin/mod/member), speaking indicators (VAD), push-to-talk, role management UI
+- v0.0.6 — Voice moderation (server mute/deafen, kick from voice, move between rooms), screen share with fullscreen viewer, camera/video with grid layout

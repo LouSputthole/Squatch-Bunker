@@ -23,7 +23,7 @@ import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 
 import type { Channel } from "@/types/chat";
 
-const APP_VERSION = "v0.0.5";
+const APP_VERSION = "v0.0.6";
 
 export default function ChatPage() {
   return (
