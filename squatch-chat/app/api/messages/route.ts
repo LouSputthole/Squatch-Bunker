@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
+import { checkRateLimit } from "@/lib/rateLimit";
 
 export async function GET(request: Request) {
   const session = await getSession();
@@ -88,6 +89,22 @@ export async function POST(request: Request) {
   const session = await getSession();
   if (!session) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  }
+
+  const { allowed, remaining, resetAt } = checkRateLimit(`msg:${session.userId}`);
+  if (!allowed) {
+    return NextResponse.json(
+      { error: "Too many requests. Please slow down." },
+      {
+        status: 429,
+        headers: {
+          "X-RateLimit-Limit": String(30),
+          "X-RateLimit-Remaining": String(remaining),
+          "X-RateLimit-Reset": String(Math.ceil(resetAt / 1000)),
+          "Retry-After": String(Math.ceil((resetAt - Date.now()) / 1000)),
+        },
+      }
+    );
   }
 
   const { channelId, content, attachmentUrl, attachmentName, replyToId, parentMessageId } = await request.json();

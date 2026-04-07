@@ -5,6 +5,13 @@ import { displayName, truncateName } from "@/lib/utils";
 import Avatar from "@/components/Avatar";
 import ProfileCard from "@/components/ProfileCard";
 import ImageLightbox from "@/components/ImageLightbox";
+import { LinkPreview } from "@/components/LinkPreview";
+
+// URL extraction util — returns at most 1 unique URL for preview
+function extractUrls(text: string): string[] {
+  const urlRegex = /https?:\/\/[^\s<>"]+/g;
+  return [...new Set(text.match(urlRegex) ?? [])].slice(0, 1);
+}
 
 const EMOJI_DATA: { emoji: string; keywords: string }[] = [
   // Smileys & emotion
@@ -282,6 +289,7 @@ interface MessageBubbleProps {
   };
   isOwn: boolean;
   currentUserId?: string;
+  authorColor?: string | null;
   canPin?: boolean;
   onEdit?: (messageId: string, newContent: string) => void;
   onDelete?: (messageId: string) => void;
@@ -293,7 +301,7 @@ interface MessageBubbleProps {
   highlighted?: boolean;
 }
 
-export default function MessageBubble({ message, isOwn, currentUserId, canPin, onEdit, onDelete, onReact, onReply, onScrollToMessage, onPin, onThread, highlighted }: MessageBubbleProps) {
+export default function MessageBubble({ message, isOwn, currentUserId, authorColor, canPin, onEdit, onDelete, onReact, onReply, onScrollToMessage, onPin, onThread, highlighted }: MessageBubbleProps) {
   const [editing, setEditing] = useState(false);
   const [glowing, setGlowing] = useState(false);
 
@@ -374,6 +382,7 @@ export default function MessageBubble({ message, isOwn, currentUserId, canPin, o
             type="button"
             onClick={(e) => setProfileCard({ x: e.clientX, y: e.clientY })}
             className={`font-semibold text-sm hover:underline cursor-pointer ${isOwn ? "text-[var(--accent)]" : "text-[var(--text)]"}`}
+            style={authorColor ? { color: authorColor } : undefined}
             title={displayName(message.author.username)}
           >
             {shown}
@@ -424,6 +433,9 @@ export default function MessageBubble({ message, isOwn, currentUserId, canPin, o
             {message.content && (
               <div className="text-[var(--text)] text-sm break-words">{renderContent(message.content)}</div>
             )}
+            {message.content && extractUrls(message.content).map((url) => (
+              <LinkPreview key={url} url={url} />
+            ))}
             {message.attachmentUrl && (
               <Attachment
                 url={message.attachmentUrl}
