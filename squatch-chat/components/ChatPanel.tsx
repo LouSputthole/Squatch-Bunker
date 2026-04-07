@@ -69,7 +69,9 @@ export default function ChatPanel({
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isTypingRef = useRef(false);
   const [uploading, setUploading] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const dragCounterRef = useRef(0);
   let pendingIdCounter = useRef(0);
 
   const scrollToBottom = useCallback(() => {
@@ -431,6 +433,41 @@ export default function ChatPanel({
     }
   }
 
+  async function handleFileDrop(file: File) {
+    if (file.size > 10 * 1024 * 1024) {
+      alert("File too large. Maximum size is 10MB.");
+      return;
+    }
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const uploadRes = await fetch("/api/upload", { method: "POST", body: formData });
+      if (!uploadRes.ok) {
+        const data = await uploadRes.json();
+        alert(data.error || "Upload failed");
+        return;
+      }
+      const { url, name } = await uploadRes.json();
+      const res = await fetch("/api/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channelId, content: "", attachmentUrl: url, attachmentName: name }),
+      });
+      if (res.ok) {
+        const { message } = await res.json();
+        setMessages((prev) => [...prev, message]);
+        setTimeout(scrollToBottom, 50);
+        const socket = getSocket();
+        socket.emit("message:send", { channelId, message });
+      }
+    } catch {
+      alert("Upload failed. Please try again.");
+    } finally {
+      setUploading(false);
+    }
+  }
+
   const typingNames = Array.from(typingUsers.values()).map((name) => truncateName(name));
   const typingLabel =
     typingNames.length === 1
@@ -442,7 +479,36 @@ export default function ChatPanel({
           : null;
 
   return (
-    <div className="flex-1 flex bg-[var(--panel-2)] min-w-0">
+    <div
+      className="flex-1 flex bg-[var(--panel-2)] min-w-0 relative"
+      onDragEnter={(e) => {
+        e.preventDefault();
+        dragCounterRef.current++;
+        if (e.dataTransfer.types.includes("Files")) setIsDragging(true);
+      }}
+      onDragOver={(e) => { e.preventDefault(); }}
+      onDragLeave={() => {
+        dragCounterRef.current--;
+        if (dragCounterRef.current <= 0) { dragCounterRef.current = 0; setIsDragging(false); }
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        dragCounterRef.current = 0;
+        setIsDragging(false);
+        const file = e.dataTransfer.files[0];
+        if (file) handleFileDrop(file);
+      }}
+    >
+      {/* Drop zone overlay */}
+      {isDragging && (
+        <div className="absolute inset-0 z-30 flex items-center justify-center bg-[var(--accent)]/10 border-2 border-dashed border-[var(--accent)] rounded pointer-events-none">
+          <div className="text-center">
+            <p className="text-lg font-semibold text-[var(--accent)]">Drop file to upload</p>
+            <p className="text-sm text-[var(--muted)] mt-1">Supports images, PDF, TXT, ZIP (max 10MB)</p>
+          </div>
+        </div>
+      )}
+
       {/* Main chat column */}
       <div className="flex-1 flex flex-col min-w-0">
       <div className="h-12 px-4 flex items-center border-b border-[var(--accent-2)]/30 bg-[var(--panel-2)] shrink-0 justify-between">
