@@ -13,6 +13,23 @@ function extractUrls(text: string): string[] {
   return [...new Set(text.match(urlRegex) ?? [])].slice(0, 1);
 }
 
+function SpoilerText({ children }: { children: string }) {
+  const [revealed, setRevealed] = useState(false);
+  return (
+    <span
+      onClick={() => setRevealed(true)}
+      className={`inline rounded px-0.5 cursor-pointer select-none transition-all ${
+        revealed
+          ? "bg-[var(--panel-2)]"
+          : "bg-[var(--text)] text-[var(--text)] blur-[3px] hover:blur-[2px]"
+      }`}
+      title={revealed ? undefined : "Click to reveal spoiler"}
+    >
+      {children}
+    </span>
+  );
+}
+
 const EMOJI_DATA: { emoji: string; keywords: string }[] = [
   // Smileys & emotion
   { emoji: "😀", keywords: "grinning happy smile" },
@@ -190,7 +207,7 @@ const EMOJI_DATA: { emoji: string; keywords: string }[] = [
 //         6=*italic*, 7=italic-inner, 8=_italic_, 9=italic-inner2,
 //         10=~~strike~~, 11=strike-inner, 12=URL, 13=@mention
 const INLINE_RE =
-  /(`[^`\n]+`)|\*\*([^*\n]+)\*\*|__([^_\n]+)__|\*([^*\n]+)\*|_([^_\n]+)_|~~([^~\n]+)~~|(https?:\/\/[^\s<]+[^\s<.,;:!?'")\]])|(@\w+(?:#[a-f0-9]+)?)/g;
+  /(`[^`\n]+`)|\*\*([^*\n]+)\*\*|__([^_\n]+)__|\*([^*\n]+)\*|_([^_\n]+)_|~~([^~\n]+)~~|(https?:\/\/[^\s<]+[^\s<.,;:!?'")\]])|(@\w+(?:#[a-f0-9]+)?)|(\|\|[^|\n]+\|\|)/g;
 
 let _inlineKey = 0;
 function renderInline(text: string): React.ReactNode {
@@ -209,6 +226,7 @@ function renderInline(text: string): React.ReactNode {
     else if (m[6]) parts.push(<del key={k} className="line-through opacity-60">{m[6]}</del>);
     else if (m[7]) parts.push(<a key={k} href={m[7]} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline break-all">{m[7]}</a>);
     else if (m[8]) parts.push(<span key={k} className="bg-blue-500/20 text-blue-300 rounded px-1 font-medium">{m[8]}</span>);
+    else if (m[9]) parts.push(<SpoilerText key={k}>{m[9].slice(2, -2)}</SpoilerText>);
     last = m.index + m[0].length;
   }
   if (last < text.length) parts.push(text.slice(last));
@@ -322,6 +340,24 @@ export default function MessageBubble({ message, isOwn, currentUserId, authorCol
   const [profileCard, setProfileCard] = useState<{ x: number; y: number } | null>(null);
   const [lightbox, setLightbox] = useState<{ src: string; allSrcs: string[] } | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [translated, setTranslated] = useState<string | null>(null);
+  const [translating, setTranslating] = useState(false);
+
+  async function handleTranslate() {
+    if (translated) { setTranslated(null); return; }
+    setTranslating(true);
+    try {
+      const res = await fetch("/api/translate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: message.content, target: "en" }),
+      });
+      const data = await res.json();
+      if (res.ok) setTranslated(data.translatedText);
+    } finally {
+      setTranslating(false);
+    }
+  }
 
   const shown = truncateName(message.author.username, 20);
 
@@ -449,6 +485,12 @@ export default function MessageBubble({ message, isOwn, currentUserId, authorCol
                   setLightbox({ src, allSrcs: all.length > 0 ? all : [src] });
                 }}
               />
+            )}
+            {translated && (
+              <div className="mt-1 pt-1 border-t border-[var(--accent-2)]/20">
+                <div className="text-xs text-[var(--muted)] mb-0.5">Translation:</div>
+                <div className="text-sm text-[var(--text)] opacity-80 italic">{translated}</div>
+              </div>
             )}
           </>
         )}
