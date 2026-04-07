@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { displayName, truncateName } from "@/lib/utils";
 import Avatar from "@/components/Avatar";
 import ProfileCard from "@/components/ProfileCard";
@@ -289,10 +289,21 @@ interface MessageBubbleProps {
   onScrollToMessage?: (messageId: string) => void;
   onPin?: (messageId: string, pinned: boolean) => void;
   onThread?: (messageId: string, author: { id: string; username: string }) => void;
+  highlighted?: boolean;
 }
 
-export default function MessageBubble({ message, isOwn, currentUserId, canPin, onEdit, onDelete, onReact, onReply, onScrollToMessage, onPin, onThread }: MessageBubbleProps) {
+export default function MessageBubble({ message, isOwn, currentUserId, canPin, onEdit, onDelete, onReact, onReply, onScrollToMessage, onPin, onThread, highlighted }: MessageBubbleProps) {
   const [editing, setEditing] = useState(false);
+  const [glowing, setGlowing] = useState(false);
+
+  useEffect(() => {
+    if (highlighted) {
+      setGlowing(true);
+      const t = setTimeout(() => setGlowing(false), 2000);
+      return () => clearTimeout(t);
+    }
+  }, [highlighted]);
+
   const [editContent, setEditContent] = useState(message.content);
   const [showActions, setShowActions] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
@@ -345,7 +356,7 @@ export default function MessageBubble({ message, isOwn, currentUserId, canPin, o
 
   return (
     <div
-      className="flex gap-3 py-1 group hover:bg-[var(--panel)]/30 px-1 rounded relative"
+      className={`flex gap-3 py-1 group hover:bg-[var(--panel)]/30 px-1 rounded relative ${glowing ? "animate-search-highlight" : ""}`}
       onMouseEnter={() => setShowActions(true)}
       onMouseLeave={() => { setShowActions(false); setShowEmojiPicker(false); setEmojiSearch(""); }}
     >
