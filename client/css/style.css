@@ -1,5 +1,5 @@
 /* =====================================================
-   Squatch-Bunker – Discord-inspired dark theme
+   Squatch-Bunker – Campfire design system
    ===================================================== */
 
 *, *::before, *::after {
@@ -9,33 +9,41 @@
 }
 
 :root {
-  --color-bg-sidebar:      #1e1f22;
-  --color-bg-main:         #2b2d31;
-  --color-bg-control-bar:  #232428;
-  --color-bg-hover:        #35373c;
-  --color-bg-active:       #404249;
-  --color-accent:          #5865f2;
-  --color-accent-hover:    #4752c4;
-  --color-danger:          #ed4245;
-  --color-danger-hover:    #c03537;
-  --color-text-primary:    #dcddde;
-  --color-text-secondary:  #96989d;
-  --color-text-muted:      #72767d;
-  --color-border:          #1e1f22;
-  --color-speaking:        #3ba55d;
-  --color-avatar-bg:       #5865f2;
-  --sidebar-width:         240px;
-  --control-bar-height:    56px;
-  --border-radius:         8px;
-  --border-radius-sm:      4px;
+  /* ── Core design tokens ───────────────────────────── */
+  --bg:     #1a1a1e;   /* deep charcoal – darkest base      */
+  --panel:  #25252b;   /* main panels, content areas        */
+  --text:   #f0ece3;   /* primary text – warm off-white     */
+  --muted:  #8b8694;   /* muted text, placeholders          */
+  --accent: #f59e0b;   /* warm amber – brand / CTA          */
+
+  /* ── Extended palette ─────────────────────────────── */
+  --panel-dark:     #1e1e24;            /* control bar, user bar     */
+  --panel-hover:    #2e2e37;            /* hover states              */
+  --panel-active:   #38383f;            /* active / selected         */
+  --panel-surface:  #313139;            /* cards, modals, toasts     */
+  --accent-hover:   #d97706;            /* darker amber on hover     */
+  --accent-glow:    rgba(245,158,11,.2);/* amber glow for focus      */
+  --danger:         #ef4444;            /* destructive actions       */
+  --danger-hover:   #dc2626;
+  --danger-glow:    rgba(239,68,68,.2);
+  --success:        #22c55e;            /* speaking indicator        */
+  --success-glow:   rgba(34,197,94,.4);
+  --text-secondary: #c4bfcc;            /* slightly muted text       */
+  --border:         rgba(255,255,255,.07); /* subtle divider lines   */
+
+  /* ── Layout ───────────────────────────────────────── */
+  --sidebar-width:      240px;
+  --control-bar-height: 56px;
+  --radius:             8px;
+  --radius-sm:          4px;
 }
 
 html, body {
   height: 100%;
   font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
   font-size: 14px;
-  background: var(--color-bg-main);
-  color: var(--color-text-primary);
+  background: var(--panel);
+  color: var(--text);
   overflow: hidden;
 }
 
@@ -52,7 +60,7 @@ html, body {
 #sidebar {
   width: var(--sidebar-width);
   min-width: var(--sidebar-width);
-  background: var(--color-bg-sidebar);
+  background: var(--bg);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -63,10 +71,10 @@ html, body {
   align-items: center;
   padding: 0 16px;
   height: 48px;
-  border-bottom: 1px solid rgba(0,0,0,0.2);
+  border-bottom: 1px solid var(--border);
   font-weight: 600;
   font-size: 15px;
-  color: var(--color-text-primary);
+  color: var(--text);
   cursor: default;
   user-select: none;
   flex-shrink: 0;
@@ -76,7 +84,7 @@ html, body {
   width: 28px;
   height: 28px;
   border-radius: 50%;
-  background: var(--color-accent);
+  background: var(--accent);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -105,7 +113,7 @@ html, body {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.02em;
-  color: var(--color-text-muted);
+  color: var(--muted);
   display: flex;
   align-items: center;
   gap: 4px;
@@ -116,22 +124,22 @@ html, body {
   align-items: center;
   padding: 4px 8px 4px 16px;
   margin: 0 4px;
-  border-radius: var(--border-radius-sm);
+  border-radius: var(--radius-sm);
   cursor: pointer;
-  color: var(--color-text-secondary);
+  color: var(--text-secondary);
   transition: background 0.1s, color 0.1s;
   gap: 6px;
   user-select: none;
 }
 
 .channel-item:hover {
-  background: var(--color-bg-hover);
-  color: var(--color-text-primary);
+  background: var(--panel-hover);
+  color: var(--text);
 }
 
 .channel-item.active {
-  background: var(--color-bg-active);
-  color: var(--color-text-primary);
+  background: var(--panel-active);
+  color: var(--text);
 }
 
 .channel-item .channel-icon {
@@ -150,7 +158,7 @@ html, body {
 
 .channel-item .channel-occupancy {
   font-size: 11px;
-  color: var(--color-text-muted);
+  color: var(--muted);
   flex-shrink: 0;
 }
 
@@ -164,7 +172,7 @@ html, body {
   align-items: center;
   padding: 2px 8px 2px 36px;
   gap: 6px;
-  color: var(--color-text-muted);
+  color: var(--muted);
   font-size: 13px;
 }
 
@@ -172,7 +180,7 @@ html, body {
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  background: var(--color-avatar-bg);
+  background: var(--accent);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -196,7 +204,7 @@ html, body {
   align-items: center;
   padding: 0 8px;
   height: 52px;
-  background: var(--color-bg-control-bar);
+  background: var(--panel-dark);
   gap: 8px;
   flex-shrink: 0;
 }
@@ -205,7 +213,7 @@ html, body {
   width: 32px;
   height: 32px;
   border-radius: 50%;
-  background: var(--color-accent);
+  background: var(--accent);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -223,7 +231,7 @@ html, body {
 #user-bar .user-info .user-name {
   font-size: 13px;
   font-weight: 600;
-  color: var(--color-text-primary);
+  color: var(--text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -231,7 +239,7 @@ html, body {
 
 #user-bar .user-info .user-status {
   font-size: 11px;
-  color: var(--color-text-muted);
+  color: var(--muted);
 }
 
 /* ── Main Content ─────────────────────────────────── */
@@ -241,7 +249,7 @@ html, body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: var(--color-bg-main);
+  background: var(--panel);
 }
 
 /* Empty state */
@@ -251,7 +259,7 @@ html, body {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  color: var(--color-text-muted);
+  color: var(--muted);
   gap: 12px;
 }
 
@@ -262,7 +270,7 @@ html, body {
 
 #empty-state h2 {
   font-size: 22px;
-  color: var(--color-text-secondary);
+  color: var(--text-secondary);
 }
 
 #empty-state p {
@@ -295,7 +303,7 @@ html, body {
   min-width: 220px;
   display: flex;
   flex-direction: column;
-  border-right: 1px solid rgba(0,0,0,0.2);
+  border-right: 1px solid var(--border);
   overflow: hidden;
 }
 
@@ -306,7 +314,7 @@ html, body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: var(--color-bg-main);
+  background: var(--panel);
 }
 
 #chat-messages {
@@ -330,7 +338,7 @@ html, body {
   display: flex;
   gap: 10px;
   padding: 3px 4px;
-  border-radius: var(--border-radius-sm);
+  border-radius: var(--radius-sm);
   transition: background 0.1s;
 }
 
@@ -380,18 +388,18 @@ html, body {
 .chat-msg-author {
   font-size: 13px;
   font-weight: 600;
-  color: var(--color-text-primary);
+  color: var(--text);
   white-space: nowrap;
 }
 
 .chat-msg-time {
   font-size: 11px;
-  color: var(--color-text-muted);
+  color: var(--muted);
 }
 
 .chat-msg-content {
   font-size: 14px;
-  color: var(--color-text-primary);
+  color: var(--text);
   line-height: 1.45;
   word-break: break-word;
   white-space: pre-wrap;
@@ -405,7 +413,7 @@ html, body {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  color: var(--color-text-muted);
+  color: var(--muted);
   font-size: 13px;
   padding: 24px;
   text-align: center;
@@ -422,30 +430,31 @@ html, body {
   align-items: center;
   gap: 8px;
   padding: 10px 16px;
-  border-top: 1px solid rgba(0,0,0,0.2);
-  background: var(--color-bg-main);
+  border-top: 1px solid var(--border);
+  background: var(--panel);
   flex-shrink: 0;
 }
 
 #chat-input {
   flex: 1;
   background: rgba(0,0,0,0.2);
-  border: 1px solid rgba(255,255,255,0.07);
-  border-radius: var(--border-radius-sm);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
   padding: 8px 12px;
   font-size: 14px;
-  color: var(--color-text-primary);
+  color: var(--text);
   outline: none;
   transition: border-color 0.15s;
   font-family: inherit;
 }
 
 #chat-input:focus {
-  border-color: rgba(255,255,255,0.18);
+  border-color: var(--accent-glow);
+  box-shadow: 0 0 0 2px var(--accent-glow);
 }
 
 #chat-input::placeholder {
-  color: var(--color-text-muted);
+  color: var(--muted);
 }
 
 #chat-input:disabled {
@@ -455,10 +464,10 @@ html, body {
 
 #chat-send-btn {
   padding: 8px 14px;
-  background: var(--color-accent);
+  background: var(--accent);
   color: #fff;
   border: none;
-  border-radius: var(--border-radius-sm);
+  border-radius: var(--radius-sm);
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
@@ -468,7 +477,7 @@ html, body {
 }
 
 #chat-send-btn:hover {
-  background: var(--color-accent-hover);
+  background: var(--accent-hover);
 }
 
 #chat-send-btn:disabled {
@@ -482,14 +491,14 @@ html, body {
   align-items: center;
   padding: 0 16px;
   height: 48px;
-  border-bottom: 1px solid rgba(0,0,0,0.2);
+  border-bottom: 1px solid var(--border);
   gap: 8px;
   flex-shrink: 0;
 }
 
 #room-header .room-header-icon {
   font-size: 18px;
-  color: var(--color-text-muted);
+  color: var(--muted);
 }
 
 #room-header-name {
@@ -500,7 +509,7 @@ html, body {
 #room-header .member-count-badge {
   margin-left: auto;
   font-size: 12px;
-  color: var(--color-text-muted);
+  color: var(--muted);
   background: rgba(255,255,255,0.05);
   padding: 2px 8px;
   border-radius: 12px;
@@ -530,7 +539,7 @@ html, body {
   align-items: center;
   gap: 8px;
   padding: 6px 8px;
-  border-radius: var(--border-radius-sm);
+  border-radius: var(--radius-sm);
   background: transparent;
   transition: background 0.15s;
 }
@@ -540,20 +549,20 @@ html, body {
 }
 
 .member-card.speaking .member-avatar {
-  box-shadow: 0 0 0 3px var(--color-speaking);
+  box-shadow: 0 0 0 3px var(--success);
   animation: speaking-pulse 1.5s ease-in-out infinite;
 }
 
 @keyframes speaking-pulse {
-  0%, 100% { box-shadow: 0 0 0 3px var(--color-speaking); }
-  50%       { box-shadow: 0 0 0 5px rgba(59,165,93,0.4); }
+  0%, 100% { box-shadow: 0 0 0 3px var(--success); }
+  50%       { box-shadow: 0 0 0 5px var(--success-glow); }
 }
 
 .member-avatar {
   width: 32px;
   height: 32px;
   border-radius: 50%;
-  background: var(--color-avatar-bg);
+  background: var(--accent);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -571,7 +580,7 @@ html, body {
   right: -2px;
   width: 18px;
   height: 18px;
-  background: var(--color-bg-main);
+  background: var(--panel);
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -586,41 +595,41 @@ html, body {
   overflow: hidden;
   text-overflow: ellipsis;
   flex: 1;
-  color: var(--color-text-primary);
+  color: var(--text);
 }
 
 .member-icons {
   display: flex;
   gap: 2px;
   font-size: 11px;
-  color: var(--color-text-muted);
+  color: var(--muted);
   flex-shrink: 0;
 }
 
-.member-icons .icon-muted    { color: var(--color-danger); }
-.member-icons .icon-deafened { color: var(--color-danger); }
-.member-icons .icon-speaking { color: var(--color-speaking); }
+.member-icons .icon-muted    { color: var(--danger); }
+.member-icons .icon-deafened { color: var(--danger); }
+.member-icons .icon-speaking { color: var(--success); }
 
 /* ── Control Bar ─────────────────────────────────── */
 
 #control-bar {
   height: var(--control-bar-height);
-  background: var(--color-bg-control-bar);
+  background: var(--panel-dark);
   display: flex;
   align-items: center;
   padding: 0 16px;
   gap: 8px;
   flex-shrink: 0;
-  border-top: 1px solid rgba(0,0,0,0.2);
+  border-top: 1px solid var(--border);
 }
 
 .ctrl-btn {
   width: 40px;
   height: 40px;
-  border-radius: var(--border-radius-sm);
+  border-radius: var(--radius-sm);
   border: none;
   background: rgba(255,255,255,0.07);
-  color: var(--color-text-primary);
+  color: var(--text);
   font-size: 18px;
   cursor: pointer;
   display: flex;
@@ -635,27 +644,27 @@ html, body {
 }
 
 .ctrl-btn.active {
-  background: var(--color-accent);
+  background: var(--accent);
   color: #fff;
 }
 
 .ctrl-btn.danger {
-  background: var(--color-danger);
+  background: var(--danger);
   color: #fff;
 }
 
 .ctrl-btn.danger:hover {
-  background: var(--color-danger-hover);
+  background: var(--danger-hover);
 }
 
 .ctrl-btn.muted {
-  background: rgba(237,66,69,0.2);
-  color: var(--color-danger);
+  background: var(--danger-glow);
+  color: var(--danger);
 }
 
 .ctrl-btn.deafened {
-  background: rgba(237,66,69,0.2);
-  color: var(--color-danger);
+  background: var(--danger-glow);
+  color: var(--danger);
 }
 
 #control-bar .speaking-indicator {
@@ -663,13 +672,13 @@ html, body {
   align-items: center;
   gap: 6px;
   margin-left: auto;
-  color: var(--color-text-muted);
+  color: var(--muted);
   font-size: 12px;
   transition: color 0.2s;
 }
 
 #control-bar .speaking-indicator.active {
-  color: var(--color-speaking);
+  color: var(--success);
 }
 
 #control-bar .speaking-indicator .dot {
@@ -691,7 +700,7 @@ html, body {
 
 #control-bar .ctrl-label {
   font-size: 11px;
-  color: var(--color-text-muted);
+  color: var(--muted);
   margin-left: 4px;
 }
 
@@ -713,23 +722,24 @@ html, body {
 }
 
 #username-modal {
-  background: #313338;
+  background: var(--panel-surface);
   border-radius: 12px;
   padding: 32px;
   width: 400px;
   max-width: 90vw;
-  box-shadow: 0 8px 48px rgba(0,0,0,0.4);
+  box-shadow: 0 8px 48px rgba(0,0,0,0.5);
+  border: 1px solid var(--border);
 }
 
 #username-modal h2 {
   font-size: 24px;
   margin-bottom: 8px;
-  color: var(--color-text-primary);
+  color: var(--text);
 }
 
 #username-modal p {
   font-size: 14px;
-  color: var(--color-text-secondary);
+  color: var(--text-secondary);
   margin-bottom: 24px;
 }
 
@@ -751,36 +761,37 @@ html, body {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: var(--color-text-secondary);
+  color: var(--text-secondary);
 }
 
 .form-group input {
-  background: #1e1f22;
-  border: 1px solid rgba(255,255,255,0.1);
-  border-radius: var(--border-radius-sm);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
   padding: 10px 12px;
   font-size: 15px;
-  color: var(--color-text-primary);
+  color: var(--text);
   outline: none;
-  transition: border-color 0.15s;
+  transition: border-color 0.15s, box-shadow 0.15s;
   width: 100%;
 }
 
 .form-group input:focus {
-  border-color: var(--color-accent);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-glow);
 }
 
 .form-group input::placeholder {
-  color: var(--color-text-muted);
+  color: var(--muted);
 }
 
 .btn-primary {
   width: 100%;
   padding: 12px;
-  background: var(--color-accent);
+  background: var(--accent);
   color: #fff;
   border: none;
-  border-radius: var(--border-radius-sm);
+  border-radius: var(--radius-sm);
   font-size: 15px;
   font-weight: 600;
   cursor: pointer;
@@ -788,7 +799,7 @@ html, body {
 }
 
 .btn-primary:hover {
-  background: var(--color-accent-hover);
+  background: var(--accent-hover);
 }
 
 .btn-primary:disabled {
@@ -810,19 +821,19 @@ html, body {
 }
 
 .toast {
-  background: #313338;
-  border-left: 3px solid var(--color-accent);
+  background: var(--panel-surface);
+  border-left: 3px solid var(--accent);
   padding: 10px 14px;
-  border-radius: var(--border-radius-sm);
+  border-radius: var(--radius-sm);
   font-size: 13px;
-  color: var(--color-text-primary);
-  box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+  color: var(--text);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.4);
   animation: toast-in 0.2s ease;
   max-width: 280px;
 }
 
 .toast.error {
-  border-left-color: var(--color-danger);
+  border-left-color: var(--danger);
 }
 
 @keyframes toast-in {
@@ -837,7 +848,7 @@ html, body {
   width: 16px;
   height: 16px;
   border: 2px solid rgba(255,255,255,0.2);
-  border-top-color: var(--color-accent);
+  border-top-color: var(--accent);
   border-radius: 50%;
   animation: spin 0.7s linear infinite;
 }
@@ -848,15 +859,15 @@ html, body {
 
 #connection-status {
   font-size: 11px;
-  color: var(--color-text-muted);
+  color: var(--muted);
   display: flex;
   align-items: center;
   gap: 6px;
   padding: 4px 8px;
 }
 
-#connection-status.connected { color: var(--color-speaking); }
-#connection-status.error     { color: var(--color-danger); }
+#connection-status.connected { color: var(--success); }
+#connection-status.error     { color: var(--danger); }
 
 /* ── Responsive ──────────────────────────────────── */
 
@@ -878,7 +889,7 @@ html, body {
     min-width: unset;
     max-height: 120px;
     border-right: none;
-    border-bottom: 1px solid rgba(0,0,0,0.2);
+    border-bottom: 1px solid var(--border);
   }
 
   #member-roster {
