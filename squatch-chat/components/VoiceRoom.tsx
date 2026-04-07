@@ -13,10 +13,18 @@ interface VoiceParticipant {
   avatar?: string | null;
 }
 
+interface VoiceChannel {
+  id: string;
+  name: string;
+  type?: string;
+}
+
 interface VoiceRoomProps {
+  channelId: string;
   channelName: string;
   participants: VoiceParticipant[];
   currentUserId: string;
+  currentUserRole?: string;
   muted: boolean;
   deafened: boolean;
   pttMode?: boolean;
@@ -25,6 +33,11 @@ interface VoiceRoomProps {
   onTogglePTT?: () => void;
   onDisconnect: () => void;
   onUserVolumeChange?: (userId: string, volume: number) => void;
+  onServerMute?: (channelId: string, targetUserId: string, muted: boolean) => void;
+  onServerDeafen?: (channelId: string, targetUserId: string, deafened: boolean) => void;
+  onKickFromVoice?: (channelId: string, targetUserId: string) => void;
+  onMoveUser?: (fromChannelId: string, toChannelId: string, targetUserId: string) => void;
+  voiceChannels?: VoiceChannel[];
   reconnecting?: boolean;
 }
 
@@ -110,9 +123,11 @@ function PushToTalkIcon({ active }: { active: boolean }) {
 }
 
 export default function VoiceRoom({
+  channelId,
   channelName,
   participants,
   currentUserId,
+  currentUserRole,
   muted,
   deafened,
   pttMode,
@@ -121,9 +136,18 @@ export default function VoiceRoom({
   onTogglePTT,
   onDisconnect,
   onUserVolumeChange,
+  onServerMute,
+  onServerDeafen,
+  onKickFromVoice,
+  onMoveUser,
+  voiceChannels,
   reconnecting,
 }: VoiceRoomProps) {
   const [volumePopup, setVolumePopup] = useState<{ userId: string; volume: number } | null>(null);
+  const [modMenu, setModMenu] = useState<{ userId: string; username: string; x: number; y: number; muted: boolean; deafened?: boolean } | null>(null);
+
+  const canMod = currentUserRole === "owner" || currentUserRole === "admin" || currentUserRole === "mod";
+  const otherVoiceChannels = voiceChannels?.filter((c) => c.id !== channelId && c.type === "voice") || [];
 
   return (
     <div className="flex-1 flex flex-col bg-[var(--panel-2)]">
@@ -169,7 +193,12 @@ export default function VoiceRoom({
                   onContextMenu={(e) => {
                     if (isSelf) return;
                     e.preventDefault();
-                    setVolumePopup({ userId: p.userId, volume: 1 });
+                    if (canMod) {
+                      setModMenu({ userId: p.userId, username: p.username, x: e.clientX, y: e.clientY, muted: p.muted, deafened: p.deafened });
+                      setVolumePopup(null);
+                    } else {
+                      setVolumePopup({ userId: p.userId, volume: 1 });
+                    }
                   }}
                 >
                   {/* Avatar */}
@@ -250,6 +279,75 @@ export default function VoiceRoom({
           </div>
         )}
       </div>
+
+      {/* Mod context menu */}
+      {modMenu && (
+        <div
+          className="fixed bg-[var(--panel)] border border-[var(--accent-2)]/30 rounded-lg shadow-xl py-1 z-50 min-w-[160px]"
+          style={{ left: Math.min(modMenu.x, (typeof window !== "undefined" ? window.innerWidth : 800) - 180), top: Math.min(modMenu.y, (typeof window !== "undefined" ? window.innerHeight : 600) - 250) }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="px-3 py-1.5 text-xs text-[var(--muted)] border-b border-[var(--accent-2)]/20">
+            {modMenu.username}
+          </div>
+          {/* Volume control */}
+          <button
+            onClick={() => { setVolumePopup({ userId: modMenu.userId, volume: 1 }); setModMenu(null); }}
+            className="w-full text-left px-3 py-1.5 text-xs text-[var(--text)] hover:bg-[var(--panel-2)] flex items-center gap-2"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" /></svg>
+            Adjust Volume
+          </button>
+          {/* Server mute */}
+          <button
+            onClick={() => { onServerMute?.(channelId, modMenu.userId, !modMenu.muted); setModMenu(null); }}
+            className="w-full text-left px-3 py-1.5 text-xs text-[var(--text)] hover:bg-[var(--panel-2)] flex items-center gap-2"
+          >
+            <MicIcon muted={!modMenu.muted} size={12} />
+            {modMenu.muted ? "Server Unmute" : "Server Mute"}
+          </button>
+          {/* Server deafen */}
+          <button
+            onClick={() => { onServerDeafen?.(channelId, modMenu.userId, !modMenu.deafened); setModMenu(null); }}
+            className="w-full text-left px-3 py-1.5 text-xs text-[var(--text)] hover:bg-[var(--panel-2)] flex items-center gap-2"
+          >
+            <HeadphonesIcon deafened={!modMenu.deafened} size={12} />
+            {modMenu.deafened ? "Server Undeafen" : "Server Deafen"}
+          </button>
+          {/* Move to channel */}
+          {otherVoiceChannels.length > 0 && (
+            <>
+              <div className="border-t border-[var(--accent-2)]/20 mt-1 pt-1">
+                <div className="px-3 py-1 text-[10px] text-[var(--muted)] uppercase">Move to</div>
+                {otherVoiceChannels.map((vc) => (
+                  <button
+                    key={vc.id}
+                    onClick={() => { onMoveUser?.(channelId, vc.id, modMenu.userId); setModMenu(null); }}
+                    className="w-full text-left px-3 py-1 text-xs text-[var(--text)] hover:bg-[var(--panel-2)]"
+                  >
+                    🔊 {vc.name}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+          {/* Kick from voice */}
+          <div className="border-t border-[var(--accent-2)]/20 mt-1 pt-1">
+            <button
+              onClick={() => { onKickFromVoice?.(channelId, modMenu.userId); setModMenu(null); }}
+              className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-red-600/10 flex items-center gap-2"
+            >
+              <PhoneOffIcon />
+              Disconnect User
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Click outside to close mod menu */}
+      {modMenu && (
+        <div className="fixed inset-0 z-40" onClick={() => setModMenu(null)} />
+      )}
 
       {/* Bottom Controls Bar */}
       <div className="px-6 py-4 border-t border-[var(--accent-2)]/30 bg-[var(--panel)] shrink-0">

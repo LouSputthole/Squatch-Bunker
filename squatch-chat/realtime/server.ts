@@ -37,10 +37,23 @@ const userVoiceChannel = new Map<string, string>();
 type PresenceStatus = "online" | "idle" | "dnd" | "invisible";
 const userStatus = new Map<string, PresenceStatus>();
 
+// Track member roles per server: serverId -> Map<userId, role>
+const memberRoles = new Map<string, Map<string, string>>();
+
+// Server-muted / server-deafened users: Set of `${serverId}:${userId}`
+const serverMuted = new Set<string>();
+const serverDeafened = new Set<string>();
+
 // Heartbeat tracking: socketId -> last heartbeat timestamp
 const heartbeats = new Map<string, number>();
 const HEARTBEAT_INTERVAL = 15000; // 15s
 const HEARTBEAT_TIMEOUT = 45000; // 45s — 3 missed beats
+
+// Role level check (must match lib/permissions.ts)
+function roleLevel(role: string): number {
+  const levels: Record<string, number> = { owner: 4, admin: 3, mod: 2, member: 1 };
+  return levels[role] || 0;
+}
 
 interface TokenPayload {
   userId: string;
@@ -103,8 +116,17 @@ io.on("connection", (socket) => {
   });
 
   // Join a server room (for presence)
-  socket.on("server:join", (serverId: string) => {
+  socket.on("server:join", (data: string | { serverId: string; role?: string }) => {
+    const serverId = typeof data === "string" ? data : data.serverId;
+    const role = typeof data === "string" ? "member" : (data.role || "member");
+
     socket.join(`server:${serverId}`);
+
+    // Track role
+    if (!memberRoles.has(serverId)) {
+      memberRoles.set(serverId, new Map());
+    }
+    memberRoles.get(serverId)!.set(currentUserId, role);
 
     // Track presence
     if (!onlineUsers.has(serverId)) {
@@ -287,6 +309,143 @@ io.on("connection", (socket) => {
       userId: currentUserId,
       speaking: data.speaking,
     });
+  });
+
+  // ─── Moderation Actions ───
+
+  // Helper: get caller's role in a voice channel's server
+  function getModRole(channelId: string): { serverId: string; callerRole: number } | null {
+    const serverId = voiceChannelServer.get(channelId);
+    if (!serverId) return null;
+    const roles = memberRoles.get(serverId);
+    const callerRole = roleLevel(roles?.get(currentUserId) || "member");
+    return { serverId, callerRole };
+  }
+
+  function getTargetRole(serverId: string, targetUserId: string): number {
+    const roles = memberRoles.get(serverId);
+    return roleLevel(roles?.get(targetUserId) || "member");
+  }
+
+  // Server mute a user (mod+ only, must outrank target)
+  socket.on("mod:server-mute", (data: { channelId: string; targetUserId: string; muted: boolean }) => {
+    const ctx = getModRole(data.channelId);
+    if (!ctx || ctx.callerRole < 2) return; // need mod+
+    if (ctx.callerRole <= getTargetRole(ctx.serverId, data.targetUserId)) return; // can't mod equal/higher
+
+    const key = `${ctx.serverId}:${data.targetUserId}`;
+    if (data.muted) serverMuted.add(key); else serverMuted.delete(key);
+
+    // Force mute in voice room data
+    const room = voiceRooms.get(data.channelId);
+    if (room?.has(data.targetUserId)) {
+      room.get(data.targetUserId)!.muted = data.muted;
+      broadcastVoiceParticipants(data.channelId);
+    }
+
+    // Notify the target user
+    const targetEntry = room?.get(data.targetUserId);
+    if (targetEntry) {
+      io.to(targetEntry.socketId).emit("mod:force-mute", { muted: data.muted, by: currentUsername });
+    }
+  });
+
+  // Server deafen a user (mod+ only)
+  socket.on("mod:server-deafen", (data: { channelId: string; targetUserId: string; deafened: boolean }) => {
+    const ctx = getModRole(data.channelId);
+    if (!ctx || ctx.callerRole < 2) return;
+    if (ctx.callerRole <= getTargetRole(ctx.serverId, data.targetUserId)) return;
+
+    const key = `${ctx.serverId}:${data.targetUserId}`;
+    if (data.deafened) serverDeafened.add(key); else serverDeafened.delete(key);
+
+    const room = voiceRooms.get(data.channelId);
+    if (room?.has(data.targetUserId)) {
+      const entry = room.get(data.targetUserId)!;
+      entry.deafened = data.deafened;
+      if (data.deafened) entry.muted = true;
+      broadcastVoiceParticipants(data.channelId);
+      io.to(entry.socketId).emit("mod:force-deafen", { deafened: data.deafened, by: currentUsername });
+    }
+  });
+
+  // Kick user from voice (mod+ only)
+  socket.on("mod:kick-voice", (data: { channelId: string; targetUserId: string }) => {
+    const ctx = getModRole(data.channelId);
+    if (!ctx || ctx.callerRole < 2) return;
+    if (ctx.callerRole <= getTargetRole(ctx.serverId, data.targetUserId)) return;
+
+    const room = voiceRooms.get(data.channelId);
+    const targetEntry = room?.get(data.targetUserId);
+    if (targetEntry) {
+      // Notify target before removing
+      io.to(targetEntry.socketId).emit("mod:kicked-from-voice", { channelId: data.channelId, by: currentUsername });
+      // Remove from room
+      room!.delete(data.targetUserId);
+      userVoiceChannel.delete(data.targetUserId);
+      // Notify others
+      io.to(`voice:${data.channelId}`).emit("voice:user-left", {
+        channelId: data.channelId,
+        userId: data.targetUserId,
+        socketId: targetEntry.socketId,
+      });
+      // Force target socket to leave voice room
+      const targetSocket = io.sockets.sockets.get(targetEntry.socketId);
+      if (targetSocket) targetSocket.leave(`voice:${data.channelId}`);
+      broadcastVoiceParticipants(data.channelId);
+    }
+  });
+
+  // Move user to another voice channel (mod+ only)
+  socket.on("mod:move-user", (data: { fromChannelId: string; toChannelId: string; targetUserId: string }) => {
+    const ctx = getModRole(data.fromChannelId);
+    if (!ctx || ctx.callerRole < 2) return;
+    if (ctx.callerRole <= getTargetRole(ctx.serverId, data.targetUserId)) return;
+
+    const room = voiceRooms.get(data.fromChannelId);
+    const targetEntry = room?.get(data.targetUserId);
+    if (!targetEntry) return;
+
+    // Remove from old channel
+    room!.delete(data.targetUserId);
+    const targetSocket = io.sockets.sockets.get(targetEntry.socketId);
+    if (targetSocket) targetSocket.leave(`voice:${data.fromChannelId}`);
+    io.to(`voice:${data.fromChannelId}`).emit("voice:user-left", {
+      channelId: data.fromChannelId,
+      userId: data.targetUserId,
+      socketId: targetEntry.socketId,
+    });
+    broadcastVoiceParticipants(data.fromChannelId);
+
+    // Add to new channel
+    if (targetSocket) targetSocket.join(`voice:${data.toChannelId}`);
+    if (!voiceRooms.has(data.toChannelId)) voiceRooms.set(data.toChannelId, new Map());
+    voiceRooms.get(data.toChannelId)!.set(data.targetUserId, {
+      username: targetEntry.username,
+      socketId: targetEntry.socketId,
+      muted: targetEntry.muted,
+      deafened: targetEntry.deafened,
+    });
+    userVoiceChannel.set(data.targetUserId, data.toChannelId);
+    voiceChannelServer.set(data.toChannelId, ctx.serverId);
+
+    // Notify target to switch channels client-side
+    if (targetSocket) {
+      targetSocket.emit("mod:moved-to-channel", {
+        fromChannelId: data.fromChannelId,
+        toChannelId: data.toChannelId,
+        by: currentUsername,
+      });
+    }
+
+    // Notify new room
+    io.to(`voice:${data.toChannelId}`).emit("voice:user-joined", {
+      channelId: data.toChannelId,
+      userId: data.targetUserId,
+      username: targetEntry.username,
+      socketId: targetEntry.socketId,
+    });
+    broadcastVoiceParticipants(data.toChannelId);
   });
 
   // WebRTC signaling: relay offer to a specific peer

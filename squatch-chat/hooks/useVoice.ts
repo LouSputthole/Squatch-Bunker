@@ -72,6 +72,60 @@ export function useVoice(activeServer: Server | null) {
     voicePanelRef.current?.setInputSensitivity(threshold);
   }, []);
 
+  // ─── Mod Actions ───
+
+  const serverMuteUser = useCallback((channelId: string, targetUserId: string, muted: boolean) => {
+    getSocket().emit("mod:server-mute", { channelId, targetUserId, muted });
+  }, []);
+
+  const serverDeafenUser = useCallback((channelId: string, targetUserId: string, deafened: boolean) => {
+    getSocket().emit("mod:server-deafen", { channelId, targetUserId, deafened });
+  }, []);
+
+  const kickFromVoice = useCallback((channelId: string, targetUserId: string) => {
+    getSocket().emit("mod:kick-voice", { channelId, targetUserId });
+  }, []);
+
+  const moveUser = useCallback((fromChannelId: string, toChannelId: string, targetUserId: string) => {
+    getSocket().emit("mod:move-user", { fromChannelId, toChannelId, targetUserId });
+  }, []);
+
+  // Listen for mod actions targeting us
+  useEffect(() => {
+    const socket = getSocket();
+
+    function handleForceMute(data: { muted: boolean; by: string }) {
+      if (data.muted) voicePanelRef.current?.forceMute?.();
+      setVoiceState((prev) => ({ ...prev, muted: data.muted }));
+    }
+    function handleForceDeafen(data: { deafened: boolean; by: string }) {
+      if (data.deafened) voicePanelRef.current?.forceDeafen?.();
+      setVoiceState((prev) => ({ ...prev, deafened: data.deafened, muted: data.deafened || prev.muted }));
+    }
+    function handleKicked() {
+      setActiveVoiceChannel(null);
+    }
+    function handleMoved(data: { toChannelId: string }) {
+      // Find the channel in the active server and switch to it
+      if (activeServer) {
+        const target = activeServer.channels.find((c) => c.id === data.toChannelId);
+        if (target) setActiveVoiceChannel(target);
+      }
+    }
+
+    socket.on("mod:force-mute", handleForceMute);
+    socket.on("mod:force-deafen", handleForceDeafen);
+    socket.on("mod:kicked-from-voice", handleKicked);
+    socket.on("mod:moved-to-channel", handleMoved);
+
+    return () => {
+      socket.off("mod:force-mute", handleForceMute);
+      socket.off("mod:force-deafen", handleForceDeafen);
+      socket.off("mod:kicked-from-voice", handleKicked);
+      socket.off("mod:moved-to-channel", handleMoved);
+    };
+  }, [activeServer]);
+
   return {
     activeVoiceChannel,
     voiceParticipants,
@@ -88,5 +142,9 @@ export function useVoice(activeServer: Server | null) {
     togglePTT,
     setUserVolume,
     setInputSensitivity,
+    serverMuteUser,
+    serverDeafenUser,
+    kickFromVoice,
+    moveUser,
   };
 }

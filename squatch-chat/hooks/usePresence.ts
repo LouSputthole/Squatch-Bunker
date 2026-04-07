@@ -27,7 +27,26 @@ export function usePresence(activeServer: Server | null, user: User | null) {
   useEffect(() => {
     if (!activeServer) return;
     const socket = getSocket();
-    socket.emit("server:join", activeServer.id);
+    // Send role with server join so realtime server can enforce mod permissions
+    if (user) {
+      fetch(`/api/servers/${activeServer.id}/members`)
+        .then((r) => r.ok ? r.json() : null)
+        .then((data) => {
+          if (data?.members) {
+            const me = data.members.find((m: { userId: string; role?: string }) => m.userId === user.id);
+            const role = me?.role || "member";
+            setUserRole(role);
+            socket.emit("server:join", { serverId: activeServer.id, role });
+          } else {
+            socket.emit("server:join", { serverId: activeServer.id, role: "member" });
+          }
+        })
+        .catch(() => {
+          socket.emit("server:join", { serverId: activeServer.id, role: "member" });
+        });
+    } else {
+      socket.emit("server:join", { serverId: activeServer.id, role: "member" });
+    }
 
     function handlePresence(data: { serverId: string; members: MemberPresence[] }) {
       if (data.serverId !== activeServerIdRef.current) return;
@@ -37,18 +56,6 @@ export function usePresence(activeServer: Server | null, user: User | null) {
       setMemberStatuses(new Map(data.members.map((m) => [m.userId, m.status])));
     }
     socket.on("presence:update", handlePresence);
-
-    if (user) {
-      fetch(`/api/servers/${activeServer.id}/members`)
-        .then((r) => r.ok ? r.json() : null)
-        .then((data) => {
-          if (data?.members) {
-            const me = data.members.find((m: { userId: string; role?: string }) => m.userId === user.id);
-            setUserRole(me?.role || "member");
-          }
-        })
-        .catch(() => setUserRole("member"));
-    }
 
     return () => {
       socket.off("presence:update", handlePresence);

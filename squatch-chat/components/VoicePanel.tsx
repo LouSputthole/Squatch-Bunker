@@ -29,6 +29,8 @@ export interface VoicePanelHandle {
   isPTT: () => boolean;
   setUserVolume: (userId: string, volume: number) => void;
   setInputSensitivity: (threshold: number) => void;
+  forceMute: () => void;
+  forceDeafen: () => void;
 }
 
 const ICE_SERVERS: RTCConfiguration = {
@@ -365,7 +367,13 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
     setInputSensitivity: (threshold: number) => {
       vadThresholdRef.current = Math.max(1, Math.min(100, threshold));
     },
-  }), [toggleMute, toggleDeafen, leaveVoice, togglePTT]);
+    forceMute: () => {
+      if (!muted) toggleMute();
+    },
+    forceDeafen: () => {
+      if (!deafened) toggleDeafen();
+    },
+  }), [toggleMute, toggleDeafen, leaveVoice, togglePTT, muted, deafened]);
 
   // Report state changes to parent — merge speaking state into participants
   useEffect(() => {

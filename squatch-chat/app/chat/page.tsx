@@ -161,9 +161,11 @@ function ChatPageInner() {
       {/* Main panel */}
       {voice.activeVoiceChannel && auth.user ? (
         <VoiceRoom
+          channelId={voice.activeVoiceChannel.id}
           channelName={voice.activeVoiceChannel.name}
           participants={voice.voiceState.participants}
           currentUserId={auth.user.id}
+          currentUserRole={presence.userRole}
           muted={voice.voiceState.muted}
           deafened={voice.voiceState.deafened}
           pttMode={voice.pttMode}
@@ -172,6 +174,11 @@ function ChatPageInner() {
           onTogglePTT={voice.togglePTT}
           onDisconnect={voice.disconnect}
           onUserVolumeChange={voice.setUserVolume}
+          onServerMute={voice.serverMuteUser}
+          onServerDeafen={voice.serverDeafenUser}
+          onKickFromVoice={voice.kickFromVoice}
+          onMoveUser={voice.moveUser}
+          voiceChannels={srv.activeServer?.channels.filter((c) => c.type === "voice")}
           reconnecting={voice.voiceState.reconnecting}
         />
       ) : ch.activeChannel && auth.user ? (
