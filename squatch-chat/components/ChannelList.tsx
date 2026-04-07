@@ -354,10 +354,10 @@ export default function ChannelList({
               type="text"
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
-              placeholder="channel-name"
+              placeholder="channel-name (Enter to save)"
               className="w-full text-sm px-2 py-1 bg-[var(--panel-2)] text-[var(--text)] border border-[var(--accent-2)] rounded focus:outline-none"
               autoFocus
-              onBlur={() => { if (!newName.trim()) setCreating(null); }}
+              onKeyDown={(e) => { if (e.key === "Escape") setCreating(null); }}
             />
             <input
               type="text"
@@ -365,7 +365,12 @@ export default function ChannelList({
               onChange={(e) => setNewCategory(e.target.value)}
               placeholder="Category (optional)"
               className="w-full text-xs px-2 py-1 bg-[var(--panel-2)] text-[var(--text)] border border-[var(--accent-2)]/50 rounded focus:outline-none"
+              onKeyDown={(e) => { if (e.key === "Escape") setCreating(null); }}
             />
+            <div className="flex gap-1">
+              <button type="submit" disabled={!newName.trim()} className="flex-1 text-xs py-1 bg-amber-600/30 text-amber-300 rounded hover:bg-amber-600/40 disabled:opacity-30 transition-colors">Create</button>
+              <button type="button" onClick={() => setCreating(null)} className="text-xs py-1 px-2 text-[var(--muted)] hover:text-[var(--text)]">Cancel</button>
+            </div>
           </form>
         )}
 
@@ -384,16 +389,20 @@ export default function ChannelList({
         </div>
 
         {creating === "voice" && (
-          <form onSubmit={handleCreate} className="px-2 mb-1">
+          <form onSubmit={handleCreate} className="px-2 mb-1 space-y-1">
             <input
               type="text"
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
-              placeholder="voice-channel"
+              placeholder="voice-channel (Enter to save)"
               className="w-full text-sm px-2 py-1 bg-[var(--panel-2)] text-[var(--text)] border border-[var(--accent-2)] rounded focus:outline-none"
               autoFocus
-              onBlur={() => { if (!newName.trim()) setCreating(null); }}
+              onKeyDown={(e) => { if (e.key === "Escape") setCreating(null); }}
             />
+            <div className="flex gap-1">
+              <button type="submit" disabled={!newName.trim()} className="flex-1 text-xs py-1 bg-amber-600/30 text-amber-300 rounded hover:bg-amber-600/40 disabled:opacity-30 transition-colors">Create</button>
+              <button type="button" onClick={() => setCreating(null)} className="text-xs py-1 px-2 text-[var(--muted)] hover:text-[var(--text)]">Cancel</button>
+            </div>
           </form>
         )}
 

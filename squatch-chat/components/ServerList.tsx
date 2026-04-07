@@ -39,6 +39,7 @@ export default function ServerList({
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [iconUploading, setIconUploading] = useState<string | null>(null);
+  const [iconMenu, setIconMenu] = useState<{ serverId: string; x: number; y: number } | null>(null);
   const iconInputRef = useRef<HTMLInputElement>(null);
   const iconTargetRef = useRef<string | null>(null);
 
@@ -186,8 +187,7 @@ export default function ServerList({
                 onClick={() => onServerSelect(server)}
                 onContextMenu={(e) => {
                   e.preventDefault();
-                  iconTargetRef.current = server.id;
-                  iconInputRef.current?.click();
+                  setIconMenu({ serverId: server.id, x: e.clientX, y: e.clientY });
                 }}
                 disabled={isUploading}
                 className={`w-12 h-12 flex items-center justify-center text-lg font-bold text-white transition-all duration-200 overflow-hidden ${
@@ -195,7 +195,7 @@ export default function ServerList({
                     ? "bg-[var(--accent-2)] rounded-[16px]"
                     : "bg-[var(--panel-2)] rounded-[24px] hover:rounded-[16px] hover:bg-[var(--accent-2)]"
                 }`}
-                title={`${server.name}${isUploading ? " (uploading...)" : "\n(right-click to change icon)"}`}
+                title={server.name}
               >
                 {isUploading ? (
                   <span className="text-xs opacity-60">...</span>
@@ -208,6 +208,47 @@ export default function ServerList({
             </div>
           );
         })}
+
+        {/* Server icon context menu */}
+        {iconMenu && (
+          <>
+            <div className="fixed inset-0 z-40" onClick={() => setIconMenu(null)} />
+            <div
+              className="fixed z-50 bg-[var(--panel)] border border-[var(--accent-2)]/30 rounded-lg shadow-2xl py-1 w-44"
+              style={{ left: iconMenu.x + 4, top: iconMenu.y }}
+            >
+              <button
+                onClick={() => {
+                  iconTargetRef.current = iconMenu.serverId;
+                  iconInputRef.current?.click();
+                  setIconMenu(null);
+                }}
+                className="w-full px-3 py-2 text-left text-sm text-[var(--text)] hover:bg-[var(--accent-2)]/20 flex items-center gap-2"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="m21 15-5-5L5 21" /></svg>
+                Change Server Icon
+              </button>
+              {servers.find((s) => s.id === iconMenu.serverId)?.icon && (
+                <button
+                  onClick={async () => {
+                    const sid = iconMenu.serverId;
+                    setIconMenu(null);
+                    await fetch(`/api/servers/${sid}`, {
+                      method: "PATCH",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ icon: "" }),
+                    });
+                    window.location.reload();
+                  }}
+                  className="w-full px-3 py-2 text-left text-sm text-red-400 hover:bg-red-600/10 flex items-center gap-2"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18" /><path d="M8 6V4h8v2" /><path d="m19 6-.867 12.142A2 2 0 0 1 16.138 20H7.862a2 2 0 0 1-1.995-1.858L5 6" /></svg>
+                  Remove Icon
+                </button>
+              )}
+            </div>
+          </>
+        )}
 
         <div className="w-8 h-[1px] bg-[var(--accent-2)]/30 my-1" />
 

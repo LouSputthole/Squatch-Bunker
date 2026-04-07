@@ -17,6 +17,7 @@ interface VoicePanelProps {
   channelName: string;
   serverId: string;
   currentUserId: string;
+  currentUsername: string;
   currentUserAvatar?: string | null;
   onParticipantsChange?: (channelId: string, participants: VoiceParticipant[]) => void;
   onDisconnect?: () => void;
@@ -102,6 +103,7 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
   channelName,
   serverId,
   currentUserId,
+  currentUsername,
   currentUserAvatar,
   onParticipantsChange,
   onDisconnect,
@@ -677,13 +679,21 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
 
   // Report state changes to parent — merge speaking state and connection quality into participants
   useEffect(() => {
-    const withSpeaking = participants.map((p) => ({
+    let allParticipants = participants;
+    // Ensure current user always appears in the participant list when joined
+    if (joined && !participants.some((p) => p.userId === currentUserId)) {
+      allParticipants = [
+        ...participants,
+        { userId: currentUserId, username: currentUsername, muted, deafened, camera: cameraOn, avatar: currentUserAvatar } as VoiceParticipant,
+      ];
+    }
+    const withSpeaking = allParticipants.map((p) => ({
       ...p,
       speaking: speakingUsers.has(p.userId),
       connectionQuality: p.userId === currentUserId ? ("good" as const) : (connectionQualities.get(p.userId) ?? "fair"),
     }));
     onStateChange?.({ muted, deafened, reconnecting, participants: withSpeaking, sharing, cameraOn });
-  }, [muted, deafened, reconnecting, participants, speakingUsers, connectionQualities, sharing, cameraOn, onStateChange, currentUserId]);
+  }, [joined, muted, deafened, reconnecting, participants, speakingUsers, connectionQualities, sharing, cameraOn, onStateChange, currentUserId, currentUsername, currentUserAvatar]);
 
   // Participant updates — register BEFORE joining so we don't miss the initial broadcast
   useEffect(() => {

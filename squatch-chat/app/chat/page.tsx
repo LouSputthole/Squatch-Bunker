@@ -303,6 +303,7 @@ function ChatPageInner() {
           channelName={voice.activeVoiceChannel.name}
           serverId={srv.activeServer?.id || ""}
           currentUserId={auth.user.id}
+          currentUsername={auth.user.username}
           currentUserAvatar={auth.user.avatar}
           onParticipantsChange={voice.handleParticipantsChange}
           onDisconnect={voice.leaveVoice}
