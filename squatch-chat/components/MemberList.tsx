@@ -23,6 +23,7 @@ interface Member {
   username: string;
   avatar?: string | null;
   role?: string;
+  statusMessage?: string | null;
 }
 
 interface MemberListProps {
@@ -135,13 +136,18 @@ export default function MemberList({ serverId, currentUserId, currentUserRole, o
           <span
             className={`text-sm truncate ${online ? "text-[var(--text)]" : "text-[var(--muted)]"}`}
             style={roleColor ? { color: roleColor } : undefined}
-            title={`${displayName(m.username)}${roleLabel ? ` (${roleLabel})` : ""}`}
+            title={`${displayName(m.username)}${roleLabel ? ` (${roleLabel})` : ""}${m.statusMessage ? `\n${m.statusMessage}` : ""}`}
           >
             {truncateName(m.username)}
           </span>
           {roleLabel && (
             <span className="text-[10px] px-1 py-0.5 rounded shrink-0" style={{ color: roleColor, backgroundColor: roleColor ? `${roleColor}20` : undefined }}>
               {roleLabel}
+            </span>
+          )}
+          {m.statusMessage && (
+            <span className="text-[10px] text-[var(--muted)] truncate ml-auto max-w-[80px] shrink-0" title={m.statusMessage}>
+              {m.statusMessage}
             </span>
           )}
         </div>
