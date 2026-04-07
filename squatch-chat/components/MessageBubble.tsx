@@ -4,7 +4,177 @@ import { useState } from "react";
 import { displayName, truncateName } from "@/lib/utils";
 import Avatar from "@/components/Avatar";
 
-const QUICK_EMOJIS = ["👍", "❤️", "😂", "🔥", "👀", "🎉"];
+const EMOJI_DATA: { emoji: string; keywords: string }[] = [
+  // Smileys & emotion
+  { emoji: "😀", keywords: "grinning happy smile" },
+  { emoji: "😁", keywords: "grin happy teeth" },
+  { emoji: "😂", keywords: "joy laugh cry tears lol" },
+  { emoji: "🤣", keywords: "rofl laugh rolling floor" },
+  { emoji: "😃", keywords: "smile happy grin open" },
+  { emoji: "😄", keywords: "smile happy grin" },
+  { emoji: "😅", keywords: "sweat smile nervous" },
+  { emoji: "😆", keywords: "grin squint laugh" },
+  { emoji: "😉", keywords: "wink" },
+  { emoji: "😊", keywords: "blush smile happy" },
+  { emoji: "😋", keywords: "yum delicious tongue" },
+  { emoji: "😎", keywords: "cool sunglasses" },
+  { emoji: "😍", keywords: "heart eyes love" },
+  { emoji: "🥰", keywords: "love hearts smiling" },
+  { emoji: "😘", keywords: "kiss blow heart" },
+  { emoji: "🤩", keywords: "star eyes wow amazing" },
+  { emoji: "🥳", keywords: "party celebrate hat" },
+  { emoji: "😏", keywords: "smirk" },
+  { emoji: "😒", keywords: "unamused meh" },
+  { emoji: "🙄", keywords: "eye roll whatever" },
+  { emoji: "😔", keywords: "pensive sad" },
+  { emoji: "😢", keywords: "cry sad tear" },
+  { emoji: "😭", keywords: "sob cry loud" },
+  { emoji: "😤", keywords: "steam frustration" },
+  { emoji: "😡", keywords: "angry mad rage red" },
+  { emoji: "🤬", keywords: "swearing mad" },
+  { emoji: "😱", keywords: "scream shock fear" },
+  { emoji: "😨", keywords: "fearful scared" },
+  { emoji: "🤯", keywords: "exploding head mind blown" },
+  { emoji: "😴", keywords: "sleep tired zzz" },
+  { emoji: "🥱", keywords: "yawn tired" },
+  { emoji: "🤢", keywords: "nauseated sick green" },
+  { emoji: "🤮", keywords: "vomit sick puke" },
+  { emoji: "🥵", keywords: "hot sweating fever" },
+  { emoji: "🥶", keywords: "cold freezing blue face" },
+  { emoji: "😵", keywords: "dizzy spiral" },
+  { emoji: "🤠", keywords: "cowboy hat" },
+  { emoji: "🤡", keywords: "clown circus" },
+  { emoji: "👻", keywords: "ghost boo halloween" },
+  { emoji: "💀", keywords: "skull dead death" },
+  { emoji: "🤖", keywords: "robot" },
+  { emoji: "😺", keywords: "cat grin happy" },
+  { emoji: "💩", keywords: "poop shit" },
+  // Hand gestures & people
+  { emoji: "👍", keywords: "thumbs up like good ok" },
+  { emoji: "👎", keywords: "thumbs down dislike no" },
+  { emoji: "👌", keywords: "ok perfect" },
+  { emoji: "✌️", keywords: "peace victory two fingers" },
+  { emoji: "🤞", keywords: "crossed fingers luck" },
+  { emoji: "🤟", keywords: "love you hand" },
+  { emoji: "🤘", keywords: "rock metal horns" },
+  { emoji: "👏", keywords: "clap applause" },
+  { emoji: "🙌", keywords: "raise hands celebration" },
+  { emoji: "🤝", keywords: "handshake deal" },
+  { emoji: "🙏", keywords: "pray thanks please folded hands" },
+  { emoji: "💪", keywords: "flex strong muscle" },
+  { emoji: "👀", keywords: "eyes looking see" },
+  { emoji: "👋", keywords: "wave hello hi bye" },
+  { emoji: "🤙", keywords: "call me shaka hang loose" },
+  { emoji: "☝️", keywords: "point up one" },
+  { emoji: "👉", keywords: "point right" },
+  { emoji: "👈", keywords: "point left" },
+  { emoji: "🫡", keywords: "salute respect" },
+  { emoji: "🫶", keywords: "heart hands love" },
+  { emoji: "🧠", keywords: "brain smart think" },
+  { emoji: "👁️", keywords: "eye" },
+  // Hearts & symbols
+  { emoji: "❤️", keywords: "heart love red" },
+  { emoji: "🧡", keywords: "heart orange love" },
+  { emoji: "💛", keywords: "heart yellow love" },
+  { emoji: "💚", keywords: "heart green love" },
+  { emoji: "💙", keywords: "heart blue love" },
+  { emoji: "💜", keywords: "heart purple love" },
+  { emoji: "🖤", keywords: "heart black love" },
+  { emoji: "🤍", keywords: "heart white love" },
+  { emoji: "💔", keywords: "broken heart" },
+  { emoji: "💕", keywords: "two hearts love" },
+  { emoji: "💯", keywords: "hundred percent perfect" },
+  { emoji: "💢", keywords: "anger symbol" },
+  { emoji: "💥", keywords: "explosion boom" },
+  { emoji: "✨", keywords: "sparkles stars glitter" },
+  { emoji: "🎉", keywords: "party tada confetti celebrate" },
+  { emoji: "🎊", keywords: "confetti celebrate" },
+  { emoji: "🎈", keywords: "balloon party" },
+  { emoji: "🔥", keywords: "fire hot lit flame" },
+  { emoji: "⚡", keywords: "lightning bolt zap" },
+  { emoji: "❄️", keywords: "snowflake cold winter" },
+  { emoji: "🌈", keywords: "rainbow colorful" },
+  { emoji: "⭐", keywords: "star yellow" },
+  { emoji: "🌟", keywords: "glowing star" },
+  { emoji: "💫", keywords: "dizzy star" },
+  { emoji: "🌙", keywords: "moon night" },
+  { emoji: "☀️", keywords: "sun sunny warm" },
+  // Nature & animals
+  { emoji: "🐶", keywords: "dog puppy" },
+  { emoji: "🐱", keywords: "cat kitten" },
+  { emoji: "🐭", keywords: "mouse" },
+  { emoji: "🐻", keywords: "bear" },
+  { emoji: "🐼", keywords: "panda" },
+  { emoji: "🦊", keywords: "fox" },
+  { emoji: "🐺", keywords: "wolf" },
+  { emoji: "🦁", keywords: "lion" },
+  { emoji: "🐸", keywords: "frog" },
+  { emoji: "🐧", keywords: "penguin" },
+  { emoji: "🦅", keywords: "eagle bird" },
+  { emoji: "🦋", keywords: "butterfly" },
+  { emoji: "🐝", keywords: "bee honey" },
+  { emoji: "🌸", keywords: "cherry blossom flower" },
+  { emoji: "🌿", keywords: "leaf plant green" },
+  { emoji: "🌲", keywords: "tree pine evergreen" },
+  { emoji: "🍄", keywords: "mushroom" },
+  // Food & drink
+  { emoji: "🍕", keywords: "pizza" },
+  { emoji: "🍔", keywords: "burger hamburger" },
+  { emoji: "🍟", keywords: "fries french" },
+  { emoji: "🌮", keywords: "taco" },
+  { emoji: "🌯", keywords: "burrito wrap" },
+  { emoji: "🍜", keywords: "noodle ramen" },
+  { emoji: "🍣", keywords: "sushi" },
+  { emoji: "🍰", keywords: "cake slice" },
+  { emoji: "🍩", keywords: "donut doughnut" },
+  { emoji: "🍪", keywords: "cookie" },
+  { emoji: "🍫", keywords: "chocolate" },
+  { emoji: "🍿", keywords: "popcorn movie" },
+  { emoji: "☕", keywords: "coffee hot drink" },
+  { emoji: "🧋", keywords: "bubble tea boba" },
+  { emoji: "🍺", keywords: "beer mug" },
+  { emoji: "🥂", keywords: "champagne clink cheers" },
+  { emoji: "🍷", keywords: "wine red" },
+  // Objects & activities
+  { emoji: "🎮", keywords: "video game controller" },
+  { emoji: "🕹️", keywords: "joystick game" },
+  { emoji: "🎵", keywords: "music note song" },
+  { emoji: "🎶", keywords: "music notes" },
+  { emoji: "🎸", keywords: "guitar music" },
+  { emoji: "🎤", keywords: "microphone sing" },
+  { emoji: "📷", keywords: "camera photo" },
+  { emoji: "📱", keywords: "phone mobile" },
+  { emoji: "💻", keywords: "laptop computer" },
+  { emoji: "🖥️", keywords: "desktop computer monitor" },
+  { emoji: "⌨️", keywords: "keyboard type" },
+  { emoji: "🖱️", keywords: "computer mouse" },
+  { emoji: "📚", keywords: "books read study" },
+  { emoji: "✏️", keywords: "pencil write" },
+  { emoji: "📝", keywords: "memo write note" },
+  { emoji: "💡", keywords: "lightbulb idea" },
+  { emoji: "🔑", keywords: "key lock" },
+  { emoji: "🔒", keywords: "lock secure" },
+  { emoji: "🔓", keywords: "unlock open" },
+  { emoji: "🛠️", keywords: "tools wrench hammer" },
+  { emoji: "⚙️", keywords: "gear settings cog" },
+  { emoji: "🚀", keywords: "rocket launch space" },
+  { emoji: "🛸", keywords: "ufo alien" },
+  { emoji: "🏆", keywords: "trophy win winner" },
+  { emoji: "🥇", keywords: "gold medal first" },
+  { emoji: "🎯", keywords: "target bullseye" },
+  { emoji: "🎲", keywords: "dice game" },
+  { emoji: "🃏", keywords: "card joker" },
+  { emoji: "♟️", keywords: "chess pawn" },
+  { emoji: "⚽", keywords: "soccer football" },
+  { emoji: "🏀", keywords: "basketball" },
+  { emoji: "🎃", keywords: "halloween pumpkin jack" },
+  { emoji: "🎄", keywords: "christmas tree" },
+  { emoji: "💣", keywords: "bomb explosion" },
+  { emoji: "🔮", keywords: "crystal ball magic" },
+  { emoji: "💎", keywords: "gem diamond" },
+  { emoji: "💰", keywords: "money bag rich" },
+  { emoji: "🪙", keywords: "coin money" },
+];
 
 // URL regex — matches http(s) links
 const URL_REGEX = /https?:\/\/[^\s<]+[^\s<.,;:!?'")\]]/g;
@@ -89,6 +259,7 @@ export default function MessageBubble({ message, isOwn, currentUserId, onEdit, o
   const [editContent, setEditContent] = useState(message.content);
   const [showActions, setShowActions] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [emojiSearch, setEmojiSearch] = useState("");
 
   const shown = truncateName(message.author.username, 20);
 
@@ -122,13 +293,21 @@ export default function MessageBubble({ message, isOwn, currentUserId, onEdit, o
   function handleReact(emoji: string) {
     onReact?.(message.id, emoji);
     setShowEmojiPicker(false);
+    setEmojiSearch("");
   }
+
+  const filteredEmojis = emojiSearch.trim()
+    ? EMOJI_DATA.filter(({ emoji, keywords }) =>
+        keywords.includes(emojiSearch.toLowerCase()) ||
+        emoji === emojiSearch
+      )
+    : EMOJI_DATA;
 
   return (
     <div
       className="flex gap-3 py-1 group hover:bg-[var(--panel)]/30 px-1 rounded relative"
       onMouseEnter={() => setShowActions(true)}
-      onMouseLeave={() => { setShowActions(false); setShowEmojiPicker(false); }}
+      onMouseLeave={() => { setShowActions(false); setShowEmojiPicker(false); setEmojiSearch(""); }}
     >
       <Avatar
         username={message.author.username}
@@ -234,19 +413,42 @@ export default function MessageBubble({ message, isOwn, currentUserId, onEdit, o
         </div>
       )}
 
-      {/* Quick emoji picker */}
+      {/* Searchable emoji picker */}
       {showEmojiPicker && (
-        <div className="absolute right-1 top-7 bg-[var(--panel)] border border-[var(--accent-2)]/30 rounded-lg px-2 py-1.5 shadow-xl z-20 flex gap-1">
-          {QUICK_EMOJIS.map((emoji) => (
-            <button
-              key={emoji}
-              onClick={() => handleReact(emoji)}
-              className="text-lg hover:scale-125 transition-transform px-0.5"
-              title={emoji}
-            >
-              {emoji}
-            </button>
-          ))}
+        <div
+          className="absolute right-1 top-7 bg-[var(--panel)] border border-[var(--accent-2)]/30 rounded-lg shadow-xl z-20 flex flex-col"
+          style={{ width: 272 }}
+          onMouseLeave={(e) => e.stopPropagation()}
+        >
+          <div className="px-2 pt-2 pb-1">
+            <input
+              type="text"
+              value={emojiSearch}
+              onChange={(e) => setEmojiSearch(e.target.value)}
+              placeholder="Search emoji..."
+              autoFocus
+              className="w-full text-xs px-2 py-1 bg-[var(--panel-2)] text-[var(--text)] border border-[var(--accent-2)]/50 rounded focus:outline-none focus:border-[var(--accent-2)]"
+              onMouseDown={(e) => e.stopPropagation()}
+            />
+          </div>
+          <div className="overflow-y-auto px-1 pb-1.5" style={{ maxHeight: 200 }}>
+            {filteredEmojis.length === 0 ? (
+              <p className="text-xs text-[var(--muted)] text-center py-3">No results</p>
+            ) : (
+              <div className="grid grid-cols-8 gap-0.5">
+                {filteredEmojis.map(({ emoji }) => (
+                  <button
+                    key={emoji}
+                    onClick={() => handleReact(emoji)}
+                    className="text-lg p-1 rounded hover:bg-[var(--panel-2)] transition-colors leading-none"
+                    title={emoji}
+                  >
+                    {emoji}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>
