@@ -95,3 +95,10 @@ body::before {
 .animate-slide-down {
   animation: slide-down 0.3s ease-out forwards;
 }
+
+/* Mobile safe area padding for devices with notches/home indicators */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
