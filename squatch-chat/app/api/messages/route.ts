@@ -11,6 +11,7 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const channelId = searchParams.get("channelId");
   const parentId = searchParams.get("parentId");
+  const pinned = searchParams.get("pinned");
   const cursor = searchParams.get("cursor");
   const limit = 50;
 
@@ -44,7 +45,11 @@ export async function GET(request: Request) {
     }
 
     const messages = await prisma.message.findMany({
-      where: { channelId, parentMessageId: parentId ?? null },
+      where: {
+        channelId,
+        ...(pinned === "true" ? { pinned: true } : {}),
+        parentMessageId: pinned === "true" ? null : (parentId ?? null),
+      },
       include: {
         author: { select: { id: true, username: true, avatar: true } },
         reactions: {
