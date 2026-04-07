@@ -5,6 +5,13 @@ import { displayName, truncateName } from "@/lib/utils";
 import Avatar from "@/components/Avatar";
 import ProfileCard from "@/components/ProfileCard";
 import ImageLightbox from "@/components/ImageLightbox";
+import { LinkPreview } from "@/components/LinkPreview";
+
+// URL extraction util — returns at most 1 unique URL for preview
+function extractUrls(text: string): string[] {
+  const urlRegex = /https?:\/\/[^\s<>"]+/g;
+  return [...new Set(text.match(urlRegex) ?? [])].slice(0, 1);
+}
 
 const EMOJI_DATA: { emoji: string; keywords: string }[] = [
   // Smileys & emotion
@@ -412,6 +419,9 @@ export default function MessageBubble({ message, isOwn, currentUserId, canPin, o
             {message.content && (
               <div className="text-[var(--text)] text-sm break-words">{renderContent(message.content)}</div>
             )}
+            {message.content && extractUrls(message.content).map((url) => (
+              <LinkPreview key={url} url={url} />
+            ))}
             {message.attachmentUrl && (
               <Attachment
                 url={message.attachmentUrl}
@@ -484,6 +494,16 @@ export default function MessageBubble({ message, isOwn, currentUserId, canPin, o
           >
             ↩
           </button>
+          {message.content && (
+            <button
+              onClick={handleTranslate}
+              disabled={translating}
+              title={translated ? "Hide translation" : "Translate to English"}
+              className="text-xs text-[var(--muted)] hover:text-[var(--text)] px-1.5 py-0.5 disabled:opacity-50"
+            >
+              {translating ? "..." : "🌐"}
+            </button>
+          )}
           {canPin && (
             <button
               onClick={() => onPin?.(message.id, !message.pinned)}
