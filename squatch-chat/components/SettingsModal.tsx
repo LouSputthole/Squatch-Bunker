@@ -191,19 +191,21 @@ export default function SettingsModal({ open, onClose, username, currentAvatar, 
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center" onClick={onClose} role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">
       <div
         className="bg-[var(--panel)] rounded-lg shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col border border-[var(--accent-2)]/30"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--accent-2)]/30">
-          <h2 className="text-lg font-bold text-[var(--text)]">Settings</h2>
+          <h2 id="settings-modal-title" className="text-lg font-bold text-[var(--text)]">Settings</h2>
           <button
             onClick={onClose}
             className="text-[var(--muted)] hover:text-[var(--text)] text-xl leading-none"
+            aria-label="Close settings"
+            autoFocus
           >
-            x
+            ×
           </button>
         </div>
 
@@ -405,6 +407,8 @@ export default function SettingsModal({ open, onClose, username, currentAvatar, 
                       messageNotifications ? "bg-[var(--accent)]" : "bg-[var(--panel-2)] border border-[var(--accent-2)]/30"
                     }`}
                     title={messageNotifications ? "Disable message sounds" : "Enable message sounds"}
+                    aria-label={messageNotifications ? "Disable message notification sounds" : "Enable message notification sounds"}
+                    aria-pressed={messageNotifications}
                   >
                     <div className={`w-4 h-4 rounded-full bg-white absolute top-0.5 transition-transform ${
                       messageNotifications ? "translate-x-5" : "translate-x-0.5"

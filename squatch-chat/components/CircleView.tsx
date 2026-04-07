@@ -261,8 +261,8 @@ export default function CircleView({ participants, currentUserId, onContextMenu 
                   {/* Status badges */}
                   {p.muted && <MicOffDot />}
                   {p.deafened && <DeafDot />}
-                  {!isSelf && p.connectionQuality && (
-                    <div className="flex items-center justify-center mt-0.5">
+                  {!isSelf && p.connectionQuality && p.connectionQuality !== "good" && (
+                    <div className="absolute -top-1 -left-1 z-10">
                       <ConnectionQualityIcon quality={p.connectionQuality} pingMs={p.pingMs} />
                     </div>
                   )}
@@ -291,6 +291,7 @@ export default function CircleView({ participants, currentUserId, onContextMenu 
                 >
                   {isSelf ? "You" : displayName(p.username)}
                 </span>
+
               </div>
             </div>
           );

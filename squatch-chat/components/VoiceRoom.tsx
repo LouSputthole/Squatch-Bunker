@@ -5,6 +5,7 @@ import { displayName } from "@/lib/utils";
 import Avatar from "@/components/Avatar";
 import CircleView from "@/components/CircleView";
 import EmberReactions from "@/components/EmberReactions";
+import ConnectionQualityIcon from "@/components/ConnectionQualityIcon";
 import type { ScreenShareInfo } from "@/components/VoicePanel";
 
 interface VoiceParticipant {
@@ -14,7 +15,8 @@ interface VoiceParticipant {
   deafened?: boolean;
   speaking?: boolean;
   avatar?: string | null;
-  connectionQuality?: "good" | "fair" | "poor";
+  connectionQuality?: "good" | "fair" | "poor" | "unknown";
+  pingMs?: number;
 }
 
 interface VoiceChannel {
@@ -364,6 +366,14 @@ export default function VoiceRoom({
         )}
       </div>
 
+      {/* Reconnecting banner */}
+      {reconnecting && (
+        <div className="flex items-center justify-center gap-2 px-4 py-2 bg-yellow-500/15 border-b border-yellow-500/30 text-yellow-300 text-sm font-medium shrink-0">
+          <span>&#9889;</span>
+          <span>Reconnecting to voice...</span>
+        </div>
+      )}
+
       {/* Ember Reactions overlay */}
       <EmberReactions channelId={channelId} />
 
@@ -431,6 +441,11 @@ export default function VoiceRoom({
                   />
                   {p.speaking && !p.muted && (
                     <div className="absolute inset-[-2px] rounded-full border-2 border-amber-400/60" />
+                  )}
+                  {!isSelf && p.connectionQuality && (
+                    <div className="absolute -top-1 -right-1 bg-[#1a1a1e]/80 rounded px-0.5">
+                      <ConnectionQualityIcon quality={p.connectionQuality} pingMs={p.pingMs} />
+                    </div>
                   )}
                 </div>
                 <span className={`text-[10px] truncate max-w-[50px] ${p.speaking && !p.muted ? "text-amber-300" : "text-[var(--muted)]"}`}>
