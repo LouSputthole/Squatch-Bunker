@@ -50,7 +50,11 @@ export default function EmberReactions({ channelId }: EmberReactionsProps) {
   useEffect(() => {
     const interval = setInterval(() => {
       const now = Date.now();
-      setEmbers((prev) => prev.filter((e) => now - e.startTime < 3000));
+      setEmbers((prev) => {
+        const filtered = prev.filter((e) => now - e.startTime < 3000);
+        if (filtered.length === prev.length) return prev; // no change, skip re-render
+        return filtered;
+      });
     }, 500);
     return () => clearInterval(interval);
   }, []);
