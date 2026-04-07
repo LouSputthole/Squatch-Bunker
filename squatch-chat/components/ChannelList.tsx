@@ -277,8 +277,10 @@ export default function ChannelList({
             onClick={() => { setShowServerSettings((v) => !v); setRenameValue(serverName); setSettingsError(""); }}
             className="text-[var(--muted)] hover:text-[var(--text)] opacity-0 group-hover/header:opacity-100 transition-opacity shrink-0 ml-2"
             title="Server Settings"
+            aria-label="Server settings"
+            aria-expanded={showServerSettings}
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <circle cx="12" cy="12" r="3" />
               <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
             </svg>
@@ -293,9 +295,10 @@ export default function ChannelList({
             <p className="text-xs text-[var(--danger)]">{settingsError}</p>
           )}
           <form onSubmit={handleRename} className="space-y-1">
-            <label className="text-xs font-semibold text-[var(--muted)] uppercase">Rename Server</label>
+            <label htmlFor="rename-server-input" className="text-xs font-semibold text-[var(--muted)] uppercase">Rename Server</label>
             <div className="flex gap-1">
               <input
+                id="rename-server-input"
                 type="text"
                 value={renameValue}
                 onChange={(e) => setRenameValue(e.target.value)}
@@ -340,8 +343,10 @@ export default function ChannelList({
                 <button
                   onClick={() => toggleCategory(cat)}
                   className="flex items-center gap-1 text-xs font-semibold text-[var(--muted)] uppercase tracking-wide hover:text-[var(--text)] transition-colors"
+                  aria-expanded={!isCollapsed}
+                  aria-label={`${isCollapsed ? "Expand" : "Collapse"} ${label} category`}
                 >
-                  <span className="text-[8px]">{isCollapsed ? "▶" : "▼"}</span>
+                  <span className="text-[8px]" aria-hidden="true">{isCollapsed ? "▶" : "▼"}</span>
                   {label}
                 </button>
                 {cat === "" && (
@@ -349,48 +354,56 @@ export default function ChannelList({
                     onClick={() => setCreating("text")}
                     className="text-[var(--muted)] hover:text-[var(--text)] text-lg leading-none"
                     title="Create Text Channel"
+                    aria-label="Create channel"
                   >
                     +
                   </button>
                 )}
               </div>
-              {!isCollapsed && catChannels.map((channel) => {
-                const unread = unreadCounts?.get(channel.id) || 0;
-                const muted = isMuted(channel.id);
-                const showBadge = !muted && unread > 0;
-                return (
-                  <button
-                    key={channel.id}
-                    onClick={() => onChannelSelect(channel)}
-                    onContextMenu={(e) => {
-                      e.preventDefault();
-                      toggleMute(channel.id);
-                    }}
-                    title={channel.description || undefined}
-                    draggable={isAdminOrOwner}
-                    onDragStart={isAdminOrOwner ? () => setDraggingId(channel.id) : undefined}
-                    onDragOver={isAdminOrOwner ? (e) => { e.preventDefault(); setDragOverId(channel.id); } : undefined}
-                    onDragEnd={isAdminOrOwner ? () => { setDraggingId(null); setDragOverId(null); } : undefined}
-                    onDrop={isAdminOrOwner ? () => handleChannelDrop(channel.id) : undefined}
-                    className={`w-full text-left px-2 py-1 rounded text-sm flex items-center gap-1.5 ${
-                      activeChannelId === channel.id
-                        ? "bg-[var(--panel-2)] text-[var(--text)]"
-                        : showBadge
-                          ? "text-[var(--text)] font-semibold hover:bg-[var(--panel-2)]/50"
-                          : "text-[var(--muted)] hover:bg-[var(--panel-2)]/50 hover:text-[var(--text)]"
-                    } ${dragOverId === channel.id && draggingId !== channel.id ? "opacity-50" : ""}`}
-                  >
-                    <HashIcon />
-                    <span className="flex-1 truncate">{channel.name}</span>
-                    {muted && <MuteIcon />}
-                    {showBadge && (
-                      <span className="ml-auto bg-[var(--accent)] text-[var(--bg)] text-xs font-bold rounded-full min-w-[1.25rem] h-5 flex items-center justify-center px-1">
-                        {unread > 99 ? "99+" : unread}
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
+              {!isCollapsed && (
+                <ul role="list" aria-label={`${label} channels`}>
+                  {catChannels.map((channel) => {
+                    const unread = unreadCounts?.get(channel.id) || 0;
+                    const muted = isMuted(channel.id);
+                    const showBadge = !muted && unread > 0;
+                    return (
+                      <li key={channel.id} role="listitem">
+                        <button
+                          onClick={() => onChannelSelect(channel)}
+                          onContextMenu={(e) => {
+                            e.preventDefault();
+                            toggleMute(channel.id);
+                          }}
+                          title={channel.description || undefined}
+                          aria-label={`#${channel.name}${unread > 0 && !muted ? `, ${unread} unread` : ""}${muted ? ", muted" : ""}`}
+                          aria-current={activeChannelId === channel.id ? "page" : undefined}
+                          draggable={isAdminOrOwner}
+                          onDragStart={isAdminOrOwner ? () => setDraggingId(channel.id) : undefined}
+                          onDragOver={isAdminOrOwner ? (e) => { e.preventDefault(); setDragOverId(channel.id); } : undefined}
+                          onDragEnd={isAdminOrOwner ? () => { setDraggingId(null); setDragOverId(null); } : undefined}
+                          onDrop={isAdminOrOwner ? () => handleChannelDrop(channel.id) : undefined}
+                          className={`w-full text-left px-2 py-1 rounded text-sm flex items-center gap-1.5 ${
+                            activeChannelId === channel.id
+                              ? "bg-[var(--panel-2)] text-[var(--text)]"
+                              : showBadge
+                                ? "text-[var(--text)] font-semibold hover:bg-[var(--panel-2)]/50"
+                                : "text-[var(--muted)] hover:bg-[var(--panel-2)]/50 hover:text-[var(--text)]"
+                          } ${dragOverId === channel.id && draggingId !== channel.id ? "opacity-50" : ""}`}
+                        >
+                          <HashIcon />
+                          <span className="flex-1 truncate">{channel.name}</span>
+                          {muted && <MuteIcon />}
+                          {showBadge && (
+                            <span className="ml-auto bg-[var(--accent)] text-[var(--bg)] text-xs font-bold rounded-full min-w-[1.25rem] h-5 flex items-center justify-center px-1" aria-label={`${unread} unread messages`}>
+                              {unread > 99 ? "99+" : unread}
+                            </span>
+                          )}
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
             </div>
           );
         })}
@@ -403,6 +416,7 @@ export default function ChannelList({
               onClick={() => setCreating("text")}
               className="text-[var(--muted)] hover:text-[var(--text)] text-lg leading-none"
               title="Create Text Channel"
+            aria-label="Create channel"
             >
               +
             </button>
@@ -410,8 +424,10 @@ export default function ChannelList({
         )}
 
         {creating === "text" && (
-          <form onSubmit={handleCreate} className="px-2 mb-1 space-y-1">
+          <form onSubmit={handleCreate} className="px-2 mb-1 space-y-1" aria-label="Create text channel">
+            <label htmlFor="new-text-channel-name" className="sr-only">Channel name</label>
             <input
+              id="new-text-channel-name"
               type="text"
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
@@ -420,7 +436,9 @@ export default function ChannelList({
               autoFocus
               onKeyDown={(e) => { if (e.key === "Escape") setCreating(null); }}
             />
+            <label htmlFor="new-text-channel-category" className="sr-only">Category (optional)</label>
             <input
+              id="new-text-channel-category"
               type="text"
               value={newCategory}
               onChange={(e) => setNewCategory(e.target.value)}
@@ -444,14 +462,17 @@ export default function ChannelList({
             onClick={() => setCreating("voice")}
             className="text-[var(--muted)] hover:text-[var(--text)] text-lg leading-none"
             title="Create Voice Channel"
+            aria-label="Create voice channel"
           >
             +
           </button>
         </div>
 
         {creating === "voice" && (
-          <form onSubmit={handleCreate} className="px-2 mb-1 space-y-1">
+          <form onSubmit={handleCreate} className="px-2 mb-1 space-y-1" aria-label="Create voice channel">
+            <label htmlFor="new-voice-channel-name" className="sr-only">Voice channel name</label>
             <input
+              id="new-voice-channel-name"
               type="text"
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
@@ -473,55 +494,60 @@ export default function ChannelList({
           </div>
         )}
 
-        {voiceChannels.map((channel) => {
-          const isActive = activeVoiceChannelId === channel.id;
-          const participants = localVoiceParticipants.get(channel.id) || [];
-          return (
-            <div key={channel.id}>
-              <button
-                onClick={() => {
-                  if (isActive) {
-                    onVoiceLeave?.();
-                  } else {
-                    onVoiceJoin?.(channel);
-                  }
-                }}
-                className={`w-full text-left px-2 py-1 rounded text-sm flex items-center gap-1.5 ${
-                  isActive
-                    ? "bg-green-600/20 text-green-400"
-                    : "text-[var(--muted)] hover:bg-[var(--panel-2)]/50 hover:text-[var(--text)]"
-                }`}
-              >
-                <SpeakerIcon />
-                <span className="flex-1 truncate">{channel.name}</span>
-                {participants.length > 0 && (
-                  <span className="text-xs text-[var(--muted)]">{participants.length}</span>
-                )}
-              </button>
+        <ul role="list" aria-label="Voice channels">
+          {voiceChannels.map((channel) => {
+            const isActive = activeVoiceChannelId === channel.id;
+            const participants = localVoiceParticipants.get(channel.id) || [];
+            return (
+              <li key={channel.id} role="listitem">
+                <button
+                  onClick={() => {
+                    if (isActive) {
+                      onVoiceLeave?.();
+                    } else {
+                      onVoiceJoin?.(channel);
+                    }
+                  }}
+                  aria-label={isActive ? `Leave ${channel.name} voice channel` : `Join ${channel.name} voice channel`}
+                  aria-pressed={isActive}
+                  className={`w-full text-left px-2 py-1 rounded text-sm flex items-center gap-1.5 ${
+                    isActive
+                      ? "bg-green-600/20 text-green-400"
+                      : "text-[var(--muted)] hover:bg-[var(--panel-2)]/50 hover:text-[var(--text)]"
+                  }`}
+                >
+                  <SpeakerIcon />
+                  <span className="flex-1 truncate">{channel.name}</span>
+                  {participants.length > 0 && (
+                    <span className="text-xs text-[var(--muted)]" aria-label={`${participants.length} participants`}>{participants.length}</span>
+                  )}
+                </button>
 
-              {/* Show participants in voice channel */}
-              {participants.length > 0 && (
-                <div className="pl-7 pr-2">
-                  {participants.map((p) => (
-                    <div
-                      key={p.userId}
-                      className={`flex items-center gap-1.5 py-0.5 text-xs ${
-                        p.userId === currentUserId ? "text-[var(--accent)]" : "text-[var(--text)]"
-                      }`}
-                    >
-                      <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                        p.muted ? "bg-red-400" : "bg-green-500"
-                      }`} />
-                      <span className="truncate">{displayName(p.username)}</span>
-                      {p.muted && <MicOffIcon />}
-                      {p.deafened && <HeadphonesOffIcon />}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          );
-        })}
+                {/* Show participants in voice channel */}
+                {participants.length > 0 && (
+                  <ul role="list" aria-label={`Participants in ${channel.name}`} className="pl-7 pr-2">
+                    {participants.map((p) => (
+                      <li
+                        key={p.userId}
+                        role="listitem"
+                        className={`flex items-center gap-1.5 py-0.5 text-xs ${
+                          p.userId === currentUserId ? "text-[var(--accent)]" : "text-[var(--text)]"
+                        }`}
+                      >
+                        <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                          p.muted ? "bg-red-400" : "bg-green-500"
+                        }`} aria-hidden="true" />
+                        <span className="truncate">{displayName(p.username)}</span>
+                        {p.muted && <MicOffIcon />}
+                        {p.deafened && <HeadphonesOffIcon />}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </li>
+            );
+          })}
+        </ul>
       </div>
     </div>
   );
