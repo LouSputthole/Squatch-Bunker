@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { getSocket } from "@/lib/socket";
 import { displayName } from "@/lib/utils";
+import { useMutedChannels } from "@/hooks/useMutedChannels";
 
 interface Channel {
   id: string;
@@ -10,6 +11,7 @@ interface Channel {
   type?: string;
   category?: string | null;
   description?: string;
+  position?: number;
 }
 
 interface VoiceParticipant {
@@ -50,6 +52,14 @@ function SpeakerIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-[var(--accent-2)]">
       <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" /><path d="M15.54 8.46a5 5 0 0 1 0 7.07" /><path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+    </svg>
+  );
+}
+
+function MuteIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" className="text-[var(--muted)] opacity-50 shrink-0">
+      <path d="M3.27 3L2 4.27l9 9V21l4-4h4l1 1V3.27L3.27 3zM19 15.73L4.27 1 3 2.27l16 16 .73-.73L19 15.73z"/>
     </svg>
   );
 }
@@ -98,6 +108,15 @@ export default function ChannelList({
   const [localVoiceParticipants, setLocalVoiceParticipants] = useState<Map<string, VoiceParticipant[]>>(
     voiceParticipants || new Map()
   );
+  const { toggleMute, isMuted } = useMutedChannels();
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [dragOverId, setDragOverId] = useState<string | null>(null);
+  const [localChannels, setLocalChannels] = useState<Channel[]>(channels);
+
+  // Sync localChannels when parent channels prop changes
+  useEffect(() => {
+    setLocalChannels(channels);
+  }, [channels]);
 
   // Sync with parent prop
   useEffect(() => {
@@ -202,8 +221,11 @@ export default function ChannelList({
     });
   }
 
-  const textChannels = channels.filter((c) => !c.type || c.type === "text");
-  const voiceChannels = channels.filter((c) => c.type === "voice");
+  const isAdminOrOwner = currentUserRole === "owner" || currentUserRole === "admin";
+
+  const sortedLocalChannels = [...localChannels].sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
+  const textChannels = sortedLocalChannels.filter((c) => !c.type || c.type === "text");
+  const voiceChannels = sortedLocalChannels.filter((c) => c.type === "voice");
 
   // Group text channels by category
   const categoryMap = new Map<string, Channel[]>();
@@ -218,6 +240,26 @@ export default function ChannelList({
     if (b === "") return -1;
     return a.localeCompare(b);
   });
+
+  async function handleChannelDrop(targetChannelId: string) {
+    if (!draggingId || draggingId === targetChannelId) return;
+    const currentOrder = sortedLocalChannels.map((c) => c.id);
+    const fromIdx = currentOrder.indexOf(draggingId);
+    const toIdx = currentOrder.indexOf(targetChannelId);
+    const newOrder = [...currentOrder];
+    newOrder.splice(fromIdx, 1);
+    newOrder.splice(toIdx, 0, draggingId);
+    // Optimistic local update
+    const reordered = newOrder.map((id) => localChannels.find((c) => c.id === id)!);
+    setLocalChannels(reordered);
+    setDraggingId(null);
+    setDragOverId(null);
+    await fetch("/api/channels/reorder", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ channelIds: newOrder, serverId }),
+    });
+  }
 
   return (
     <div className="w-60 bg-[var(--panel)] flex flex-col border-r border-[var(--accent-2)]/30 shrink-0">
@@ -307,22 +349,34 @@ export default function ChannelList({
               </div>
               {!isCollapsed && catChannels.map((channel) => {
                 const unread = unreadCounts?.get(channel.id) || 0;
+                const muted = isMuted(channel.id);
+                const showBadge = !muted && unread > 0;
                 return (
                   <button
                     key={channel.id}
                     onClick={() => onChannelSelect(channel)}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      toggleMute(channel.id);
+                    }}
                     title={channel.description || undefined}
+                    draggable={isAdminOrOwner}
+                    onDragStart={isAdminOrOwner ? () => setDraggingId(channel.id) : undefined}
+                    onDragOver={isAdminOrOwner ? (e) => { e.preventDefault(); setDragOverId(channel.id); } : undefined}
+                    onDragEnd={isAdminOrOwner ? () => { setDraggingId(null); setDragOverId(null); } : undefined}
+                    onDrop={isAdminOrOwner ? () => handleChannelDrop(channel.id) : undefined}
                     className={`w-full text-left px-2 py-1 rounded text-sm flex items-center gap-1.5 ${
                       activeChannelId === channel.id
                         ? "bg-[var(--panel-2)] text-[var(--text)]"
-                        : unread > 0
+                        : showBadge
                           ? "text-[var(--text)] font-semibold hover:bg-[var(--panel-2)]/50"
                           : "text-[var(--muted)] hover:bg-[var(--panel-2)]/50 hover:text-[var(--text)]"
-                    }`}
+                    } ${dragOverId === channel.id && draggingId !== channel.id ? "opacity-50" : ""}`}
                   >
                     <HashIcon />
                     <span className="flex-1 truncate">{channel.name}</span>
-                    {unread > 0 && (
+                    {muted && <MuteIcon />}
+                    {showBadge && (
                       <span className="ml-auto bg-[var(--accent)] text-[var(--bg)] text-xs font-bold rounded-full min-w-[1.25rem] h-5 flex items-center justify-center px-1">
                         {unread > 99 ? "99+" : unread}
                       </span>

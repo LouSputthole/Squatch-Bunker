@@ -7,7 +7,7 @@
     "dev:realtime": "tsx watch realtime/server.ts",
     "dev:full": "bash ./scripts/dev-full.sh",
     "postinstall": "bash scripts/postinstall.sh || prisma generate",
-    "build": "prisma generate && next build",
+    "build": "bash scripts/build.sh",
     "start": "next start",
     "lint": "eslint",
     "setup": "bash ./scripts/setup.sh",

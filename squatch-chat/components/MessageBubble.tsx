@@ -508,6 +508,16 @@ export default function MessageBubble({ message, isOwn, currentUserId, authorCol
           >
             ↩
           </button>
+          {message.content && (
+            <button
+              onClick={handleTranslate}
+              disabled={translating}
+              title={translated ? "Hide translation" : "Translate to English"}
+              className="text-xs text-[var(--muted)] hover:text-[var(--text)] px-1.5 py-0.5 disabled:opacity-50"
+            >
+              {translating ? "..." : "🌐"}
+            </button>
+          )}
           {canPin && (
             <button
               onClick={() => onPin?.(message.id, !message.pinned)}

@@ -1,36 +1,47 @@
-import { PrismaClient as PrismaClientPg } from "@/generated/prisma/client";
-import { PrismaClient as PrismaClientSqlite } from "@/generated/prisma-sqlite/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { PrismaClient } from "@/generated/prisma/client";
 
 type DbType = "postgres" | "sqlite";
 
+/**
+ * Returns true when DATABASE_URL is unset or starts with "file:",
+ * indicating SQLite should be used instead of PostgreSQL.
+ */
+export function isSQLite(): boolean {
+  const url = process.env.DATABASE_URL ?? "";
+  return !url || url.startsWith("file:");
+}
+
+export function getDatabaseProvider(): "postgresql" | "sqlite" {
+  return isSQLite() ? "sqlite" : "postgresql";
+}
+
 function detectDbType(): DbType {
-  const url = process.env.DATABASE_URL;
-  if (url && (url.startsWith("postgresql://") || url.startsWith("postgres://"))) {
-    return "postgres";
-  }
-  return "sqlite";
+  return isSQLite() ? "sqlite" : "postgres";
 }
 
 const dbType = detectDbType();
 
-function createPrismaClient(): InstanceType<typeof PrismaClientPg> | InstanceType<typeof PrismaClientSqlite> {
-  if (dbType === "postgres") {
-    const connectionString =
-      process.env.DATABASE_URL ||
-      "postgresql://postgres:postgres@localhost:5432/campfire?schema=public";
-    const adapter = new PrismaPg(connectionString);
-    return new PrismaClientPg({ adapter });
+function createPrismaClient(): InstanceType<typeof PrismaClient> {
+  if (isSQLite()) {
+    // SQLite: set default URL if not provided
+    if (!process.env.DATABASE_URL) {
+      process.env.DATABASE_URL = "file:./data/campfire.db";
+    }
+    return new PrismaClient();
   }
 
-  // SQLite fallback — default to file:./data/campfire.db if DATABASE_URL is not set
-  const sqliteUrl = process.env.DATABASE_URL || "file:./data/campfire.db";
-  process.env.DATABASE_URL = sqliteUrl;
-  return new PrismaClientSqlite();
+  // PostgreSQL: use the PrismaPg driver adapter.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { PrismaPg } = require("@prisma/adapter-pg") as typeof import("@prisma/adapter-pg");
+  const connectionString =
+    process.env.DATABASE_URL ||
+    "postgresql://postgres:postgres@localhost:5432/campfire?schema=public";
+  const adapter = new PrismaPg(connectionString);
+  return new PrismaClient({ adapter });
 }
 
 const globalForPrisma = globalThis as unknown as {
-  prisma: InstanceType<typeof PrismaClientPg> | InstanceType<typeof PrismaClientSqlite>;
+  prisma: InstanceType<typeof PrismaClient>;
 };
 
 export const prisma = globalForPrisma.prisma || createPrismaClient();
