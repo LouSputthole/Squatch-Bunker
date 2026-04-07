@@ -41,6 +41,8 @@ export async function POST(request: Request) {
           email: guestEmail,
           username: guestUsername,
           passwordHash,
+          isGuest: true,
+          guestExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
         },
       });
     } catch {
