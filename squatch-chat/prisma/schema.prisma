@@ -49,11 +49,12 @@ model ServerMember {
 }
 
 model Channel {
-  id        String   @id @default(uuid())
-  serverId  String
-  name      String
-  type      String   @default("text")
-  createdAt DateTime @default(now())
+  id          String   @id @default(uuid())
+  serverId    String
+  name        String
+  type        String   @default("text")
+  description String?
+  createdAt   DateTime @default(now())
 
   server   Server    @relation(fields: [serverId], references: [id])
   messages Message[]
