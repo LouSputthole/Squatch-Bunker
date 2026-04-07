@@ -8,6 +8,7 @@ interface Channel {
   id: string;
   name: string;
   type?: string;
+  description?: string;
 }
 
 interface VoiceParticipant {
@@ -174,6 +175,7 @@ export default function ChannelList({
             <button
               key={channel.id}
               onClick={() => onChannelSelect(channel)}
+              title={channel.description || undefined}
               className={`w-full text-left px-2 py-1 rounded text-sm flex items-center gap-1.5 ${
                 activeChannelId === channel.id
                   ? "bg-[var(--panel-2)] text-[var(--text)]"

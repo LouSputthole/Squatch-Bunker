@@ -142,7 +142,13 @@ export default function MessageBubble({ message, isOwn, currentUserId, onEdit, o
           <span className={`font-semibold text-sm ${isOwn ? "text-[var(--accent)]" : "text-[var(--text)]"}`}>
             <span title={displayName(message.author.username)}>{shown}</span>
           </span>
-          <span className="text-xs text-[var(--muted)]">{time}</span>
+          <span className="group/ts relative cursor-default">
+            <span className="text-xs text-[var(--muted)]">{time}</span>
+            <span className="absolute bottom-full left-0 mb-1 px-2 py-1 text-xs bg-black/90 text-white rounded whitespace-nowrap opacity-0 group-hover/ts:opacity-100 transition-opacity pointer-events-none z-10">
+              {new Date(message.createdAt).toLocaleString()}
+              {wasEdited && ` (edited at ${new Date(message.updatedAt!).toLocaleString()})`}
+            </span>
+          </span>
           {wasEdited && <span className="text-xs text-[var(--muted)] italic">(edited)</span>}
         </div>
 
