@@ -3,8 +3,8 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { getSocket } from "@/lib/socket";
 import { truncateName } from "@/lib/utils";
-import { sounds } from "@/lib/sounds";
 import MessageBubble from "./MessageBubble";
+import PinnedMessagesPanel from "./PinnedMessagesPanel";
 
 interface ReactionGroup {
   count: number;
@@ -64,7 +64,7 @@ export default function ChatPanel({
   const [typingUsers, setTypingUsers] = useState<Map<string, string>>(new Map());
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
   const [firstUnreadId, setFirstUnreadId] = useState<string | null>(null);
-  const [showPinned, setShowPinned] = useState(false);
+  const [showPinnedPanel, setShowPinnedPanel] = useState(false);
   const [threadParent, setThreadParent] = useState<{ id: string; author: { id: string; username: string } } | null>(null);
   const [threadMessages, setThreadMessages] = useState<Message[]>([]);
   const [threadInput, setThreadInput] = useState("");
@@ -99,7 +99,30 @@ export default function ChatPanel({
     }
   }, []);
 
-
+  function playMessageNotification() {
+    try {
+      const saved = localStorage.getItem("campfire-audio-settings");
+      if (saved) {
+        const s = JSON.parse(saved);
+        if (s.messageNotifications === false) return;
+      }
+      const ctx = new AudioContext();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(880, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(1320, ctx.currentTime + 0.08);
+      gain.gain.setValueAtTime(0.15, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.25);
+      setTimeout(() => ctx.close(), 400);
+    } catch {
+      // Audio not supported
+    }
+  }
 
   // Sync topic when channel changes
   useEffect(() => {
@@ -154,9 +177,9 @@ export default function ChatPanel({
         return next;
       });
       setTimeout(scrollToBottom, 100);
-      // Play sound when message is from someone else
-      if (message.author.id !== currentUserId) {
-        sounds.messageReceived();
+      // Notify when tab is in the background and message is from someone else
+      if (message.author.id !== currentUserId && document.hidden) {
+        playMessageNotification();
       }
     }
 
@@ -275,7 +298,6 @@ export default function ChatPanel({
         prev.map((m) => (m.id === tempId ? message : m))
       );
       socket.emit("message:send", { channelId, message });
-      sounds.messageSent();
 
       // Start slow mode countdown
       if (channelSlowMode > 0) {
@@ -503,6 +525,8 @@ export default function ChatPanel({
           ? `${typingNames[0]} and ${typingNames.length - 1} others are typing`
           : null;
 
+  const pinnedCount = messages.filter((m) => m.pinned).length;
+
   return (
     <div
       className="flex-1 flex bg-[var(--panel-2)] min-w-0 relative"
@@ -576,29 +600,14 @@ export default function ChatPanel({
             </svg>
           </button>
         )}
-        {messages.some((m) => m.pinned) && (
-          <button
-            onClick={() => setShowPinned((p) => !p)}
-            className={`text-xs px-2 py-1 rounded transition-colors ${showPinned ? "bg-yellow-500/20 text-yellow-400" : "text-[var(--muted)] hover:text-yellow-400"}`}
-            title="Pinned messages"
-          >
-            📌 {messages.filter((m) => m.pinned).length}
-          </button>
-        )}
+        <button
+          onClick={() => setShowPinnedPanel((p) => !p)}
+          className={`text-xs px-2 py-1 rounded transition-colors ${showPinnedPanel ? "bg-yellow-500/20 text-yellow-400" : "text-[var(--muted)] hover:text-yellow-400"}`}
+          title="Pinned messages"
+        >
+          {pinnedCount > 0 ? `📌 ${pinnedCount}` : "📌"}
+        </button>
       </div>
-
-      {/* Pinned messages panel */}
-      {showPinned && (
-        <div className="border-b border-[var(--accent-2)]/30 bg-[var(--panel)] max-h-48 overflow-y-auto">
-          <div className="px-4 py-2 text-xs font-semibold text-yellow-400 uppercase tracking-wide">Pinned Messages</div>
-          {messages.filter((m) => m.pinned).map((msg) => (
-            <div key={msg.id} className="px-4 py-1.5 border-t border-[var(--accent-2)]/10 hover:bg-[var(--panel-2)]/50">
-              <span className="text-xs font-medium text-[var(--accent-2)] mr-2">{msg.author.username}</span>
-              <span className="text-xs text-[var(--text)] break-words">{msg.content || "[attachment]"}</span>
-            </div>
-          ))}
-        </div>
-      )}
 
       <div className="flex-1 overflow-y-auto px-4 py-2">
         {loading ? (
@@ -674,7 +683,7 @@ export default function ChatPanel({
         </div>
       )}
 
-      <form onSubmit={handleSend} className={`px-4 pb-4 pb-safe shrink-0 ${replyingTo ? "pt-0" : "pt-1"}`}>
+      <form onSubmit={handleSend} className={`px-4 pb-4 shrink-0 ${replyingTo ? "pt-0" : "pt-1"}`}>
         <div className="flex items-center bg-[var(--panel)] rounded-lg border border-[var(--accent-2)]/30">
           <button
             type="button"
@@ -712,6 +721,20 @@ export default function ChatPanel({
         </div>
       </form>
       </div>{/* end main chat column */}
+
+      {/* Pinned messages side panel */}
+      {showPinnedPanel && (
+        <PinnedMessagesPanel
+          channelId={channelId}
+          canPin={canPin ?? false}
+          onClose={() => setShowPinnedPanel(false)}
+          onJumpToMessage={(messageId) => {
+            scrollToMessage(messageId);
+            setShowPinnedPanel(false);
+          }}
+          onUnpin={(messageId) => handlePin(messageId, false)}
+        />
+      )}
 
       {/* Thread panel */}
       {threadParent && (
