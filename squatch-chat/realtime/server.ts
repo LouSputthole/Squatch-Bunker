@@ -8,9 +8,13 @@ const JWT_SECRET = process.env.JWT_SECRET || "campfire-secret-change-me";
 const COOKIE_NAME = process.env.COOKIE_NAME || "squatch-token";
 const SOCKET_PATH = process.env.SOCKET_PATH || "/api/socketio";
 
-// CORS — supports comma-separated origins via CORS_ORIGINS, falls back to app URL
+// CORS — in self-hosted mode, accept any origin so LAN/remote clients can connect.
+// Set CORS_ORIGINS to restrict in production if needed.
+const SELF_HOSTED = !process.env.CORS_ORIGINS && !process.env.STRICT_CORS;
 const rawOrigins = process.env.CORS_ORIGINS || process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-const CORS_ORIGIN = rawOrigins.includes(",") ? rawOrigins.split(",").map((s) => s.trim()) : rawOrigins;
+const CORS_ORIGIN: string | string[] | true = SELF_HOSTED
+  ? true  // accept any origin
+  : rawOrigins.includes(",") ? rawOrigins.split(",").map((s) => s.trim()) : rawOrigins;
 
 const httpServer = createServer();
 const io = new Server(httpServer, {
@@ -638,8 +642,8 @@ io.on("connection", (socket) => {
   }
 });
 
-httpServer.listen(PORT, () => {
-  console.log(`[Campfire] Realtime server running on port ${PORT}`);
+httpServer.listen(PORT, "0.0.0.0", () => {
+  console.log(`[Campfire] Realtime server running on 0.0.0.0:${PORT}`);
 });
 
 export { io };

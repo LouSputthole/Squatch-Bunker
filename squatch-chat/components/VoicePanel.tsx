@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from "react";
 import { getSocket } from "@/lib/socket";
+import { getRuntimeConfig } from "@/hooks/useRuntimeConfig";
 
 interface VoiceParticipant {
   userId: string;
@@ -50,12 +51,24 @@ export interface VoicePanelHandle {
   getLocalScreenStream: () => MediaStream | null;
 }
 
-const ICE_SERVERS: RTCConfiguration = {
-  iceServers: [
+function getIceServers(): RTCConfiguration {
+  const servers: RTCIceServer[] = [
     { urls: "stun:stun.l.google.com:19302" },
     { urls: "stun:stun1.l.google.com:19302" },
-  ],
-};
+  ];
+
+  // Add TURN server if configured (needed for voice across NATs/internet)
+  const config = getRuntimeConfig();
+  if (config?.turnUrl) {
+    servers.push({
+      urls: config.turnUrl,
+      username: config.turnUsername,
+      credential: config.turnCredential,
+    });
+  }
+
+  return { iceServers: servers };
+}
 
 // Generate a short notification tone using Web Audio API
 function playNotificationSound(type: "join" | "leave") {
@@ -208,7 +221,7 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
   }, []);
 
   const createScreenPeer = useCallback((remoteSocketId: string, initiator: boolean) => {
-    const pc = new RTCPeerConnection(ICE_SERVERS);
+    const pc = new RTCPeerConnection(getIceServers());
     const socket = getSocket();
 
     if (initiator && screenStreamRef.current) {
@@ -471,7 +484,7 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
 
   const createPeer = useCallback(
     (remoteSocketId: string, initiator: boolean, remoteUserId?: string) => {
-      const pc = new RTCPeerConnection(ICE_SERVERS);
+      const pc = new RTCPeerConnection(getIceServers());
       const socket = getSocket();
 
       if (remoteUserId) {

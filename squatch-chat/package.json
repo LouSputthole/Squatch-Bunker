@@ -9,6 +9,7 @@
     "postinstall": "bash scripts/postinstall.sh || prisma generate",
     "build": "bash scripts/build.sh",
     "start": "next start",
+    "host": "bash ./scripts/host.sh",
     "lint": "eslint",
     "setup": "bash ./scripts/setup.sh",
     "db:up": "bash ./scripts/db-up.sh",

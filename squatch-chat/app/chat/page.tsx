@@ -24,6 +24,7 @@ import { useChannels } from "@/hooks/useChannels";
 import { usePresence } from "@/hooks/usePresence";
 import { useVoice } from "@/hooks/useVoice";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
+import { useRuntimeConfig } from "@/hooks/useRuntimeConfig";
 
 import type { Channel } from "@/types/chat";
 
@@ -43,6 +44,9 @@ export default function ChatPage() {
 }
 
 function ChatPageInner() {
+  // Fetch runtime config early so socket/voice know the correct URLs
+  useRuntimeConfig();
+
   const auth = useAuth();
   const srv = useServers();
   const ch = useChannels(srv.activeServer);

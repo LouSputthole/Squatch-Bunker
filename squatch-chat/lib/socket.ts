@@ -1,17 +1,39 @@
 "use client";
 
 import { io, Socket } from "socket.io-client";
-
-const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || "http://localhost:3001";
-const SOCKET_PATH = process.env.NEXT_PUBLIC_SOCKET_PATH || "/api/socketio";
+import { getRuntimeConfig } from "@/hooks/useRuntimeConfig";
 
 let socket: Socket | null = null;
 let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
 
+function getSocketConfig() {
+  const runtime = getRuntimeConfig();
+  if (runtime?.socketUrl) {
+    return { url: runtime.socketUrl, path: runtime.socketPath || "/api/socketio" };
+  }
+
+  // Fallback: derive from current page location (works for LAN/remote access)
+  if (typeof window !== "undefined") {
+    const hostname = window.location.hostname;
+    const protocol = window.location.protocol === "https:" ? "https" : "http";
+    const socketPort = process.env.NEXT_PUBLIC_SOCKET_PORT || "3001";
+    return {
+      url: `${protocol}://${hostname}:${socketPort}`,
+      path: process.env.NEXT_PUBLIC_SOCKET_PATH || "/api/socketio",
+    };
+  }
+
+  return {
+    url: process.env.NEXT_PUBLIC_SOCKET_URL || "http://localhost:3001",
+    path: process.env.NEXT_PUBLIC_SOCKET_PATH || "/api/socketio",
+  };
+}
+
 export function getSocket(): Socket {
   if (!socket) {
-    socket = io(SOCKET_URL, {
-      path: SOCKET_PATH,
+    const config = getSocketConfig();
+    socket = io(config.url, {
+      path: config.path,
       autoConnect: false,
       withCredentials: true,
       reconnection: true,
