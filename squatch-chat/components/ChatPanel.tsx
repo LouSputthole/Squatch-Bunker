@@ -51,9 +51,11 @@ export default function ChatPanel({
   const [loading, setLoading] = useState(true);
   const [typingUsers, setTypingUsers] = useState<Map<string, string>>(new Map());
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
+  const [firstUnreadId, setFirstUnreadId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messageRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const prevChannelRef = useRef<string | null>(null);
+  const lastReadIdRef = useRef<string | null>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isTypingRef = useRef(false);
   const [uploading, setUploading] = useState(false);
@@ -104,11 +106,15 @@ export default function ChatPanel({
     setMessages([]);
     setTypingUsers(new Map());
     setReplyingTo(null);
+    setFirstUnreadId(null);
+    lastReadIdRef.current = null;
 
     fetch(`/api/messages?channelId=${channelId}`)
       .then((res) => res.json())
       .then((data) => {
-        setMessages(data.messages || []);
+        const msgs: Message[] = data.messages || [];
+        setMessages(msgs);
+        lastReadIdRef.current = msgs.length > 0 ? msgs[msgs.length - 1].id : null;
         setLoading(false);
         setTimeout(scrollToBottom, 100);
       })
@@ -127,6 +133,10 @@ export default function ChatPanel({
     prevChannelRef.current = channelId;
 
     function handleChannelMessage(message: Message) {
+      // Mark first incoming message as the unread boundary (only for others' messages)
+      if (message.author.id !== currentUserId) {
+        setFirstUnreadId((prev) => prev ?? message.id);
+      }
       setMessages((prev) => {
         if (prev.some((m) => m.id === message.id)) return prev;
         return [...prev, message];
@@ -220,6 +230,7 @@ export default function ChatPanel({
 
     const content = newMessage.trim();
     setNewMessage("");
+    setFirstUnreadId(null);
 
     // Stop typing
     isTypingRef.current = false;
@@ -400,6 +411,13 @@ export default function ChatPanel({
               key={msg.id}
               ref={(el) => { if (el) messageRefs.current.set(msg.id, el); else messageRefs.current.delete(msg.id); }}
             >
+              {firstUnreadId === msg.id && (
+                <div className="flex items-center gap-2 my-2 px-1">
+                  <div className="flex-1 h-px bg-red-500/60" />
+                  <span className="text-[10px] font-bold text-red-400 uppercase tracking-widest px-1">New</span>
+                  <div className="flex-1 h-px bg-red-500/60" />
+                </div>
+              )}
               <MessageBubble
                 message={msg}
                 isOwn={msg.author.id === currentUserId}
