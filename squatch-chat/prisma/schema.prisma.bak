@@ -1,0 +1,147 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  username     String   @unique
+  passwordHash String
+  avatar       String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  memberships    ServerMember[]
+  messages       Message[]
+  reactions      Reaction[]
+  ownedServers   Server[]
+  conversations1 Conversation[] @relation("ConvUser1")
+  conversations2 Conversation[] @relation("ConvUser2")
+  directMessages DirectMessage[]
+  notesWritten   UserNote[]      @relation("NoteAuthor")
+  notesReceived  UserNote[]      @relation("NoteTarget")
+}
+
+model Server {
+  id        String   @id @default(uuid())
+  name      String
+  icon      String?
+  ownerId   String
+  createdAt DateTime @default(now())
+
+  inviteCode String   @unique @default(uuid())
+
+  owner    User           @relation(fields: [ownerId], references: [id])
+  members  ServerMember[]
+  channels Channel[]
+}
+
+model ServerMember {
+  id        String    @id @default(uuid())
+  serverId  String
+  userId    String
+  role      String    @default("member")
+  banned    Boolean   @default(false)
+  bannedAt  DateTime?
+  createdAt DateTime  @default(now())
+
+  server Server @relation(fields: [serverId], references: [id])
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@unique([serverId, userId])
+}
+
+model Channel {
+  id          String   @id @default(uuid())
+  serverId    String
+  name        String
+  type        String   @default("text")
+  category    String?
+  description String?
+  topic       String?
+  createdAt   DateTime @default(now())
+
+  server   Server    @relation(fields: [serverId], references: [id])
+  messages Message[]
+}
+
+model Message {
+  id              String   @id @default(uuid())
+  channelId       String
+  authorId        String
+  content         String
+  attachmentUrl   String?
+  attachmentName  String?
+  replyToId       String?
+  pinned          Boolean  @default(false)
+  parentMessageId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  channel   Channel    @relation(fields: [channelId], references: [id])
+  author    User       @relation(fields: [authorId], references: [id])
+  replyTo   Message?   @relation("MessageReplies", fields: [replyToId], references: [id])
+  replies   Message[]  @relation("MessageReplies")
+  reactions Reaction[]
+  parent    Message?   @relation("thread", fields: [parentMessageId], references: [id])
+  children  Message[]  @relation("thread")
+}
+
+model Reaction {
+  id        String   @id @default(uuid())
+  messageId String
+  userId    String
+  emoji     String
+  createdAt DateTime @default(now())
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id])
+
+  @@unique([messageId, userId, emoji])
+}
+
+model Conversation {
+  id        String   @id @default(uuid())
+  user1Id   String
+  user2Id   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user1    User             @relation("ConvUser1", fields: [user1Id], references: [id])
+  user2    User             @relation("ConvUser2", fields: [user2Id], references: [id])
+  messages DirectMessage[]
+
+  @@unique([user1Id, user2Id])
+}
+
+model DirectMessage {
+  id             String   @id @default(uuid())
+  conversationId String
+  authorId       String
+  content        String
+  attachmentUrl  String?
+  attachmentName String?
+  createdAt      DateTime @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id])
+  author       User         @relation(fields: [authorId], references: [id])
+}
+
+model UserNote {
+  id           String   @id @default(uuid())
+  authorId     String
+  targetUserId String
+  content      String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  author User @relation("NoteAuthor", fields: [authorId], references: [id])
+  target User @relation("NoteTarget", fields: [targetUserId], references: [id])
+
+  @@unique([authorId, targetUserId])
+}
