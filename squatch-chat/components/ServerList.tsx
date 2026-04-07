@@ -100,20 +100,27 @@ export default function ServerList({
         <img src="/campfire-logo.png" alt="Campfire" className="w-10 h-10 mb-1 opacity-90" title="Campfire" />
         <div className="w-8 h-[1px] bg-[var(--accent-2)]/30 mb-1" />
 
-        {servers.map((server) => (
-          <button
-            key={server.id}
-            onClick={() => onServerSelect(server)}
-            className={`w-12 h-12 rounded-2xl flex items-center justify-center text-sm font-bold transition-all hover:rounded-xl ${
-              activeServerId === server.id
-                ? "bg-[var(--accent-2)] text-[var(--text)] rounded-xl"
-                : "bg-[var(--panel-2)] text-[var(--muted)] hover:bg-[var(--accent-2)] hover:text-[var(--text)]"
-            }`}
-            title={server.name}
-          >
-            {server.name.slice(0, 2).toUpperCase()}
-          </button>
-        ))}
+        {servers.map((server) => {
+          const isActive = activeServerId === server.id;
+          return (
+            <div key={server.id} className="relative flex items-center">
+              {isActive && (
+                <div className="absolute -left-3 w-1 h-8 bg-white rounded-r-full" />
+              )}
+              <button
+                onClick={() => onServerSelect(server)}
+                className={`w-12 h-12 flex items-center justify-center text-lg font-bold text-white transition-all duration-200 ${
+                  isActive
+                    ? "bg-[var(--accent-2)] rounded-[16px]"
+                    : "bg-[var(--panel-2)] rounded-[24px] hover:rounded-[16px] hover:bg-[var(--accent-2)]"
+                }`}
+                title={server.name}
+              >
+                {server.name[0].toUpperCase()}
+              </button>
+            </div>
+          );
+        })}
 
         <div className="w-8 h-[1px] bg-[var(--accent-2)]/30 my-1" />
 
