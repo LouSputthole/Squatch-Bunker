@@ -48,7 +48,7 @@ export async function POST(request: Request) {
         name: name.trim(),
         ownerId: session.userId,
         members: {
-          create: { userId: session.userId },
+          create: { userId: session.userId, role: "owner" },
         },
         channels: {
           create: { name: "campfire", type: "text" },

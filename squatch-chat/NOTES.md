@@ -82,8 +82,10 @@ squatch-chat/
 
 ### Voice Chat (WebRTC)
 - **VoicePanel** (`components/VoicePanel.tsx`): Headless WebRTC connection manager
-  - Uses `forwardRef` + `useImperativeHandle` to expose `toggleMute`, `toggleDeafen`, `disconnect`
-  - Reports state via `onStateChange` callback
+  - Uses `forwardRef` + `useImperativeHandle` to expose `toggleMute`, `toggleDeafen`, `disconnect`, `togglePTT`, `isPTT`
+  - Reports state via `onStateChange` callback (includes speaking state per participant)
+  - Voice activity detection (VAD) using AudioContext AnalyserNode — emits `voice:speaking` events
+  - Push-to-talk mode: mic stays muted, Space bar hold to transmit
   - Renders `null` — all UI is in VoiceRoom
 - **VoiceRoom** (`components/VoiceRoom.tsx`): Visual participant grid + controls
   - Takes over the main panel when user joins a voice channel
@@ -168,29 +170,26 @@ Used by VoicePanel to expose methods to the parent chat page. The parent holds a
 
 See `ROADMAP.md` for the full 20-section voice product roadmap with `[x]` built / `[~]` partial / `[ ]` not started annotations.
 
-**Recently completed:**
-- Text chat with edit/delete + realtime broadcast
-- Unread message badges
-- Separate voice/text channels with icons
-- WebRTC P2P voice with mute/deafen
-- Voice room main panel view (participant grid)
-- Notification tones (Web Audio API)
-- Settings modal (audio device selection + testing)
-- Profile pictures (avatar upload + display)
-- Docker hosting support
-- Project rename from SquatchChat to Campfire
+**Recently completed (v0.0.5):**
+- Roles & permissions (owner/admin/mod/member hierarchy)
+- Role badges with color coding in member list
+- Right-click context menu for role management + kick
+- Speaking indicators via voice activity detection (VAD)
+- Push-to-talk (Space bar hold, toggle in voice room)
+- Emoji reactions with toggle semantics
+- File/image uploads with inline preview
+- Message search with debounced API
+- Keyboard shortcuts (Ctrl+K search, Ctrl+M mute, Ctrl+D deafen)
 
 **High-priority next items (P0):**
 - Reconnect/reliability for voice
-- Permissions and roles
-- Moderation tools
-- Push-to-talk
 - Per-user volume control
-- Speaking indicators (actual audio level detection)
+- Input sensitivity slider
 - SFU for scalable voice (currently P2P, won't scale past ~6 users)
+- Channel-specific permissions
 
 **Future:**
-- DMs, search, file uploads, reactions
+- DMs, mentions, link previews
 - Screen share, camera
 - Stage mode, shared activities
 
@@ -207,4 +206,10 @@ See `ROADMAP.md` for the full 20-section voice product roadmap with `[x]` built 
 
 ---
 
-*Last updated: April 2026*
+## Dev Communication Style
+
+Short 3-6 word sentences. No filler, preamble, or pleasantries. Run tools first, show result, then stop. Do not narrate. Drop articles ("me fix code" not "I will fix the code").
+
+---
+
+*Last updated: April 2026 — v0.0.5*

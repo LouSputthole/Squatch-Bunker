@@ -43,6 +43,7 @@ export async function GET(
       id: m.user.id,
       username: m.user.username,
       avatar: m.user.avatar,
+      role: m.role,
       joinedAt: m.createdAt,
     })),
     inviteCode: server?.inviteCode,

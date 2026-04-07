@@ -8,6 +8,7 @@ interface VoiceParticipant {
   username: string;
   muted: boolean;
   deafened?: boolean;
+  speaking?: boolean;
   avatar?: string | null;
 }
 
@@ -17,8 +18,10 @@ interface VoiceRoomProps {
   currentUserId: string;
   muted: boolean;
   deafened: boolean;
+  pttMode?: boolean;
   onToggleMute: () => void;
   onToggleDeafen: () => void;
+  onTogglePTT?: () => void;
   onDisconnect: () => void;
 }
 
@@ -93,14 +96,26 @@ function DeafSmall() {
   );
 }
 
+function PushToTalkIcon({ active }: { active: boolean }) {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+      {active && <circle cx="12" cy="16" r="2" fill="currentColor" />}
+    </svg>
+  );
+}
+
 export default function VoiceRoom({
   channelName,
   participants,
   currentUserId,
   muted,
   deafened,
+  pttMode,
   onToggleMute,
   onToggleDeafen,
+  onTogglePTT,
   onDisconnect,
 }: VoiceRoomProps) {
   return (
@@ -151,9 +166,9 @@ export default function VoiceRoom({
                           : "bg-[var(--accent-2)] text-[var(--text)]"
                       } ${p.muted ? "opacity-60" : ""}`}
                     />
-                    {/* Speaking ring — shows when not muted */}
-                    {!p.muted && (
-                      <div className="absolute inset-0 rounded-full border-2 border-green-500/50 animate-pulse" />
+                    {/* Speaking ring — green glow when actively speaking */}
+                    {p.speaking && (
+                      <div className="absolute inset-[-3px] rounded-full border-[3px] border-green-400 shadow-[0_0_8px_rgba(74,222,128,0.5)] animate-pulse" />
                     )}
                     {/* Status badges */}
                     <div className="absolute -bottom-1 -right-1 flex gap-0.5">
@@ -210,6 +225,19 @@ export default function VoiceRoom({
           >
             <HeadphonesIcon deafened={deafened} />
           </button>
+          {onTogglePTT && (
+            <button
+              onClick={onTogglePTT}
+              className={`p-3 rounded-full transition-colors ${
+                pttMode
+                  ? "bg-yellow-600/20 text-yellow-400 hover:bg-yellow-600/30"
+                  : "bg-[var(--panel-2)] text-[var(--text)] hover:bg-[var(--accent-2)]/30"
+              }`}
+              title={pttMode ? "Disable Push-to-Talk (Space)" : "Enable Push-to-Talk (Space)"}
+            >
+              <PushToTalkIcon active={!!pttMode} />
+            </button>
+          )}
           <button
             onClick={onDisconnect}
             className="p-3 rounded-full bg-red-600 hover:bg-red-700 text-white transition-colors"

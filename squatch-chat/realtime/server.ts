@@ -228,6 +228,14 @@ io.on("connection", (socket) => {
     }
   });
 
+  // Speaking indicator — relay to voice room
+  socket.on("voice:speaking", (data: { channelId: string; speaking: boolean }) => {
+    socket.to(`voice:${data.channelId}`).emit("voice:speaking", {
+      userId: currentUserId,
+      speaking: data.speaking,
+    });
+  });
+
   // WebRTC signaling: relay offer to a specific peer
   socket.on("voice:offer", (data: { to: string; offer: RTCSessionDescriptionInit }) => {
     io.to(data.to).emit("voice:offer", {

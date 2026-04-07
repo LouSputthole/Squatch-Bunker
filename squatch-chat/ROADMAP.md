@@ -26,7 +26,7 @@
 
 **Still needed:**
 - [ ] Room model enhancements: member capacity, permissions, type variants (stage, private)
-- [ ] Speaking indicator (voice activity detection)
+- [x] Speaking indicator (voice activity detection)
 - [ ] Streaming/video presence states
 - [ ] Session lifecycle: reconnect after drop, server-side stale session cleanup
 - [ ] Heartbeats to detect disconnects (beyond Socket.IO built-in)
@@ -50,7 +50,7 @@
 - [ ] Jitter buffer / packet loss concealment
 - [ ] Metrics: RTT, jitter, packet loss, bitrate, reconnect frequency
 - [ ] Device switching without restart
-- [ ] Push-to-talk support
+- [x] Push-to-talk support (Space bar)
 
 ### 3. Low-Friction Join/Leave [~]
 
@@ -83,29 +83,41 @@
 - [x] Echo cancellation, noise suppression, AGC (browser defaults)
 
 **Still needed:**
-- [ ] Push-to-talk with hotkey support
-- [ ] Voice activity detection (speaking indicator)
+- [x] Push-to-talk with hotkey support (Space bar)
+- [x] Voice activity detection (speaking indicator)
 - [ ] Per-user volume control (adjust individual user volumes)
 - [ ] Input sensitivity slider
 - [ ] Hotkey support for mute toggle
 - [ ] Debug panel: mic detected? input level? output routed? permission denied?
-- [ ] Speaking indicator animation
+- [x] Speaking indicator animation (green glow ring)
 - [ ] Push-to-talk while app backgrounded
 
-### 5. Permissions and Roles [ ]
+### 5. Permissions and Roles [~]
+
+**What exists:**
+- [x] Role model (owner, admin, mod, member) on ServerMember
+- [x] Permission hierarchy with level-based checks
+- [x] Role badges with color coding in member list
+- [x] Right-click context menu for role assignment
+- [x] Kick member (admin+)
+- [x] Permission guards on API routes
+- [x] Server creator auto-assigned owner role
 
 **Still needed:**
-- [ ] Role model (admin, mod, member, custom)
+- [ ] Custom roles
 - [ ] Permission inheritance
 - [ ] Channel overrides
 - [ ] Special perms: connect, speak, mute members, move members, manage channel, stream, video, priority speaker, stage speaker
-- [ ] Permission evaluation engine
 - [ ] Cached permission resolution
 - [ ] Audit log for mod actions
-- [ ] UI for room settings, role assignment, channel-specific permissions
-- [ ] Mod controls in roster menu
+- [ ] Channel-specific permission UI
 
-### 6. Moderation Basics [ ]
+### 6. Moderation Basics [~]
+
+**What exists:**
+- [x] Right-click user actions (context menu)
+- [x] Mod badges / role indicators
+- [x] Kick member from server
 
 **Still needed:**
 - [ ] Server mute (mod forces mute on user)
@@ -115,8 +127,6 @@
 - [ ] Temporary speaking suppression
 - [ ] Block screen share / camera
 - [ ] Report abuse flow
-- [ ] Right-click user actions
-- [ ] Mod badges / role indicators
 - [ ] Clear UI state when user is force-muted
 
 ### 7. Reconnect / Reliability [ ]
@@ -269,7 +279,7 @@
 - [x] Logo/branding integration
 
 **Still needed:**
-- [ ] Speaking indicators (green glow)
+- [x] Speaking indicators (green glow)
 - [ ] Drag-and-drop user move for mods
 - [ ] Idle-in-room behavior
 - [ ] Lightweight overlays / mini controls
@@ -315,3 +325,4 @@
 - v0.0.2 — Message edit/delete, optimistic sends, URL routing, unread badges
 - v0.0.3 — Separate voice/text channels, WebRTC voice, mute/deafen icons, settings modal, notification sounds, Docker hosting
 - v0.0.4 — Profile pictures, emoji reactions, file/image uploads, message search, keyboard shortcuts, logo integration
+- v0.0.5 — Roles & permissions (owner/admin/mod/member), speaking indicators (VAD), push-to-talk, role management UI

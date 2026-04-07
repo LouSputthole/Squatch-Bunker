@@ -40,6 +40,7 @@ interface VoiceParticipant {
   username: string;
   muted: boolean;
   deafened?: boolean;
+  speaking?: boolean;
   avatar?: string | null;
 }
 
@@ -57,7 +58,7 @@ export default function ChatPage() {
 }
 
 function ChatPageInner() {
-  const APP_VERSION = "v0.0.4";
+  const APP_VERSION = "v0.0.5";
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -71,11 +72,13 @@ function ChatPageInner() {
   const [loading, setLoading] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [userRole, setUserRole] = useState<string>("member");
 
   // Voice state
   const [activeVoiceChannel, setActiveVoiceChannel] = useState<Channel | null>(null);
   const [voiceParticipants, setVoiceParticipants] = useState<Map<string, VoiceParticipant[]>>(new Map());
   const [voiceState, setVoiceState] = useState({ muted: false, deafened: false, participants: [] as VoiceParticipant[] });
+  const [pttMode, setPttMode] = useState(false);
 
   const activeServerIdRef = useRef<string | null>(null);
   const activeChannelIdRef = useRef<string | null>(null);
@@ -188,8 +191,22 @@ function ChatPageInner() {
     if (!activeServer) return;
     const socket = getSocket();
     socket.emit("server:join", activeServer.id);
+
+    // Fetch current user's role in this server
+    if (user) {
+      fetch(`/api/servers/${activeServer.id}/members`)
+        .then((r) => r.ok ? r.json() : null)
+        .then((data) => {
+          if (data?.members) {
+            const me = data.members.find((m: { userId: string; role?: string }) => m.userId === user.id);
+            setUserRole(me?.role || "member");
+          }
+        })
+        .catch(() => setUserRole("member"));
+    }
+
     return () => { socket.emit("server:leave", activeServer.id); };
-  }, [activeServer]);
+  }, [activeServer, user]);
 
   // Global voice participants listener — receives updates via server room broadcast
   useEffect(() => {
@@ -417,8 +434,10 @@ function ChatPageInner() {
           currentUserId={user.id}
           muted={voiceState.muted}
           deafened={voiceState.deafened}
+          pttMode={pttMode}
           onToggleMute={() => voicePanelRef.current?.toggleMute()}
           onToggleDeafen={() => voicePanelRef.current?.toggleDeafen()}
+          onTogglePTT={() => { voicePanelRef.current?.togglePTT(); setPttMode((p) => !p); }}
           onDisconnect={() => voicePanelRef.current?.disconnect()}
         />
       ) : activeChannel && user ? (
@@ -450,6 +469,8 @@ function ChatPageInner() {
         <MemberList
           serverId={activeServer.id}
           onlineMemberIds={onlineMembers}
+          currentUserId={user?.id}
+          currentUserRole={userRole}
         />
       )}
 

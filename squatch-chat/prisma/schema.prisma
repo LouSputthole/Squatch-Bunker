@@ -39,6 +39,7 @@ model ServerMember {
   id        String   @id @default(uuid())
   serverId  String
   userId    String
+  role      String   @default("member")
   createdAt DateTime @default(now())
 
   server Server @relation(fields: [serverId], references: [id])

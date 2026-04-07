@@ -8,6 +8,7 @@ interface VoiceParticipant {
   username: string;
   muted: boolean;
   deafened?: boolean;
+  speaking?: boolean;
 }
 
 interface VoicePanelProps {
@@ -24,6 +25,8 @@ export interface VoicePanelHandle {
   toggleMute: () => void;
   toggleDeafen: () => void;
   disconnect: () => void;
+  togglePTT: () => void;
+  isPTT: () => boolean;
 }
 
 const ICE_SERVERS: RTCConfiguration = {
@@ -86,13 +89,20 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
   const [joined, setJoined] = useState(false);
   const [muted, setMuted] = useState(false);
   const [deafened, setDeafened] = useState(false);
+  const [pttMode, setPttMode] = useState(false);
   const [participants, setParticipants] = useState<VoiceParticipant[]>([]);
   const [connecting, setConnecting] = useState(false);
+
+  const [speakingUsers, setSpeakingUsers] = useState<Set<string>>(new Set());
 
   const localStreamRef = useRef<MediaStream | null>(null);
   const peersRef = useRef<Map<string, RTCPeerConnection>>(new Map());
   const audioElementsRef = useRef<Map<string, HTMLAudioElement>>(new Map());
   const joinedChannelRef = useRef<string | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const vadIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const wasSpeakingRef = useRef(false);
 
   const cleanupPeers = useCallback(() => {
     peersRef.current.forEach((pc) => pc.close());
@@ -100,6 +110,108 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
     audioElementsRef.current.forEach((el) => { el.srcObject = null; el.remove(); });
     audioElementsRef.current.clear();
   }, []);
+
+  const startVAD = useCallback((stream: MediaStream) => {
+    try {
+      const ctx = new AudioContext();
+      const source = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 512;
+      analyser.smoothingTimeConstant = 0.3;
+      source.connect(analyser);
+      audioCtxRef.current = ctx;
+      analyserRef.current = analyser;
+
+      const data = new Uint8Array(analyser.frequencyBinCount);
+      const THRESHOLD = 15; // amplitude threshold
+      const socket = getSocket();
+
+      vadIntervalRef.current = setInterval(() => {
+        analyser.getByteFrequencyData(data);
+        let sum = 0;
+        for (let i = 0; i < data.length; i++) sum += data[i];
+        const avg = sum / data.length;
+        const isSpeaking = avg > THRESHOLD;
+
+        if (isSpeaking !== wasSpeakingRef.current) {
+          wasSpeakingRef.current = isSpeaking;
+          socket.emit("voice:speaking", { channelId, speaking: isSpeaking });
+          setSpeakingUsers((prev) => {
+            const next = new Set(prev);
+            if (isSpeaking) next.add(currentUserId);
+            else next.delete(currentUserId);
+            return next;
+          });
+        }
+      }, 100);
+    } catch {
+      // AudioContext not available
+    }
+  }, [channelId, currentUserId]);
+
+  const stopVAD = useCallback(() => {
+    if (vadIntervalRef.current) { clearInterval(vadIntervalRef.current); vadIntervalRef.current = null; }
+    if (audioCtxRef.current) { audioCtxRef.current.close().catch(() => {}); audioCtxRef.current = null; }
+    analyserRef.current = null;
+    wasSpeakingRef.current = false;
+  }, []);
+
+  const pttModeRef = useRef(false);
+
+  const togglePTT = useCallback(() => {
+    setPttMode((prev) => {
+      const next = !prev;
+      pttModeRef.current = next;
+      if (next && localStreamRef.current) {
+        // Entering PTT: mute mic by default
+        localStreamRef.current.getAudioTracks().forEach((t) => { t.enabled = false; });
+        setMuted(true);
+        const socket = getSocket();
+        socket.emit("voice:mute", { channelId, muted: true });
+      }
+      return next;
+    });
+  }, [channelId]);
+
+  // PTT key handler (Space bar)
+  useEffect(() => {
+    if (!joined) return;
+
+    function handleKeyDown(e: KeyboardEvent) {
+      if (!pttModeRef.current) return;
+      if (e.code !== "Space") return;
+      if ((e.target as HTMLElement)?.tagName === "INPUT" || (e.target as HTMLElement)?.tagName === "TEXTAREA") return;
+      e.preventDefault();
+      if (e.repeat) return;
+      // Unmute while key held
+      if (localStreamRef.current) {
+        localStreamRef.current.getAudioTracks().forEach((t) => { t.enabled = true; });
+        setMuted(false);
+        const socket = getSocket();
+        socket.emit("voice:mute", { channelId, muted: false });
+      }
+    }
+
+    function handleKeyUp(e: KeyboardEvent) {
+      if (!pttModeRef.current) return;
+      if (e.code !== "Space") return;
+      e.preventDefault();
+      // Re-mute on release
+      if (localStreamRef.current) {
+        localStreamRef.current.getAudioTracks().forEach((t) => { t.enabled = false; });
+        setMuted(true);
+        const socket = getSocket();
+        socket.emit("voice:mute", { channelId, muted: true });
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+    };
+  }, [joined, channelId]);
 
   const createPeer = useCallback(
     (remoteSocketId: string, initiator: boolean) => {
@@ -155,6 +267,7 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
         });
         if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return; }
         localStreamRef.current = stream;
+        startVAD(stream);
         const socket = getSocket();
         socket.emit("voice:join", { channelId, serverId });
         joinedChannelRef.current = channelId;
@@ -180,6 +293,7 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
     if (joinedChannelRef.current) {
       socket.emit("voice:leave", joinedChannelRef.current);
     }
+    stopVAD();
     localStreamRef.current?.getTracks().forEach((t) => t.stop());
     localStreamRef.current = null;
     cleanupPeers();
@@ -188,9 +302,10 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
     setMuted(false);
     setDeafened(false);
     setParticipants([]);
+    setSpeakingUsers(new Set());
     playNotificationSound("leave");
     onDisconnect?.();
-  }, [cleanupPeers, onDisconnect]);
+  }, [cleanupPeers, stopVAD, onDisconnect]);
 
   const toggleMute = useCallback(() => {
     if (!localStreamRef.current) return;
@@ -220,12 +335,18 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
     toggleMute,
     toggleDeafen,
     disconnect: leaveVoice,
-  }), [toggleMute, toggleDeafen, leaveVoice]);
+    togglePTT,
+    isPTT: () => pttModeRef.current,
+  }), [toggleMute, toggleDeafen, leaveVoice, togglePTT]);
 
-  // Report state changes to parent
+  // Report state changes to parent — merge speaking state into participants
   useEffect(() => {
-    onStateChange?.({ muted, deafened, participants });
-  }, [muted, deafened, participants, onStateChange]);
+    const withSpeaking = participants.map((p) => ({
+      ...p,
+      speaking: speakingUsers.has(p.userId),
+    }));
+    onStateChange?.({ muted, deafened, participants: withSpeaking });
+  }, [muted, deafened, participants, speakingUsers, onStateChange]);
 
   // Participant updates — register BEFORE joining so we don't miss the initial broadcast
   useEffect(() => {
@@ -240,6 +361,24 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
     socket.on("voice:participants-update", handleParticipantsUpdate);
     return () => { socket.off("voice:participants-update", handleParticipantsUpdate); };
   }, [channelId, onParticipantsChange]);
+
+  // Remote speaking indicators
+  useEffect(() => {
+    if (!joined) return;
+    const socket = getSocket();
+
+    function handleSpeaking(data: { userId: string; speaking: boolean }) {
+      setSpeakingUsers((prev) => {
+        const next = new Set(prev);
+        if (data.speaking) next.add(data.userId);
+        else next.delete(data.userId);
+        return next;
+      });
+    }
+
+    socket.on("voice:speaking", handleSpeaking);
+    return () => { socket.off("voice:speaking", handleSpeaking); };
+  }, [joined]);
 
   // WebRTC signaling handlers — only after joined
   useEffect(() => {
@@ -311,12 +450,13 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
       if (joinedChannelRef.current) {
         const socket = getSocket();
         socket.emit("voice:leave", joinedChannelRef.current);
+        stopVAD();
         localStreamRef.current?.getTracks().forEach((t) => t.stop());
         localStreamRef.current = null;
         cleanupPeers();
       }
     };
-  }, [cleanupPeers]);
+  }, [cleanupPeers, stopVAD]);
 
   // VoicePanel is now a headless WebRTC engine — VoiceRoom handles the UI
   return null;
