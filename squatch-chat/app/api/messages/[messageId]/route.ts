@@ -1,6 +1,38 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 
+export async function GET(
+  _request: Request,
+  { params }: { params: Promise<{ messageId: string }> }
+) {
+  const session = await getSession();
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const { messageId } = await params;
+
+  try {
+    const { prisma } = await import("@/lib/db");
+
+    const message = await prisma.message.findUnique({
+      where: { id: messageId },
+      include: {
+        author: { select: { id: true, username: true, avatar: true } },
+      },
+    });
+
+    if (!message) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+
+    return NextResponse.json({ message });
+  } catch (err) {
+    console.error("[Campfire] Failed to fetch message:", err);
+    return NextResponse.json({ error: "Failed to fetch message" }, { status: 500 });
+  }
+}
+
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ messageId: string }> }

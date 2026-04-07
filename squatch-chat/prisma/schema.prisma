@@ -29,26 +29,31 @@ model User {
   reactions      Reaction[]
   bookmarks      Bookmark[]
   ownedServers   Server[]
-  conversations1 Conversation[] @relation("ConvUser1")
-  conversations2 Conversation[] @relation("ConvUser2")
+  conversations1 Conversation[]          @relation("ConvUser1")
+  conversations2 Conversation[]          @relation("ConvUser2")
   directMessages DirectMessage[]
   sentRequests   Friendship[]   @relation("FriendRequester")
   recvRequests   Friendship[]   @relation("FriendAddressee")
+  dmReactions    DirectMessageReaction[]
 }
 
 model Server {
-  id        String   @id @default(uuid())
-  name      String
-  icon      String?
-  banner    String?
-  ownerId   String
-  createdAt DateTime @default(now())
+  id          String   @id @default(uuid())
+  name        String
+  icon        String?
+  banner      String?
+  ownerId     String
+  createdAt   DateTime @default(now())
+  inviteCode  String   @unique @default(uuid())
+  isPublic    Boolean  @default(false)
+  description String?
 
-  inviteCode String   @unique @default(uuid())
-
-  owner    User           @relation(fields: [ownerId], references: [id])
-  members  ServerMember[]
-  channels Channel[]
+  owner        User           @relation(fields: [ownerId], references: [id])
+  members      ServerMember[]
+  channels     Channel[]
+  webhooks     Webhook[]
+  customEmojis CustomEmoji[]
+  auditLogs    AuditLog[]
 }
 
 model ServerMember {
@@ -77,8 +82,10 @@ model Channel {
   slowModeSeconds Int      @default(0)
   createdAt       DateTime @default(now())
 
-  server   Server    @relation(fields: [serverId], references: [id])
-  messages Message[]
+  server      Server              @relation(fields: [serverId], references: [id])
+  messages    Message[]
+  permissions ChannelPermission[]
+  webhooks    Webhook[]
 }
 
 model Message {
@@ -137,24 +144,90 @@ model Conversation {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  user1    User             @relation("ConvUser1", fields: [user1Id], references: [id])
-  user2    User             @relation("ConvUser2", fields: [user2Id], references: [id])
+  user1    User            @relation("ConvUser1", fields: [user1Id], references: [id])
+  user2    User            @relation("ConvUser2", fields: [user2Id], references: [id])
   messages DirectMessage[]
 
   @@unique([user1Id, user2Id])
 }
 
 model DirectMessage {
-  id             String   @id @default(uuid())
+  id             String    @id @default(uuid())
   conversationId String
   authorId       String
   content        String
   attachmentUrl  String?
   attachmentName String?
-  createdAt      DateTime @default(now())
+  readAt         DateTime?
+  createdAt      DateTime  @default(now())
 
-  conversation Conversation @relation(fields: [conversationId], references: [id])
-  author       User         @relation(fields: [authorId], references: [id])
+  conversation Conversation            @relation(fields: [conversationId], references: [id])
+  author       User                    @relation(fields: [authorId], references: [id])
+  reactions    DirectMessageReaction[]
+}
+
+model DirectMessageReaction {
+  id              String   @id @default(uuid())
+  directMessageId String
+  userId          String
+  emoji           String
+  createdAt       DateTime @default(now())
+
+  directMessage DirectMessage @relation(fields: [directMessageId], references: [id], onDelete: Cascade)
+  user          User          @relation(fields: [userId], references: [id])
+
+  @@unique([directMessageId, userId, emoji])
+}
+
+model Webhook {
+  id        String   @id @default(uuid())
+  channelId String
+  serverId  String
+  name      String
+  token     String   @unique @default(uuid())
+  createdBy String
+  createdAt DateTime @default(now())
+
+  channel Channel @relation(fields: [channelId], references: [id])
+  server  Server  @relation(fields: [serverId], references: [id])
+}
+
+model CustomEmoji {
+  id        String   @id @default(uuid())
+  serverId  String
+  name      String
+  url       String
+  createdBy String
+  createdAt DateTime @default(now())
+
+  server Server @relation(fields: [serverId], references: [id])
+
+  @@unique([serverId, name])
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  serverId  String
+  actorId   String
+  targetId  String?
+  action    String
+  detail    String?
+  createdAt DateTime @default(now())
+
+  server Server @relation(fields: [serverId], references: [id])
+}
+
+model ChannelPermission {
+  id        String   @id @default(uuid())
+  channelId String
+  role      String
+  canView   Boolean  @default(true)
+  canSend   Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  channel Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  @@unique([channelId, role])
 }
 
 model Friendship {
