@@ -55,6 +55,31 @@ export default function ChatPanel({
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, []);
 
+  function playMessageNotification() {
+    try {
+      const saved = localStorage.getItem("campfire-audio-settings");
+      if (saved) {
+        const s = JSON.parse(saved);
+        if (s.messageNotifications === false) return;
+      }
+      const ctx = new AudioContext();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(880, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(1320, ctx.currentTime + 0.08);
+      gain.gain.setValueAtTime(0.15, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.25);
+      setTimeout(() => ctx.close(), 400);
+    } catch {
+      // Audio not supported
+    }
+  }
+
   // Load message history
   useEffect(() => {
     setLoading(true);
@@ -93,6 +118,10 @@ export default function ChatPanel({
         return next;
       });
       setTimeout(scrollToBottom, 100);
+      // Notify when tab is in the background and message is from someone else
+      if (message.author.id !== currentUserId && document.hidden) {
+        playMessageNotification();
+      }
     }
 
     function handleMessageEdited(data: { messageId: string; content: string; updatedAt: string }) {

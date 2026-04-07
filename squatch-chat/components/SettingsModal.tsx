@@ -23,6 +23,7 @@ export default function SettingsModal({ open, onClose, username, currentAvatar, 
   const [testing, setTesting] = useState(false);
   const [micLevel, setMicLevel] = useState(0);
   const [inputSensitivity, setInputSensitivity] = useState(15);
+  const [messageNotifications, setMessageNotifications] = useState(true);
 
   const testStreamRef = useRef<MediaStream | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
@@ -44,6 +45,7 @@ export default function SettingsModal({ open, onClose, username, currentAvatar, 
           setInputSensitivity(s.inputSensitivity);
           onInputSensitivityChange?.(s.inputSensitivity);
         }
+        if (s.messageNotifications !== undefined) setMessageNotifications(s.messageNotifications);
       } catch { /* ignore */ }
     }
   }, [open]);
@@ -56,8 +58,9 @@ export default function SettingsModal({ open, onClose, username, currentAvatar, 
       inputVolume,
       outputVolume,
       inputSensitivity,
+      messageNotifications,
     }));
-  }, [selectedInput, selectedOutput, inputVolume, outputVolume, inputSensitivity]);
+  }, [selectedInput, selectedOutput, inputVolume, outputVolume, inputSensitivity, messageNotifications]);
 
   useEffect(() => { saveSettings(); }, [saveSettings]);
 
@@ -342,6 +345,31 @@ export default function SettingsModal({ open, onClose, username, currentAvatar, 
                 </button>
                 <p className="text-xs text-[var(--muted)] mt-1">
                   Plays a short tone through your selected output device.
+                </p>
+              </div>
+
+              <hr className="border-[var(--accent-2)]/20" />
+
+              {/* Message Notifications */}
+              <div>
+                <div className="flex items-center justify-between">
+                  <label className="text-sm font-semibold text-[var(--text)]">
+                    Message Notifications
+                  </label>
+                  <button
+                    onClick={() => setMessageNotifications((v) => !v)}
+                    className={`w-10 h-5 rounded-full transition-colors relative shrink-0 ${
+                      messageNotifications ? "bg-[var(--accent)]" : "bg-[var(--panel-2)] border border-[var(--accent-2)]/30"
+                    }`}
+                    title={messageNotifications ? "Disable message sounds" : "Enable message sounds"}
+                  >
+                    <div className={`w-4 h-4 rounded-full bg-white absolute top-0.5 transition-transform ${
+                      messageNotifications ? "translate-x-5" : "translate-x-0.5"
+                    }`} />
+                  </button>
+                </div>
+                <p className="text-xs text-[var(--muted)] mt-1">
+                  Play a sound when a new message arrives while the tab is in the background.
                 </p>
               </div>
             </div>
