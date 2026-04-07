@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { displayName, truncateName } from "@/lib/utils";
 import Avatar from "@/components/Avatar";
+import ProfileCard from "@/components/ProfileCard";
 
 const EMOJI_DATA: { emoji: string; keywords: string }[] = [
   // Smileys & emotion
@@ -269,6 +270,7 @@ export default function MessageBubble({ message, isOwn, currentUserId, onEdit, o
   const [showActions, setShowActions] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [emojiSearch, setEmojiSearch] = useState("");
+  const [profileCard, setProfileCard] = useState<{ x: number; y: number } | null>(null);
 
   const shown = truncateName(message.author.username, 20);
 
@@ -327,9 +329,14 @@ export default function MessageBubble({ message, isOwn, currentUserId, onEdit, o
 
       <div className="flex-1 min-w-0">
         <div className="flex items-baseline gap-2">
-          <span className={`font-semibold text-sm ${isOwn ? "text-[var(--accent)]" : "text-[var(--text)]"}`}>
-            <span title={displayName(message.author.username)}>{shown}</span>
-          </span>
+          <button
+            type="button"
+            onClick={(e) => setProfileCard({ x: e.clientX, y: e.clientY })}
+            className={`font-semibold text-sm hover:underline cursor-pointer ${isOwn ? "text-[var(--accent)]" : "text-[var(--text)]"}`}
+            title={displayName(message.author.username)}
+          >
+            {shown}
+          </button>
           <span className="group/ts relative cursor-default">
             <span className="text-xs text-[var(--muted)]">{time}</span>
             <span className="absolute bottom-full left-0 mb-1 px-2 py-1 text-xs bg-black/90 text-white rounded whitespace-nowrap opacity-0 group-hover/ts:opacity-100 transition-opacity pointer-events-none z-10">
@@ -482,6 +489,16 @@ export default function MessageBubble({ message, isOwn, currentUserId, onEdit, o
             )}
           </div>
         </div>
+      )}
+
+      {profileCard && (
+        <ProfileCard
+          username={message.author.username}
+          avatar={message.author.avatar}
+          anchorX={profileCard.x}
+          anchorY={profileCard.y}
+          onClose={() => setProfileCard(null)}
+        />
       )}
     </div>
   );

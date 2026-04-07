@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { truncateName, displayName } from "@/lib/utils";
 import Avatar from "@/components/Avatar";
+import ProfileCard from "@/components/ProfileCard";
 
 const ROLE_COLORS: Record<string, string> = {
   owner: "#f59e0b",
@@ -23,6 +24,7 @@ interface Member {
   username: string;
   avatar?: string | null;
   role?: string;
+  joinedAt?: string;
 }
 
 interface MemberListProps {
@@ -49,6 +51,7 @@ export default function MemberList({ serverId, currentUserId, currentUserRole, o
   const [joinCode, setJoinCode] = useState("");
   const [joinError, setJoinError] = useState("");
   const [contextMenu, setContextMenu] = useState<{ memberId: string; x: number; y: number } | null>(null);
+  const [profileCard, setProfileCard] = useState<{ member: Member; x: number; y: number } | null>(null);
 
   useEffect(() => {
     fetch(`/api/servers/${serverId}/members`)
@@ -112,7 +115,8 @@ export default function MemberList({ serverId, currentUserId, currentUserRole, o
     return (
       <div
         key={m.id}
-        className={`flex items-center gap-2 px-3 py-1 ${online ? "" : "opacity-50"} ${canManage && !isSelf ? "cursor-pointer hover:bg-[var(--panel-2)]/50 rounded" : ""}`}
+        className={`flex items-center gap-2 px-3 py-1 cursor-pointer hover:bg-[var(--panel-2)]/50 rounded ${online ? "" : "opacity-50"}`}
+        onClick={(e) => setProfileCard({ member: m, x: e.clientX, y: e.clientY })}
         onContextMenu={(e) => {
           if (canManage && !isSelf) {
             e.preventDefault();
@@ -250,6 +254,19 @@ export default function MemberList({ serverId, currentUserId, currentUserRole, o
           </>
         )}
       </div>
+
+      {/* Profile card on click */}
+      {profileCard && (
+        <ProfileCard
+          username={profileCard.member.username}
+          avatar={profileCard.member.avatar}
+          role={profileCard.member.role}
+          joinedAt={profileCard.member.joinedAt}
+          anchorX={profileCard.x}
+          anchorY={profileCard.y}
+          onClose={() => setProfileCard(null)}
+        />
+      )}
 
       {/* Context menu for role management */}
       {contextMenu && (() => {
