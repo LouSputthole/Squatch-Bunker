@@ -5,6 +5,126 @@ import { getSocket } from "@/lib/socket";
 import { truncateName } from "@/lib/utils";
 import MessageBubble from "./MessageBubble";
 
+// ── Formatting toolbar ────────────────────────────────────────────────────────
+
+function wrapSelection(
+  textarea: HTMLTextAreaElement,
+  before: string,
+  after: string,
+  placeholder: string,
+  setter: (val: string) => void
+) {
+  const start = textarea.selectionStart;
+  const end = textarea.selectionEnd;
+  const selected = textarea.value.slice(start, end) || placeholder;
+  const newVal =
+    textarea.value.slice(0, start) +
+    before +
+    selected +
+    after +
+    textarea.value.slice(end);
+  setter(newVal);
+  setTimeout(() => {
+    textarea.focus();
+    textarea.setSelectionRange(
+      start + before.length,
+      start + before.length + selected.length
+    );
+  }, 0);
+}
+
+interface FormattingToolbarProps {
+  inputRef: React.RefObject<HTMLTextAreaElement>;
+  value: string;
+  onChange: (val: string) => void;
+}
+
+function FormattingToolbar({ inputRef, onChange }: FormattingToolbarProps) {
+  const btn =
+    "text-xs px-2 py-1 rounded hover:bg-[var(--accent-2)]/20 text-[var(--muted)] hover:text-[var(--text)] font-mono transition-colors";
+
+  function applyBold() {
+    if (!inputRef.current) return;
+    wrapSelection(inputRef.current, "**", "**", "bold text", onChange);
+  }
+  function applyItalic() {
+    if (!inputRef.current) return;
+    wrapSelection(inputRef.current, "_", "_", "italic text", onChange);
+  }
+  function applyCode() {
+    if (!inputRef.current) return;
+    wrapSelection(inputRef.current, "`", "`", "code", onChange);
+  }
+  function applyLink() {
+    if (!inputRef.current) return;
+    const textarea = inputRef.current;
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const selected = textarea.value.slice(start, end) || "link text";
+    const url = window.prompt("Enter URL:", "https://");
+    if (!url) return;
+    const newVal =
+      textarea.value.slice(0, start) +
+      "[" + selected + "](" + url + ")" +
+      textarea.value.slice(end);
+    onChange(newVal);
+    setTimeout(() => {
+      textarea.focus();
+      textarea.setSelectionRange(start + 1, start + 1 + selected.length);
+    }, 0);
+  }
+  function applyBullet() {
+    if (!inputRef.current) return;
+    const textarea = inputRef.current;
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    if (start === end) {
+      const newVal =
+        textarea.value.slice(0, start) + "\u2022 " + textarea.value.slice(end);
+      onChange(newVal);
+      setTimeout(() => {
+        textarea.focus();
+        textarea.setSelectionRange(start + 2, start + 2);
+      }, 0);
+    } else {
+      const before = textarea.value.slice(0, start);
+      const selected = textarea.value.slice(start, end);
+      const after = textarea.value.slice(end);
+      const bulleted = selected
+        .split("\n")
+        .map((line) => "\u2022 " + line)
+        .join("\n");
+      onChange(before + bulleted + after);
+      setTimeout(() => {
+        textarea.focus();
+        textarea.setSelectionRange(start, start + bulleted.length);
+      }, 0);
+    }
+  }
+
+  return (
+    <div className="border border-[var(--accent-2)]/30 rounded-t-lg bg-[var(--panel)] px-2 py-1 flex items-center gap-1">
+      <button type="button" onClick={applyBold} className={btn} title="Bold (Ctrl+B)">
+        <strong>B</strong>
+      </button>
+      <button type="button" onClick={applyItalic} className={btn} title="Italic (Ctrl+I)">
+        <em>I</em>
+      </button>
+      <button type="button" onClick={applyCode} className={btn} title="Inline code">
+        {"</>"}
+      </button>
+      <button type="button" onClick={applyLink} className={btn} title="Link (Ctrl+K)">
+        \U0001F517
+      </button>
+      <button type="button" onClick={applyBullet} className={btn} title="Bullet list">
+        \u2022
+      </button>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 interface ReactionGroup {
   count: number;
   users: string[];
@@ -81,9 +201,11 @@ export default function ChatPanel({
   const [isDragging, setIsDragging] = useState(false);
   const [slowRemaining, setSlowRemaining] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const [showToolbar, setShowToolbar] = useState(false);
   const dragCounterRef = useRef(0);
   const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  let pendingIdCounter = useRef(0);
+  const pendingIdCounter = useRef(0);
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -237,7 +359,7 @@ export default function ChatPanel({
     };
   }, [channelId, scrollToBottom, currentUserId]);
 
-  function handleInputChange(e: React.ChangeEvent<HTMLInputElement>) {
+  function handleInputChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
     setNewMessage(e.target.value);
 
     const socket = getSocket();
@@ -590,8 +712,9 @@ export default function ChatPanel({
             onClick={() => { setTopicDraft(topic); setEditingTopic(true); }}
             className="text-[var(--muted)] hover:text-[var(--text)] shrink-0"
             title="Edit topic"
+            aria-label="Edit channel topic"
           >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
               <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
             </svg>
@@ -602,6 +725,8 @@ export default function ChatPanel({
             onClick={() => setShowPinned((p) => !p)}
             className={`text-xs px-2 py-1 rounded transition-colors ${showPinned ? "bg-yellow-500/20 text-yellow-400" : "text-[var(--muted)] hover:text-yellow-400"}`}
             title="Pinned messages"
+            aria-label={showPinned ? "Hide pinned messages" : "Show pinned messages"}
+            aria-expanded={showPinned}
           >
             📌 {messages.filter((m) => m.pinned).length}
           </button>
@@ -621,7 +746,7 @@ export default function ChatPanel({
         </div>
       )}
 
-      <div className="flex-1 overflow-y-auto px-4 py-2">
+      <div role="log" aria-live="polite" aria-label={`Messages in #${channelName}`} className="flex-1 overflow-y-auto px-4 py-2">
         {loading ? (
           <div className="flex items-center justify-center h-full text-[var(--muted)]">
             Loading tracks...
@@ -665,11 +790,11 @@ export default function ChatPanel({
         <div ref={messagesEndRef} />
       </div>
 
-      <div className="h-6 px-4 shrink-0 flex items-center">
+      <div aria-live="polite" aria-atomic="true" className="h-6 px-4 shrink-0 flex items-center">
         {typingLabel && (
           <span className="flex items-center gap-1.5 text-xs text-[var(--muted)] italic">
             {typingLabel}
-            <span className="flex items-end gap-0.5 not-italic" aria-hidden>
+            <span className="flex items-end gap-0.5 not-italic" aria-hidden="true">
               <span className="w-1 h-1 rounded-full bg-current animate-bounce" style={{ animationDelay: "0ms" }} />
               <span className="w-1 h-1 rounded-full bg-current animate-bounce" style={{ animationDelay: "150ms" }} />
               <span className="w-1 h-1 rounded-full bg-current animate-bounce" style={{ animationDelay: "300ms" }} />
@@ -689,6 +814,7 @@ export default function ChatPanel({
             type="button"
             onClick={() => setReplyingTo(null)}
             className="shrink-0 text-[var(--muted)] hover:text-[var(--danger)] transition-colors ml-1"
+            aria-label="Cancel reply"
           >
             ✕
           </button>
@@ -696,15 +822,23 @@ export default function ChatPanel({
       )}
 
       <form onSubmit={handleSend} className={`px-4 pb-4 shrink-0 ${replyingTo ? "pt-0" : "pt-1"}`}>
-        <div className="flex items-center bg-[var(--panel)] rounded-lg border border-[var(--accent-2)]/30">
+        {showToolbar && (
+          <FormattingToolbar
+            inputRef={inputRef}
+            value={newMessage}
+            onChange={setNewMessage}
+          />
+        )}
+        <div className={`flex items-center bg-[var(--panel)] border border-[var(--accent-2)]/30 ${showToolbar ? "rounded-b-lg" : "rounded-lg"}`}>
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
             disabled={uploading}
             className="px-3 py-3 text-[var(--muted)] hover:text-[var(--text)] transition-colors disabled:opacity-30"
             title="Upload file"
+            aria-label="Upload file"
           >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" />
             </svg>
           </button>
@@ -715,7 +849,9 @@ export default function ChatPanel({
             onChange={handleFileUpload}
             className="hidden"
           />
+          <label htmlFor="message-input" className="sr-only">Message #{channelName}</label>
           <input
+            id="message-input"
             type="text"
             value={newMessage}
             onChange={handleInputChange}
@@ -727,6 +863,7 @@ export default function ChatPanel({
             type="submit"
             disabled={!newMessage.trim() || uploading || slowRemaining > 0}
             className="px-4 py-3 text-[var(--accent-2)] hover:text-[var(--accent)] disabled:opacity-30 transition-colors"
+            aria-label="Send message"
           >
             Send
           </button>
@@ -739,7 +876,7 @@ export default function ChatPanel({
         <div className="w-72 flex flex-col border-l border-[var(--accent-2)]/30 bg-[var(--panel)] shrink-0">
           <div className="h-12 px-3 flex items-center justify-between border-b border-[var(--accent-2)]/30 shrink-0">
             <span className="text-sm font-semibold text-[var(--text)]">Thread</span>
-            <button onClick={() => setThreadParent(null)} className="text-[var(--muted)] hover:text-[var(--text)] text-lg leading-none">&times;</button>
+            <button onClick={() => setThreadParent(null)} className="text-[var(--muted)] hover:text-[var(--text)] text-lg leading-none" aria-label="Close thread">&times;</button>
           </div>
           <div className="px-3 py-2 border-b border-[var(--accent-2)]/10 text-xs text-[var(--muted)]">
             Reply to <span className="text-[var(--text)] font-medium">{threadParent.author.username}</span>
@@ -768,7 +905,9 @@ export default function ChatPanel({
           </div>
           <form onSubmit={sendThreadMessage} className="px-3 pb-3 pt-1 shrink-0">
             <div className="flex items-center bg-[var(--panel-2)] rounded-lg border border-[var(--accent-2)]/30">
+              <label htmlFor="thread-input" className="sr-only">Reply in thread</label>
               <input
+                id="thread-input"
                 type="text"
                 value={threadInput}
                 onChange={(e) => setThreadInput(e.target.value)}
@@ -779,6 +918,7 @@ export default function ChatPanel({
                 type="submit"
                 disabled={!threadInput.trim()}
                 className="px-3 py-2 text-[var(--accent-2)] hover:text-[var(--accent)] disabled:opacity-30 transition-colors text-sm"
+                aria-label="Send thread reply"
               >
                 Send
               </button>

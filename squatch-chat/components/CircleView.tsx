@@ -3,6 +3,7 @@
 import { useRef, useEffect, useState } from "react";
 import { displayName } from "@/lib/utils";
 import Avatar from "@/components/Avatar";
+import ConnectionQualityIcon from "@/components/ConnectionQualityIcon";
 
 interface Participant {
   userId: string;
@@ -285,6 +286,13 @@ export default function CircleView({ participants, currentUserId, onContextMenu 
                 >
                   {isSelf ? "You" : displayName(p.username)}
                 </span>
+
+                {/* Connection quality icon below name */}
+                {!isSelf && p.connectionQuality && (
+                  <div className="flex items-center justify-center mt-0.5">
+                    <ConnectionQualityIcon quality={p.connectionQuality} pingMs={p.pingMs} />
+                  </div>
+                )}
               </div>
             </div>
           );

@@ -10,7 +10,8 @@ interface VoiceParticipant {
   muted: boolean;
   deafened?: boolean;
   speaking?: boolean;
-  connectionQuality?: "good" | "fair" | "poor";
+  connectionQuality?: "good" | "fair" | "poor" | "unknown";
+  pingMs?: number;
 }
 
 interface VoicePanelProps {
@@ -136,7 +137,8 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
 
   const [speakingUsers, setSpeakingUsers] = useState<Set<string>>(new Set());
 
-  const [connectionQualities, setConnectionQualities] = useState<Map<string, "good" | "fair" | "poor">>(new Map());
+  type QualityEntry = { quality: "good" | "fair" | "poor" | "unknown"; pingMs?: number };
+  const [connectionQualities, setConnectionQualities] = useState<Map<string, QualityEntry>>(new Map());
 
   const localStreamRef = useRef<MediaStream | null>(null);
   const peersRef = useRef<Map<string, RTCPeerConnection>>(new Map());
@@ -540,12 +542,17 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
         const uid = socketToUserRef.current.get(remoteSocketId);
         if (!uid) return;
         const state = pc.connectionState;
-        const quality: "good" | "fair" | "poor" =
+        const baseQuality: "good" | "fair" | "poor" | "unknown" =
           state === "connected" ? "good" :
           state === "connecting" || state === "new" ? "fair" : "poor";
         setConnectionQualities((prev) => {
           const next = new Map(prev);
-          if (state === "closed") { next.delete(uid); } else { next.set(uid, quality); }
+          if (state === "closed") {
+            next.delete(uid);
+          } else {
+            const prevEntry = next.get(uid);
+            next.set(uid, { quality: baseQuality, pingMs: prevEntry?.pingMs });
+          }
           return next;
         });
 
@@ -737,11 +744,18 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
         { userId: currentUserId, username: currentUsername, muted, deafened, camera: cameraOn, avatar: currentUserAvatar } as VoiceParticipant,
       ];
     }
-    const withSpeaking = allParticipants.map((p) => ({
-      ...p,
-      speaking: speakingUsers.has(p.userId),
-      connectionQuality: p.userId === currentUserId ? ("good" as const) : (connectionQualities.get(p.userId) ?? "fair"),
-    }));
+    const withSpeaking = allParticipants.map((p) => {
+      if (p.userId === currentUserId) {
+        return { ...p, speaking: speakingUsers.has(p.userId), connectionQuality: "good" as const, pingMs: undefined };
+      }
+      const entry = connectionQualities.get(p.userId);
+      return {
+        ...p,
+        speaking: speakingUsers.has(p.userId),
+        connectionQuality: entry?.quality ?? ("fair" as const),
+        pingMs: entry?.pingMs,
+      };
+    });
     onStateChange?.({ muted, deafened, reconnecting, participants: withSpeaking, sharing, cameraOn });
   }, [joined, muted, deafened, reconnecting, participants, speakingUsers, connectionQualities, sharing, cameraOn, onStateChange, currentUserId, currentUsername, currentUserAvatar]);
 
@@ -890,6 +904,54 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
             .catch((err) => console.error("[Voice] ICE restart failed:", err));
         }
       });
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [joined]);
+
+  // WebRTC stats polling — updates connection quality with real RTT and packet loss data every 5s
+  useEffect(() => {
+    if (!joined) return;
+    const interval = setInterval(async () => {
+      const newQuality = new Map<string, { quality: "good" | "fair" | "poor" | "unknown"; pingMs?: number }>();
+
+      for (const [socketId, pc] of peersRef.current) {
+        const uid = socketToUserRef.current.get(socketId) || socketId;
+        try {
+          const stats = await pc.getStats();
+          let packetsLost = 0, packetsReceived = 0, jitter = 0, rtt = 0;
+
+          stats.forEach((report) => {
+            if (report.type === "inbound-rtp") {
+              packetsLost += (report.packetsLost as number) || 0;
+              packetsReceived += (report.packetsReceived as number) || 0;
+              jitter = Math.max(jitter, (report.jitter as number) || 0);
+            }
+            if (report.type === "candidate-pair" && (report as RTCIceCandidatePairStats).currentRoundTripTime) {
+              rtt = ((report as RTCIceCandidatePairStats).currentRoundTripTime as number) * 1000;
+            }
+          });
+
+          const lossRate = packetsReceived > 0 ? packetsLost / (packetsLost + packetsReceived) : 0;
+          let quality: "good" | "fair" | "poor" | "unknown" = "good";
+          if (lossRate > 0.05 || jitter > 0.05 || rtt > 200) quality = "poor";
+          else if (lossRate > 0.02 || jitter > 0.02 || rtt > 100) quality = "fair";
+
+          newQuality.set(uid, { quality, pingMs: rtt > 0 ? Math.round(rtt) : undefined });
+        } catch {
+          newQuality.set(uid, { quality: "unknown" });
+        }
+      }
+
+      if (newQuality.size > 0) {
+        setConnectionQualities((prev) => {
+          const next = new Map(prev);
+          for (const [uid, entry] of newQuality) {
+            next.set(uid, entry);
+          }
+          return next;
+        });
+      }
     }, 5000);
 
     return () => clearInterval(interval);
