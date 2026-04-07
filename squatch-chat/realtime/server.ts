@@ -586,6 +586,14 @@ io.on("connection", (socket) => {
     }
   }
 
+  socket.on("dm:typing", (data: { conversationId: string; userId: string }) => {
+    socket.to(`conv:${data.conversationId}`).emit("dm:typing", {
+      conversationId: data.conversationId,
+      userId: data.userId,
+      username: currentUsername,
+    });
+  });
+
   // ─── Disconnect ───
 
   socket.on("disconnect", () => {

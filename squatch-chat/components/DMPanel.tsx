@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import Avatar from "@/components/Avatar";
 import { displayName, truncateName } from "@/lib/utils";
+import { getSocket } from "@/lib/socket";
 
 interface DMUser {
   id: string;
@@ -41,8 +42,10 @@ export default function DMPanel({ currentUserId, currentUsername, currentAvatar,
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(true);
   const [msgLoading, setMsgLoading] = useState(false);
+  const [typingUser, setTypingUser] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Fetch conversation list
   useEffect(() => {
@@ -75,6 +78,28 @@ export default function DMPanel({ currentUserId, currentUsername, currentAvatar,
 
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, [activeConv, loadMessages]);
+
+  // Join conversation room and listen for typing events
+  useEffect(() => {
+    if (!activeConv) return;
+    const socket = getSocket();
+    socket.emit("dm:join", activeConv.id);
+
+    function handleTyping(data: { conversationId: string; username: string; userId: string }) {
+      if (data.conversationId !== activeConv!.id) return;
+      if (data.userId === currentUserId) return;
+      setTypingUser(data.username);
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = setTimeout(() => setTypingUser(null), 3000);
+    }
+
+    socket.on("dm:typing", handleTyping);
+    return () => {
+      socket.off("dm:typing", handleTyping);
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      setTypingUser(null);
+    };
+  }, [activeConv, currentUserId]);
 
   async function sendMessage() {
     if (!input.trim() || !activeConv) return;
@@ -223,13 +248,23 @@ export default function DMPanel({ currentUserId, currentUsername, currentAvatar,
             <div ref={messagesEndRef} />
           </div>
 
+          {/* Typing indicator */}
+          {typingUser && (
+            <div className="text-xs text-[var(--muted)] px-4 py-1 italic">
+              {typingUser} is typing...
+            </div>
+          )}
+
           {/* Input */}
           <div className="p-3 border-t border-[var(--accent-2)]/30 bg-[var(--panel)]">
             <div className="flex gap-2">
               <input
                 type="text"
                 value={input}
-                onChange={(e) => setInput(e.target.value)}
+                onChange={(e) => {
+                  setInput(e.target.value);
+                  getSocket().emit("dm:typing", { conversationId: activeConv.id, userId: currentUserId });
+                }}
                 onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
                 placeholder={`Message ${truncateName(activeConv.otherUser.username)}`}
                 className="flex-1 bg-[var(--panel-2)] text-[var(--text)] text-sm px-3 py-2 rounded-lg border border-[var(--accent-2)]/30 focus:outline-none focus:border-amber-600/50"
