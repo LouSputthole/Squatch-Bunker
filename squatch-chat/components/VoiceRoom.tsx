@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { displayName } from "@/lib/utils";
 import Avatar from "@/components/Avatar";
 
@@ -109,6 +109,12 @@ function PushToTalkIcon({ active }: { active: boolean }) {
   );
 }
 
+interface Toast {
+  id: number;
+  message: string;
+  type: "join" | "leave";
+}
+
 export default function VoiceRoom({
   channelName,
   participants,
@@ -124,9 +130,42 @@ export default function VoiceRoom({
   reconnecting,
 }: VoiceRoomProps) {
   const [volumePopup, setVolumePopup] = useState<{ userId: string; volume: number } | null>(null);
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const prevParticipantsRef = useRef<VoiceParticipant[]>([]);
+  const toastCounterRef = useRef(0);
+  const isFirstRenderRef = useRef(true);
+
+  useEffect(() => {
+    if (isFirstRenderRef.current) {
+      isFirstRenderRef.current = false;
+      prevParticipantsRef.current = participants;
+      return;
+    }
+
+    const prev = prevParticipantsRef.current;
+    const prevIds = new Set(prev.map((p) => p.userId));
+    const currIds = new Set(participants.map((p) => p.userId));
+
+    const joined = participants.filter((p) => !prevIds.has(p.userId) && p.userId !== currentUserId);
+    const left = prev.filter((p) => !currIds.has(p.userId) && p.userId !== currentUserId);
+
+    const newToasts: Toast[] = [
+      ...joined.map((p) => ({ id: toastCounterRef.current++, message: `${displayName(p.username)} joined voice`, type: "join" as const })),
+      ...left.map((p) => ({ id: toastCounterRef.current++, message: `${displayName(p.username)} left voice`, type: "leave" as const })),
+    ];
+
+    if (newToasts.length > 0) {
+      setToasts((prev) => [...prev, ...newToasts]);
+      newToasts.forEach((t) => {
+        setTimeout(() => setToasts((prev) => prev.filter((x) => x.id !== t.id)), 3000);
+      });
+    }
+
+    prevParticipantsRef.current = participants;
+  }, [participants, currentUserId]);
 
   return (
-    <div className="flex-1 flex flex-col bg-[var(--panel-2)]">
+    <div className="flex-1 flex flex-col bg-[var(--panel-2)] relative">
       {/* Header */}
       <div className="h-12 px-4 flex items-center border-b border-[var(--accent-2)]/30 bg-[var(--panel-2)] shrink-0">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-green-400 mr-2 shrink-0">
@@ -250,6 +289,22 @@ export default function VoiceRoom({
           </div>
         )}
       </div>
+
+      {/* Join/leave toasts */}
+      {toasts.length > 0 && (
+        <div className="absolute top-14 right-3 flex flex-col gap-1.5 z-30 pointer-events-none">
+          {toasts.map((t) => (
+            <div
+              key={t.id}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium shadow-lg text-white animate-pulse-once ${
+                t.type === "join" ? "bg-green-600/90" : "bg-[var(--panel)]/90 border border-[var(--accent-2)]/30 text-[var(--text)]"
+              }`}
+            >
+              {t.type === "join" ? "→ " : "← "}{t.message}
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Bottom Controls Bar */}
       <div className="px-6 py-4 border-t border-[var(--accent-2)]/30 bg-[var(--panel)] shrink-0">
