@@ -3,6 +3,8 @@
 import { useState, useRef, useEffect } from "react";
 import { displayName } from "@/lib/utils";
 import Avatar from "@/components/Avatar";
+import CircleView from "@/components/CircleView";
+import EmberReactions from "@/components/EmberReactions";
 import type { ScreenShareInfo } from "@/components/VoicePanel";
 
 interface VoiceParticipant {
@@ -277,13 +279,13 @@ export default function VoiceRoom({
   const otherVoiceChannels = voiceChannels?.filter((c) => c.id !== channelId && c.type === "voice") || [];
 
   return (
-    <div className="flex-1 flex flex-col bg-[var(--panel-2)]">
+    <div className="flex-1 flex flex-col relative" style={{ background: "linear-gradient(180deg, #1a1a1e 0%, #151517 100%)" }}>
       {/* Header */}
-      <div className="h-12 px-4 flex items-center border-b border-[var(--accent-2)]/30 bg-[var(--panel-2)] shrink-0">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-green-400 mr-2 shrink-0">
+      <div className="h-12 px-4 flex items-center border-b border-amber-600/10 shrink-0" style={{ background: "rgba(26,26,30,0.9)" }}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2 shrink-0">
           <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" /><path d="M15.54 8.46a5 5 0 0 1 0 7.07" /><path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
         </svg>
-        <h3 className="font-bold text-[var(--text)]">{channelName}</h3>
+        <h3 className="font-bold text-amber-100">{channelName}</h3>
         {reconnecting ? (
           <span className="ml-2 text-xs text-yellow-400 animate-pulse">
             Reconnecting...
@@ -294,6 +296,9 @@ export default function VoiceRoom({
           </span>
         )}
       </div>
+
+      {/* Ember Reactions overlay */}
+      <EmberReactions channelId={channelId} />
 
       {/* Screen Share Viewer — takes priority over participant grid */}
       {(incomingScreenShares && incomingScreenShares.length > 0) && (
@@ -322,117 +327,48 @@ export default function VoiceRoom({
         );
       })()}
 
-      {/* Participant Grid (compact when screen sharing or video is on) */}
-      <div className={`${(incomingScreenShares && incomingScreenShares.length > 0) || (remoteVideoStreams && remoteVideoStreams.size > 0) || localCameraStream ? "h-28 shrink-0 overflow-x-auto overflow-y-hidden px-4 py-2" : "flex-1 overflow-y-auto p-6"}`}>
-        {participants.length === 0 ? (
-          <div className="flex items-center justify-center h-full text-[var(--muted)]">
-            <div className="text-center">
-              <p className="text-lg mb-1">No one here yet</p>
-              <p className="text-sm">Waiting for others to join...</p>
-            </div>
-          </div>
-        ) : (
-          <div className="flex flex-wrap gap-4 justify-center items-start content-center min-h-full">
-            {participants.map((p) => {
-              const isSelf = p.userId === currentUserId;
-              return (
-                <div
-                  key={p.userId}
-                  className={`flex flex-col items-center gap-2 p-4 rounded-xl transition-all cursor-default ${
-                    isSelf
-                      ? "bg-[var(--accent)]/10 border border-[var(--accent)]/30"
-                      : "bg-[var(--panel)]/50 border border-[var(--accent-2)]/20"
-                  }`}
-                  style={{ minWidth: 120 }}
-                  onContextMenu={(e) => {
-                    if (isSelf) return;
-                    e.preventDefault();
-                    if (canMod) {
-                      setModMenu({ userId: p.userId, username: p.username, x: e.clientX, y: e.clientY, muted: p.muted, deafened: p.deafened });
-                      setVolumePopup(null);
-                    } else {
-                      setVolumePopup({ userId: p.userId, volume: 1 });
-                    }
-                  }}
-                >
-                  {/* Avatar */}
-                  <div className="relative">
-                    <Avatar
-                      username={p.username}
-                      avatarUrl={p.avatar}
-                      size={64}
-                      className={`${
-                        isSelf
-                          ? "bg-[var(--accent)] text-[var(--bg)]"
-                          : "bg-[var(--accent-2)] text-[var(--text)]"
-                      } ${p.muted ? "opacity-60" : ""}`}
-                    />
-                    {/* Speaking ring — green glow when actively speaking */}
-                    {p.speaking && (
-                      <div className="absolute inset-[-3px] rounded-full border-[3px] border-green-400 shadow-[0_0_8px_rgba(74,222,128,0.5)] animate-pulse" />
-                    )}
-                    {/* Status badges */}
-                    <div className="absolute -bottom-1 -right-1 flex gap-0.5">
-                      {p.muted && (
-                        <div className="bg-[var(--bg)] rounded-full p-0.5">
-                          <MicOffSmall />
-                        </div>
-                      )}
-                      {p.deafened && (
-                        <div className="bg-[var(--bg)] rounded-full p-0.5">
-                          <DeafSmall />
-                        </div>
-                      )}
-                    </div>
-                  </div>
+      {/* The Circle — seats around the fire */}
+      {!((incomingScreenShares && incomingScreenShares.length > 0) || (remoteVideoStreams && remoteVideoStreams.size > 0) || localCameraStream) && (
+        <CircleView
+          participants={participants}
+          currentUserId={currentUserId}
+          onContextMenu={(e, p) => {
+            if (canMod) {
+              setModMenu({ userId: p.userId, username: p.username, x: e.clientX, y: e.clientY, muted: p.muted, deafened: p.deafened });
+              setVolumePopup(null);
+            } else {
+              setVolumePopup({ userId: p.userId, volume: 1 });
+            }
+          }}
+        />
+      )}
 
-                  {/* Name */}
-                  <span
-                    className={`text-sm font-medium truncate max-w-[100px] ${
-                      isSelf ? "text-[var(--accent)]" : "text-[var(--text)]"
-                    } ${p.muted ? "opacity-60" : ""}`}
-                  >
-                    {displayName(p.username)}
-                  </span>
-
-                  {/* Per-user volume slider */}
-                  {volumePopup?.userId === p.userId && !isSelf && (
-                    <div
-                      className="flex items-center gap-2 bg-[var(--bg)] rounded-lg px-3 py-2 border border-[var(--accent-2)]/30 shadow-lg"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-[var(--muted)] shrink-0">
-                        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-                      </svg>
-                      <input
-                        type="range"
-                        min="0"
-                        max="100"
-                        defaultValue="100"
-                        className="w-20 accent-[var(--accent)]"
-                        onChange={(e) => {
-                          const vol = parseInt(e.target.value) / 100;
-                          setVolumePopup({ userId: p.userId, volume: vol });
-                          onUserVolumeChange?.(p.userId, vol);
-                        }}
-                      />
-                      <span className="text-xs text-[var(--muted)] w-8">
-                        {Math.round((volumePopup.volume) * 100)}%
-                      </span>
-                      <button
-                        onClick={() => setVolumePopup(null)}
-                        className="text-[var(--muted)] hover:text-[var(--text)] ml-1"
-                      >
-                        ×
-                      </button>
-                    </div>
+      {/* Compact participant strip when video/screen share is active */}
+      {((incomingScreenShares && incomingScreenShares.length > 0) || (remoteVideoStreams && remoteVideoStreams.size > 0) || localCameraStream) && (
+        <div className="h-24 shrink-0 overflow-x-auto overflow-y-hidden px-4 py-2 flex items-center gap-3 justify-center bg-[#1a1a1e]/50">
+          {participants.map((p) => {
+            const isSelf = p.userId === currentUserId;
+            return (
+              <div key={p.userId} className="flex flex-col items-center gap-1 shrink-0">
+                <div className="relative">
+                  <Avatar
+                    username={p.username}
+                    avatarUrl={p.avatar}
+                    size={40}
+                    className={`${isSelf ? "bg-amber-600/80 text-[var(--bg)]" : "bg-[#2a2a2e] text-[var(--text)]"} ${p.muted ? "opacity-50" : ""}`}
+                  />
+                  {p.speaking && !p.muted && (
+                    <div className="absolute inset-[-2px] rounded-full border-2 border-amber-400/60" />
                   )}
                 </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
+                <span className={`text-[10px] truncate max-w-[50px] ${p.speaking && !p.muted ? "text-amber-300" : "text-[var(--muted)]"}`}>
+                  {isSelf ? "You" : displayName(p.username)}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* Mod context menu */}
       {modMenu && (
@@ -498,13 +434,50 @@ export default function VoiceRoom({
         </div>
       )}
 
+      {/* Floating volume popup */}
+      {volumePopup && (
+        <>
+          <div className="fixed inset-0 z-30" onClick={() => setVolumePopup(null)} />
+          <div
+            className="fixed z-40 flex items-center gap-2 bg-[#1a1a1e] rounded-lg px-3 py-2 border border-amber-600/20 shadow-xl"
+            style={{ left: "50%", bottom: 100, transform: "translateX(-50%)" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2" className="shrink-0">
+              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+            </svg>
+            <input
+              type="range"
+              min="0"
+              max="100"
+              defaultValue="100"
+              className="w-28 accent-amber-500"
+              onChange={(e) => {
+                const vol = parseInt(e.target.value) / 100;
+                setVolumePopup({ userId: volumePopup.userId, volume: vol });
+                onUserVolumeChange?.(volumePopup.userId, vol);
+              }}
+            />
+            <span className="text-xs text-amber-400/70 w-8">
+              {Math.round(volumePopup.volume * 100)}%
+            </span>
+            <button
+              onClick={() => setVolumePopup(null)}
+              className="text-[var(--muted)] hover:text-[var(--text)] ml-1"
+            >
+              x
+            </button>
+          </div>
+        </>
+      )}
+
       {/* Click outside to close mod menu */}
       {modMenu && (
         <div className="fixed inset-0 z-40" onClick={() => setModMenu(null)} />
       )}
 
       {/* Bottom Controls Bar */}
-      <div className="px-6 py-4 border-t border-[var(--accent-2)]/30 bg-[var(--panel)] shrink-0">
+      <div className="px-6 py-4 border-t border-amber-600/10 shrink-0" style={{ background: "rgba(26,26,30,0.95)" }}>
         <div className="flex items-center justify-center gap-3">
           <button
             onClick={onToggleMute}

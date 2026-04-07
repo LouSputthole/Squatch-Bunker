@@ -321,6 +321,18 @@ io.on("connection", (socket) => {
     });
   });
 
+  // ─── Ember Reactions ───
+
+  socket.on("ember:react", (data: { channelId: string; emoji: string }) => {
+    const ALLOWED = ["laugh", "applause", "agree", "wow", "skull", "clink", "nod"];
+    if (!ALLOWED.includes(data.emoji)) return;
+    socket.to(`voice:${data.channelId}`).emit("ember:reaction", {
+      userId: currentUserId,
+      username: currentUsername,
+      emoji: data.emoji,
+    });
+  });
+
   // ─── Screen Share ───
 
   // Notify room that a user started sharing screen
