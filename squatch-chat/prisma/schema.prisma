@@ -16,9 +16,10 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  memberships ServerMember[]
-  messages    Message[]
-  reactions   Reaction[]
+  memberships  ServerMember[]
+  messages     Message[]
+  reactions    Reaction[]
+  bookmarks    Bookmark[]
   ownedServers Server[]
 }
 
@@ -73,6 +74,7 @@ model Message {
   channel   Channel    @relation(fields: [channelId], references: [id])
   author    User       @relation(fields: [authorId], references: [id])
   reactions Reaction[]
+  bookmarks Bookmark[]
 }
 
 model Reaction {
@@ -86,4 +88,16 @@ model Reaction {
   user    User    @relation(fields: [userId], references: [id])
 
   @@unique([messageId, userId, emoji])
+}
+
+model Bookmark {
+  id        String   @id @default(uuid())
+  userId    String
+  messageId String
+  createdAt DateTime @default(now())
+
+  user    User    @relation(fields: [userId], references: [id])
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, messageId])
 }

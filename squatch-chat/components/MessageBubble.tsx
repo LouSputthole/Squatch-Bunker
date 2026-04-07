@@ -82,9 +82,11 @@ interface MessageBubbleProps {
   onEdit?: (messageId: string, newContent: string) => void;
   onDelete?: (messageId: string) => void;
   onReact?: (messageId: string, emoji: string) => void;
+  onBookmark?: (messageId: string, bookmarked: boolean) => void;
+  isBookmarked?: boolean;
 }
 
-export default function MessageBubble({ message, isOwn, currentUserId, onEdit, onDelete, onReact }: MessageBubbleProps) {
+export default function MessageBubble({ message, isOwn, currentUserId, onEdit, onDelete, onReact, onBookmark, isBookmarked }: MessageBubbleProps) {
   const [editing, setEditing] = useState(false);
   const [editContent, setEditContent] = useState(message.content);
   const [showActions, setShowActions] = useState(false);
@@ -213,6 +215,15 @@ export default function MessageBubble({ message, isOwn, currentUserId, onEdit, o
           >
             😀
           </button>
+          {onBookmark && (
+            <button
+              onClick={() => onBookmark(message.id, !isBookmarked)}
+              className={`text-xs px-1.5 py-0.5 ${isBookmarked ? "text-yellow-400" : "text-[var(--muted)] hover:text-yellow-400"}`}
+              title={isBookmarked ? "Remove bookmark" : "Bookmark"}
+            >
+              ★
+            </button>
+          )}
           {isOwn && (
             <>
               <button
