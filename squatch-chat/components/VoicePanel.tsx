@@ -9,6 +9,7 @@ interface VoiceParticipant {
   muted: boolean;
   deafened?: boolean;
   speaking?: boolean;
+  connectionQuality?: "good" | "fair" | "poor";
 }
 
 interface VoicePanelProps {
@@ -118,6 +119,8 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
   const [sharing, setSharing] = useState(false);
 
   const [speakingUsers, setSpeakingUsers] = useState<Set<string>>(new Set());
+
+  const [connectionQualities, setConnectionQualities] = useState<Map<string, "good" | "fair" | "poor">>(new Map());
 
   const localStreamRef = useRef<MediaStream | null>(null);
   const peersRef = useRef<Map<string, RTCPeerConnection>>(new Map());
@@ -517,6 +520,20 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
         }
       };
 
+      pc.onconnectionstatechange = () => {
+        const uid = socketToUserRef.current.get(remoteSocketId);
+        if (!uid) return;
+        const state = pc.connectionState;
+        const quality: "good" | "fair" | "poor" =
+          state === "connected" ? "good" :
+          state === "connecting" || state === "new" ? "fair" : "poor";
+        setConnectionQualities((prev) => {
+          const next = new Map(prev);
+          if (state === "closed") { next.delete(uid); } else { next.set(uid, quality); }
+          return next;
+        });
+      };
+
       if (initiator) {
         pc.createOffer()
           .then((offer) => pc.setLocalDescription(offer))
@@ -658,14 +675,15 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
     getLocalScreenStream: () => screenStreamRef.current,
   }), [toggleMute, toggleDeafen, leaveVoice, togglePTT, muted, deafened, startScreenShare, stopScreenShare, toggleCamera]);
 
-  // Report state changes to parent — merge speaking state into participants
+  // Report state changes to parent — merge speaking state and connection quality into participants
   useEffect(() => {
     const withSpeaking = participants.map((p) => ({
       ...p,
       speaking: speakingUsers.has(p.userId),
+      connectionQuality: p.userId === currentUserId ? ("good" as const) : (connectionQualities.get(p.userId) ?? "fair"),
     }));
     onStateChange?.({ muted, deafened, reconnecting, participants: withSpeaking, sharing, cameraOn });
-  }, [muted, deafened, reconnecting, participants, speakingUsers, sharing, cameraOn, onStateChange]);
+  }, [muted, deafened, reconnecting, participants, speakingUsers, connectionQualities, sharing, cameraOn, onStateChange, currentUserId]);
 
   // Participant updates — register BEFORE joining so we don't miss the initial broadcast
   useEffect(() => {

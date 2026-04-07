@@ -14,6 +14,7 @@ interface VoiceParticipant {
   deafened?: boolean;
   speaking?: boolean;
   avatar?: string | null;
+  connectionQuality?: "good" | "fair" | "poor";
 }
 
 interface VoiceChannel {
