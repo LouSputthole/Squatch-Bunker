@@ -136,6 +136,7 @@ function ChatPageInner() {
       {srv.activeServer ? (
         <ChannelList
           serverName={srv.activeServer.name}
+          serverBanner={(srv.activeServer as { banner?: string | null }).banner}
           channels={srv.activeServer.channels}
           activeChannelId={ch.activeChannel?.id}
           serverId={srv.activeServer.id}
