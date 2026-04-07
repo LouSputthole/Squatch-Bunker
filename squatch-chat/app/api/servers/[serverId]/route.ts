@@ -10,7 +10,7 @@ export async function PATCH(
 
   const { serverId } = await params;
   const body = await request.json();
-  const { name, regenerateInvite, icon } = body;
+  const { name, regenerateInvite, icon, banner } = body;
 
   try {
     const { prisma } = await import("@/lib/db");
@@ -21,10 +21,11 @@ export async function PATCH(
       return NextResponse.json({ error: "Only the server owner can do this" }, { status: 403 });
     }
 
-    const updates: { name?: string; inviteCode?: string; icon?: string | null } = {};
+    const updates: { name?: string; inviteCode?: string; icon?: string | null; banner?: string | null } = {};
     if (name && name.trim()) updates.name = name.trim();
     if (regenerateInvite) updates.inviteCode = crypto.randomUUID();
     if (typeof icon === "string") updates.icon = icon || null;
+    if ("banner" in body) updates.banner = banner || null;
 
     if (Object.keys(updates).length === 0) {
       return NextResponse.json({ error: "Nothing to update" }, { status: 400 });

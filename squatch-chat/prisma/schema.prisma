@@ -40,6 +40,7 @@ model Server {
   id        String   @id @default(uuid())
   name      String
   icon      String?
+  banner    String?
   ownerId   String
   createdAt DateTime @default(now())
 

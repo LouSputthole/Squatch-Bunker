@@ -23,6 +23,7 @@ interface VoiceParticipant {
 
 interface ChannelListProps {
   serverName: string;
+  serverBanner?: string | null;
   channels: Channel[];
   activeChannelId?: string;
   serverId: string;
@@ -82,6 +83,7 @@ function HeadphonesOffIcon() {
 
 export default function ChannelList({
   serverName,
+  serverBanner,
   channels,
   activeChannelId,
   serverId,
@@ -263,6 +265,11 @@ export default function ChannelList({
 
   return (
     <div className="w-60 bg-[var(--panel)] flex flex-col border-r border-[var(--accent-2)]/30 shrink-0">
+      {serverBanner && (
+        <div className="h-16 overflow-hidden shrink-0">
+          <img src={serverBanner} alt="Server banner" className="w-full h-full object-cover" />
+        </div>
+      )}
       <div className="h-12 px-4 flex items-center border-b border-[var(--accent-2)]/30 group/header">
         <h2 className="font-bold text-[var(--text)] truncate flex-1">{serverName}</h2>
         {currentUserRole === "owner" && (
