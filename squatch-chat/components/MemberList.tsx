@@ -35,6 +35,7 @@ interface MemberListProps {
   currentUserRole?: string;
   onlineMemberIds: Set<string>;
   memberStatuses?: Map<string, string>;
+  onViewProfile?: (userId: string) => void;
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -51,7 +52,7 @@ function MoonIcon() {
   );
 }
 
-export default function MemberList({ serverId, currentUserId, currentUserRole, onlineMemberIds, memberStatuses }: MemberListProps) {
+export default function MemberList({ serverId, currentUserId, currentUserRole, onlineMemberIds, memberStatuses, onViewProfile }: MemberListProps) {
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
   const [inviteCode, setInviteCode] = useState("");
@@ -313,6 +314,7 @@ export default function MemberList({ serverId, currentUserId, currentUserRole, o
       {profileCard && (
         <ProfileCard
           username={profileCard.member.username}
+          userId={profileCard.member.id}
           avatar={profileCard.member.avatar}
           role={profileCard.member.role}
           joinedAt={profileCard.member.joinedAt}
@@ -320,6 +322,7 @@ export default function MemberList({ serverId, currentUserId, currentUserRole, o
           anchorX={profileCard.x}
           anchorY={profileCard.y}
           onClose={() => setProfileCard(null)}
+          onViewFullProfile={onViewProfile ? (uid) => { setProfileCard(null); onViewProfile(uid); } : undefined}
         />
       )}
 

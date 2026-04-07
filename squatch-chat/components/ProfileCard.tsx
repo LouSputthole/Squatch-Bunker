@@ -27,9 +27,10 @@ export interface ProfileCardProps {
   anchorY: number;
   onClose: () => void;
   onMessageUser?: (userId: string) => void;
+  onViewFullProfile?: (userId: string) => void;
 }
 
-export default function ProfileCard({ username, userId, avatar, role, joinedAt, statusMessage, anchorX, anchorY, onClose, onMessageUser }: ProfileCardProps) {
+export default function ProfileCard({ username, userId, avatar, role, joinedAt, statusMessage, anchorX, anchorY, onClose, onMessageUser, onViewFullProfile }: ProfileCardProps) {
   const ref = useRef<HTMLDivElement>(null);
   const [friendStatus, setFriendStatus] = useState<string | null>(null);
 
@@ -143,6 +144,16 @@ export default function ProfileCard({ username, userId, avatar, role, joinedAt, 
              friendStatus === "sent" ? "Sent ✓" :
              friendStatus === "error" ? "Failed" :
              "Add Friend"}
+          </button>
+        </div>
+      )}
+      {userId && onViewFullProfile && (
+        <div className="mt-2">
+          <button
+            onClick={() => { onViewFullProfile(userId); onClose(); }}
+            className="w-full text-xs px-3 py-1.5 bg-[var(--panel-2)] text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--accent-2)]/20 rounded-lg transition-colors"
+          >
+            View Full Profile
           </button>
         </div>
       )}
