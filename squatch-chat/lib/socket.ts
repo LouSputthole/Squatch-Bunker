@@ -12,6 +12,10 @@ export function getSocket(): Socket {
       path: "/api/socketio",
       autoConnect: false,
       withCredentials: true,
+      reconnection: true,
+      reconnectionAttempts: 10,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 10000,
     });
   }
   return socket;

@@ -171,6 +171,7 @@ function ChatPageInner() {
           onTogglePTT={voice.togglePTT}
           onDisconnect={voice.disconnect}
           onUserVolumeChange={voice.setUserVolume}
+          reconnecting={voice.voiceState.reconnecting}
         />
       ) : ch.activeChannel && auth.user ? (
         <ChatPanel

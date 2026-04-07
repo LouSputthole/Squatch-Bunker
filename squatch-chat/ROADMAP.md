@@ -129,18 +129,20 @@
 - [ ] Report abuse flow
 - [ ] Clear UI state when user is force-muted
 
-### 7. Reconnect / Reliability [ ]
+### 7. Reconnect / Reliability [~]
+
+**What exists:**
+- [x] Reconnect flow (Socket.IO auto-reconnect + voice room rejoin)
+- [x] ICE restart / media renegotiation (auto-detect failed peers, restart ICE)
+- [x] Reconnecting UI state (yellow "Reconnecting..." banner)
+- [x] Silent recovery when possible (re-syncs mute/deafen state on reconnect)
+- [x] Retry backoff (Socket.IO exponential backoff 1s-10s, 10 attempts)
 
 **Still needed:**
-- [ ] Reconnect flow
 - [ ] Resume session token
-- [ ] ICE restart / media renegotiation
 - [ ] Channel fallback on server failure
-- [ ] Grace period for transient disconnects
-- [ ] Health checks
-- [ ] Reconnecting UI state
-- [ ] Silent recovery when possible
-- [ ] Retry backoff
+- [ ] Grace period for transient disconnects (server-side)
+- [ ] Health checks / heartbeats
 - [ ] Fallback to audio-only if video dies
 
 ### 8. Mobile-Capable Audio [ ]

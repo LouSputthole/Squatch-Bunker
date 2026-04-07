@@ -25,6 +25,7 @@ interface VoiceRoomProps {
   onTogglePTT?: () => void;
   onDisconnect: () => void;
   onUserVolumeChange?: (userId: string, volume: number) => void;
+  reconnecting?: boolean;
 }
 
 // SVG Icons (larger versions for the room view)
@@ -120,6 +121,7 @@ export default function VoiceRoom({
   onTogglePTT,
   onDisconnect,
   onUserVolumeChange,
+  reconnecting,
 }: VoiceRoomProps) {
   const [volumePopup, setVolumePopup] = useState<{ userId: string; volume: number } | null>(null);
 
@@ -131,9 +133,15 @@ export default function VoiceRoom({
           <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" /><path d="M15.54 8.46a5 5 0 0 1 0 7.07" /><path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
         </svg>
         <h3 className="font-bold text-[var(--text)]">{channelName}</h3>
-        <span className="ml-2 text-xs text-[var(--muted)]">
-          {participants.length} {participants.length === 1 ? "person" : "people"} connected
-        </span>
+        {reconnecting ? (
+          <span className="ml-2 text-xs text-yellow-400 animate-pulse">
+            Reconnecting...
+          </span>
+        ) : (
+          <span className="ml-2 text-xs text-[var(--muted)]">
+            {participants.length} {participants.length === 1 ? "person" : "people"} connected
+          </span>
+        )}
       </div>
 
       {/* Participant Grid */}

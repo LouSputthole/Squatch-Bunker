@@ -8,7 +8,7 @@ import type { VoicePanelHandle } from "@/components/VoicePanel";
 export function useVoice(activeServer: Server | null) {
   const [activeVoiceChannel, setActiveVoiceChannel] = useState<Channel | null>(null);
   const [voiceParticipants, setVoiceParticipants] = useState<Map<string, VoiceParticipant[]>>(new Map());
-  const [voiceState, setVoiceState] = useState({ muted: false, deafened: false, participants: [] as VoiceParticipant[] });
+  const [voiceState, setVoiceState] = useState({ muted: false, deafened: false, reconnecting: false, participants: [] as VoiceParticipant[] });
   const [pttMode, setPttMode] = useState(false);
   const voicePanelRef = useRef<VoicePanelHandle>(null);
 

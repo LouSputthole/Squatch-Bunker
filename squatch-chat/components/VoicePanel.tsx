@@ -18,7 +18,7 @@ interface VoicePanelProps {
   currentUserId: string;
   onParticipantsChange?: (channelId: string, participants: VoiceParticipant[]) => void;
   onDisconnect?: () => void;
-  onStateChange?: (state: { muted: boolean; deafened: boolean; participants: VoiceParticipant[] }) => void;
+  onStateChange?: (state: { muted: boolean; deafened: boolean; reconnecting: boolean; participants: VoiceParticipant[] }) => void;
 }
 
 export interface VoicePanelHandle {
@@ -94,6 +94,7 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
   const [pttMode, setPttMode] = useState(false);
   const [participants, setParticipants] = useState<VoiceParticipant[]>([]);
   const [connecting, setConnecting] = useState(false);
+  const [reconnecting, setReconnecting] = useState(false);
 
   const [speakingUsers, setSpeakingUsers] = useState<Set<string>>(new Set());
 
@@ -372,8 +373,8 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
       ...p,
       speaking: speakingUsers.has(p.userId),
     }));
-    onStateChange?.({ muted, deafened, participants: withSpeaking });
-  }, [muted, deafened, participants, speakingUsers, onStateChange]);
+    onStateChange?.({ muted, deafened, reconnecting, participants: withSpeaking });
+  }, [muted, deafened, reconnecting, participants, speakingUsers, onStateChange]);
 
   // Participant updates — register BEFORE joining so we don't miss the initial broadcast
   useEffect(() => {
@@ -470,6 +471,56 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
       socket.off("voice:ice-candidate", handleIceCandidate);
     };
   }, [joined, channelId, currentUserId, createPeer]);
+
+  // Socket reconnect handler — rejoin voice room after disconnect
+  useEffect(() => {
+    if (!joined) return;
+    const socket = getSocket();
+
+    function handleDisconnect() {
+      setReconnecting(true);
+      cleanupPeers();
+    }
+
+    function handleReconnect() {
+      setReconnecting(false);
+      // Rejoin voice channel
+      socket.emit("voice:join", { channelId, serverId });
+      // Re-sync mute/deafen state
+      if (muted) socket.emit("voice:mute", { channelId, muted: true });
+      if (deafened) socket.emit("voice:deafen", { channelId, deafened: true });
+    }
+
+    socket.on("disconnect", handleDisconnect);
+    socket.on("connect", handleReconnect);
+
+    return () => {
+      socket.off("disconnect", handleDisconnect);
+      socket.off("connect", handleReconnect);
+    };
+  }, [joined, channelId, serverId, muted, deafened, cleanupPeers]);
+
+  // ICE restart on peer connection failure
+  useEffect(() => {
+    if (!joined) return;
+    const interval = setInterval(() => {
+      peersRef.current.forEach((pc, socketId) => {
+        if (pc.connectionState === "failed" || pc.iceConnectionState === "failed") {
+          console.log("[Voice] ICE restart for peer:", socketId);
+          pc.restartIce();
+          pc.createOffer({ iceRestart: true })
+            .then((offer) => pc.setLocalDescription(offer))
+            .then(() => {
+              const socket = getSocket();
+              socket.emit("voice:offer", { to: socketId, offer: pc.localDescription! });
+            })
+            .catch((err) => console.error("[Voice] ICE restart failed:", err));
+        }
+      });
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [joined]);
 
   // Cleanup on unmount
   useEffect(() => {
