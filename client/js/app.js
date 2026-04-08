@@ -20,6 +20,14 @@ const state = {
   lastChatSenderId: null,
   /** timestamp of last chat message (for grouping within 5 min window) */
   lastChatTimestamp: 0,
+  /** @type {Map<string, object[]>} roomId → member list for all rooms (sidebar presence) */
+  lobbyPresence: new Map(),
+  /** roomId to auto-rejoin after a reconnect */
+  pendingRejoinRoomId: null,
+  /** push-to-talk mode toggle */
+  pttMode: false,
+  /** true while the PTT key is held down */
+  pttActive: false,
 };
 
 const voiceClient = new VoiceClient();
@@ -39,6 +47,7 @@ const roomMemberCount = $('room-member-count');
 const memberRoster    = $('member-roster');
 const btnMic          = $('btn-mic');
 const btnDeafen       = $('btn-deafen');
+const btnPtt          = $('btn-ptt');
 const btnDisconnect   = $('btn-disconnect');
 const speakingIndicator = $('speaking-indicator');
 const speakingLabel   = speakingIndicator.querySelector('.speaking-label');
@@ -149,8 +158,10 @@ function connectSocket() {
   });
 
   socket.on('disconnect', () => {
-    setConnectionStatus('Disconnected', 'error');
-    showToast('Disconnected from server', 'error');
+    // Save room so we can auto-rejoin on reconnect
+    state.pendingRejoinRoomId = state.currentRoomId;
+    setConnectionStatus('Disconnected — reconnecting…', 'error');
+    showToast('Connection lost. Reconnecting…', 'error');
     handleLocalLeave(false);
   });
 
@@ -167,14 +178,12 @@ function connectSocket() {
       state.activeRoomMembers.set(m.userId, m);
     }
     renderMemberRoster();
-    updateRoomOccupancyInSidebar(roomId, members.length);
   });
 
   socket.on('presence:member-joined', ({ roomId, member }) => {
     if (roomId !== state.currentRoomId) return;
     state.activeRoomMembers.set(member.userId, member);
     renderMemberRoster();
-    updateRoomOccupancyInSidebar(roomId, state.activeRoomMembers.size);
     showToast(`${member.username} joined the channel`);
     // Initiate WebRTC connection to new member
     if (member.userId !== state.userId) {
@@ -190,7 +199,6 @@ function connectSocket() {
     }
     state.activeRoomMembers.delete(userId);
     renderMemberRoster();
-    updateRoomOccupancyInSidebar(roomId, state.activeRoomMembers.size);
     voiceClient.onMemberLeft(userId);
   });
 
@@ -202,6 +210,27 @@ function connectSocket() {
       state.activeRoomMembers.set(userId, member);
       renderMemberRoster();
     }
+  });
+
+  // ── Lobby presence (sidebar: who's in each channel) ──
+
+  socket.on('lobby:snapshot', ({ rooms }) => {
+    state.lobbyPresence.clear();
+    for (const { roomId, members } of rooms) {
+      if (members.length > 0) {
+        state.lobbyPresence.set(roomId, members);
+      }
+    }
+    renderChannelList();
+  });
+
+  socket.on('lobby:room-update', ({ roomId, members }) => {
+    if (members.length === 0) {
+      state.lobbyPresence.delete(roomId);
+    } else {
+      state.lobbyPresence.set(roomId, members);
+    }
+    renderChannelList();
   });
 
   // ── WebRTC signaling ──
@@ -257,6 +286,16 @@ async function loadRooms() {
       state.rooms.set(room.id, room);
     }
     renderChannelList();
+
+    // Auto-rejoin previous room after a reconnect
+    if (state.pendingRejoinRoomId) {
+      const rejoinId = state.pendingRejoinRoomId;
+      state.pendingRejoinRoomId = null;
+      if (state.rooms.has(rejoinId)) {
+        showToast(`Rejoining ${state.rooms.get(rejoinId).name}…`);
+        await joinRoom(rejoinId);
+      }
+    }
   } catch (err) {
     console.error('[app] loadRooms error:', err);
     showToast('Could not load channels', 'error');
@@ -270,8 +309,9 @@ function renderChannelList() {
     item.className = 'channel-item' + (roomId === state.currentRoomId ? ' active' : '');
     item.dataset.roomId = roomId;
 
+    const members = state.lobbyPresence.get(roomId) || [];
     const cap = room.capacity === 0 ? '∞' : room.capacity;
-    const occ = room.occupancy ?? 0;
+    const occ = members.length;
 
     item.innerHTML = `
       <span class="channel-icon">🔊</span>
@@ -281,7 +321,34 @@ function renderChannelList() {
 
     item.addEventListener('click', () => handleChannelClick(roomId));
     channelList.appendChild(item);
+
+    // Member sub-list below the channel row (populated by lobby presence)
+    if (members.length > 0) {
+      const memberList = document.createElement('div');
+      memberList.className = 'channel-members-list';
+      for (const m of members) {
+        memberList.appendChild(makeSidebarMemberRow(m, roomId));
+      }
+      channelList.appendChild(memberList);
+    }
   }
+}
+
+function makeSidebarMemberRow(member, roomId) {
+  const row = document.createElement('div');
+  row.className = 'channel-member-row';
+  const bg = avatarColor(member.userId);
+  const ini = initials(member.username);
+  let icons = '';
+  if (member.deafened) icons += '<span title="Deafened">🔕</span>';
+  else if (member.muted) icons += '<span title="Muted">🔇</span>';
+  row.innerHTML = `
+    <div class="mini-avatar" style="background:${bg};">${ini}</div>
+    <span>${escapeHtml(member.username)}</span>
+    <span class="mini-icons">${icons}</span>
+  `;
+  row.addEventListener('click', () => handleChannelClick(roomId));
+  return row;
 }
 
 function updateRoomOccupancyInSidebar(roomId, count) {
@@ -341,7 +408,17 @@ async function joinRoom(roomId) {
   // Initialize voice (room:state event will give us the member list)
   // We pass empty array here; connectToPeer calls happen after room:state
   await voiceClient.joinRoom(roomId, state.userId, state.socket, []);
+
+  // If PTT mode is active, start in muted state
+  if (state.pttMode) {
+    state.muted = true;
+    voiceClient.setMuted(true);
+    state.socket.emit('mute-toggle', { roomId, muted: true });
+    updateMicButton();
+  }
+
   updateChatInputState();
+  updatePttButton();
 }
 
 function handleLocalLeave(emitEvent) {
@@ -364,11 +441,13 @@ function handleLocalLeave(emitEvent) {
   state.lastChatSenderId = null;
   state.lastChatTimestamp = 0;
 
-  // Reset mute/deafen state visually
+  // Reset mute/deafen and PTT active state visually
   state.muted = false;
   state.deafened = false;
+  state.pttActive = false;
   updateMicButton();
   updateDeafenButton();
+  updatePttButton();
   updateSpeakingIndicator(false);
 
   // UI
@@ -468,6 +547,67 @@ btnDeafen.addEventListener('click', () => {
 
 btnDisconnect.addEventListener('click', () => {
   handleLocalLeave(true);
+});
+
+// ── Push-to-talk ───────────────────────────────────────────────────────────
+
+btnPtt.addEventListener('click', () => {
+  if (!state.currentRoomId) return;
+  state.pttMode = !state.pttMode;
+  updatePttButton();
+  if (state.pttMode) {
+    // Entering PTT: force mute so the user holds Space to speak
+    state.muted = true;
+    voiceClient.setMuted(true);
+    state.socket.emit('mute-toggle', { roomId: state.currentRoomId, muted: true });
+    updateMicButton();
+    updateSpeakingIndicator(false);
+    showToast('Push-to-talk ON — hold Space to speak');
+  } else {
+    // Leaving PTT: release key state but keep current mute as-is
+    state.pttActive = false;
+    showToast('Push-to-talk OFF');
+  }
+});
+
+function updatePttButton() {
+  if (state.pttMode) {
+    btnPtt.classList.add('active');
+    btnPtt.title = 'Push-to-talk ON (hold Space) — click to disable';
+  } else {
+    btnPtt.classList.remove('active');
+    btnPtt.title = 'Enable push-to-talk (Space)';
+  }
+}
+
+document.addEventListener('keydown', (e) => {
+  if (e.code !== 'Space' || !state.pttMode || !state.currentRoomId) return;
+  if (document.activeElement === chatInput) return; // don't PTT while typing
+  if (e.repeat) return;
+  e.preventDefault();
+  if (!state.pttActive) {
+    state.pttActive = true;
+    state.muted = false;
+    voiceClient.setMuted(false);
+    if (state.socket && state.socket.connected) {
+      state.socket.emit('mute-toggle', { roomId: state.currentRoomId, muted: false });
+    }
+    updateMicButton();
+    updateSpeakingIndicator(false);
+  }
+});
+
+document.addEventListener('keyup', (e) => {
+  if (e.code !== 'Space' || !state.pttMode || !state.currentRoomId) return;
+  if (!state.pttActive) return;
+  state.pttActive = false;
+  state.muted = true;
+  voiceClient.setMuted(true);
+  if (state.socket && state.socket.connected) {
+    state.socket.emit('mute-toggle', { roomId: state.currentRoomId, muted: true });
+  }
+  updateMicButton();
+  updateSpeakingIndicator(false);
 });
 
 function updateMicButton() {

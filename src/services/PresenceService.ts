@@ -92,6 +92,14 @@ class PresenceService {
     return null;
   }
 
+  getAllRoomPresence(): { roomId: string; members: MemberState[] }[] {
+    const result: { roomId: string; members: MemberState[] }[] = [];
+    for (const [roomId, presence] of this.rooms.entries()) {
+      result.push({ roomId, members: Array.from(presence.members.values()) });
+    }
+    return result;
+  }
+
   startCleanup(): void {
     setInterval(() => {
       const now = Date.now();
@@ -113,6 +121,10 @@ class PresenceService {
               roomId,
             });
           }
+        }
+        if (stale.length > 0 && this.io) {
+          const updatedMembers = Array.from(presence.members.values());
+          this.io.to('lobby').emit('lobby:room-update', { roomId, members: updatedMembers });
         }
         if (presence.members.size === 0) {
           this.rooms.delete(roomId);

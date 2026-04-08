@@ -63,6 +63,11 @@ io.on('connection', (socket) => {
       session.userId = payload.userId;
       session.username = payload.username;
     }
+    // Join global lobby so this socket receives cross-room presence updates
+    socket.join('lobby');
+    // Send current presence snapshot so the sidebar can populate immediately
+    const snapshot = presenceService.getAllRoomPresence();
+    socket.emit('lobby:snapshot', { rooms: snapshot });
   });
 
   registerRoomHandlers(io, socket);

@@ -65,6 +65,9 @@ export function registerRoomHandlers(io: SocketServer, socket: Socket): void {
       const members = presenceService.getRoomPresence(roomId);
       socket.emit('room:state', { roomId, members });
 
+      // Broadcast updated member list to all clients for sidebar presence
+      io.to('lobby').emit('lobby:room-update', { roomId, members });
+
       // Send chat history to the joining user
       const history = chatService.getHistory(roomId);
       if (history.length > 0) {
@@ -87,6 +90,10 @@ export function registerRoomHandlers(io: SocketServer, socket: Socket): void {
     sessionRegistry.updateRoom(socket.id, null);
 
     io.to(`room:${roomId}`).emit('presence:member-left', { userId, roomId });
+
+    // Broadcast updated member list to all clients for sidebar presence
+    const updatedMembers = presenceService.getRoomPresence(roomId);
+    io.to('lobby').emit('lobby:room-update', { roomId, members: updatedMembers });
   });
 
   // heartbeat: { roomId }
@@ -165,6 +172,9 @@ export function registerRoomHandlers(io: SocketServer, socket: Socket): void {
         userId,
         roomId: currentRoomId,
       });
+      // Broadcast updated member list to all clients for sidebar presence
+      const updatedMembers = presenceService.getRoomPresence(currentRoomId);
+      io.to('lobby').emit('lobby:room-update', { roomId: currentRoomId, members: updatedMembers });
     }
   });
 }
