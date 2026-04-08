@@ -31,6 +31,49 @@
   </div>
 </div>
 
+<!-- Create Channel Modal -->
+<div id="create-channel-overlay" class="hidden">
+  <div id="create-channel-modal" role="dialog" aria-modal="true" aria-labelledby="create-channel-title">
+    <h2 id="create-channel-title">Create Channel</h2>
+    <p>Add a new voice channel to the server</p>
+    <form id="create-channel-form" autocomplete="off">
+      <div class="form-group">
+        <label for="channel-name-input">Channel Name</label>
+        <input
+          id="channel-name-input"
+          type="text"
+          placeholder="new-channel"
+          maxlength="40"
+          required
+        />
+      </div>
+      <div class="form-group">
+        <label for="channel-type-select">Channel Type</label>
+        <select id="channel-type-select">
+          <option value="voice">Voice</option>
+          <option value="stage">Stage</option>
+          <option value="private_voice">Private Voice</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="channel-capacity-input">User Limit <span class="label-hint">(0 = unlimited)</span></label>
+        <input
+          id="channel-capacity-input"
+          type="number"
+          min="0"
+          max="99"
+          value="0"
+          placeholder="0"
+        />
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn-cancel" id="create-channel-cancel">Cancel</button>
+        <button type="submit" class="btn-primary" id="create-channel-submit">Create Channel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <!-- Main App -->
 <div id="app">
   <!-- Sidebar -->
@@ -41,7 +84,10 @@
     </div>
 
     <div id="channel-list-wrapper">
-      <div class="channel-section-label">Voice Channels</div>
+      <div class="channel-section-label">
+        Voice Channels
+        <button id="btn-add-channel" class="add-channel-btn" title="Create Channel">+</button>
+      </div>
       <div id="channel-list">
         <!-- populated by app.js -->
       </div>

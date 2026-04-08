@@ -160,6 +160,64 @@ export function registerRoomHandlers(io: SocketServer, socket: Socket): void {
     });
   });
 
+  // create-room: { name, type?, capacity? }
+  socket.on(
+    'create-room',
+    (payload: { name: string; type?: string; capacity?: number }) => {
+      const session = sessionRegistry.get(socket.id);
+      if (!session?.userId) return;
+
+      const name = (payload.name || '').trim().slice(0, 40);
+      if (!name) {
+        socket.emit('error', { message: 'Channel name is required' });
+        return;
+      }
+
+      const validTypes = ['voice', 'stage', 'private_voice'];
+      const type = validTypes.includes(payload.type || '')
+        ? (payload.type as 'voice' | 'stage' | 'private_voice')
+        : 'voice';
+
+      const capacity = Math.max(0, Math.min(99, Math.floor(payload.capacity || 0)));
+
+      const room = roomService.createRoom({
+        name,
+        serverId: 'default',
+        type,
+        capacity,
+      });
+
+      io.to('lobby').emit('room:created', { room });
+    }
+  );
+
+  // delete-room: { roomId }
+  socket.on('delete-room', (payload: { roomId: string }) => {
+    const session = sessionRegistry.get(socket.id);
+    if (!session?.userId) return;
+
+    const { roomId } = payload;
+    if (!roomId) return;
+
+    const room = roomService.getRoom(roomId);
+    if (!room) {
+      socket.emit('error', { message: 'Room not found' });
+      return;
+    }
+
+    // Kick everyone out of the room first
+    const members = presenceService.getRoomPresence(roomId);
+    for (const member of members) {
+      presenceService.leaveRoom(roomId, member.userId);
+    }
+    if (members.length > 0) {
+      io.to(`room:${roomId}`).emit('room:deleted', { roomId });
+    }
+
+    roomService.deleteRoom(roomId);
+    io.to('lobby').emit('room:deleted', { roomId });
+  });
+
   // Built-in disconnect event
   socket.on('disconnect', () => {
     const session = sessionRegistry.unregister(socket.id);

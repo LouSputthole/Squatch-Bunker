@@ -58,6 +58,13 @@ const toastContainer  = $('toast-container');
 const chatMessages    = $('chat-messages');
 const chatInput       = $('chat-input');
 const chatSendBtn     = $('chat-send-btn');
+const btnAddChannel   = $('btn-add-channel');
+const createChannelOverlay = $('create-channel-overlay');
+const createChannelForm    = $('create-channel-form');
+const createChannelCancel  = $('create-channel-cancel');
+const channelNameInput     = $('channel-name-input');
+const channelTypeSelect    = $('channel-type-select');
+const channelCapacityInput = $('channel-capacity-input');
 
 // ── Utilities ──────────────────────────────────────────────────────────────
 
@@ -80,6 +87,20 @@ function avatarColor(userId) {
     hash = (hash * 31 + userId.charCodeAt(i)) >>> 0;
   }
   return colors[hash % colors.length];
+}
+
+function roomTypeIcon(type) {
+  switch (type) {
+    case 'stage':         return '🎙️';
+    case 'private_voice': return '🔒';
+    default:              return '🔊';
+  }
+}
+
+function roomTypeBadge(type) {
+  if (type === 'stage') return '<span class="channel-type-badge type-stage">Stage</span>';
+  if (type === 'private_voice') return '<span class="channel-type-badge type-private">Private</span>';
+  return '';
 }
 
 function showToast(message, type = 'info') {
@@ -264,6 +285,27 @@ function connectSocket() {
     scrollChatToBottom();
   });
 
+  // ── Room management events ──
+
+  socket.on('room:created', ({ room }) => {
+    state.rooms.set(room.id, room);
+    renderChannelList();
+    showToast(`Channel "${room.name}" created`);
+  });
+
+  socket.on('room:deleted', ({ roomId }) => {
+    const room = state.rooms.get(roomId);
+    const name = room ? room.name : 'Unknown';
+    state.rooms.delete(roomId);
+    state.lobbyPresence.delete(roomId);
+    // If we're in the deleted room, leave it
+    if (state.currentRoomId === roomId) {
+      handleLocalLeave(false);
+      showToast(`Channel "${name}" was deleted`, 'error');
+    }
+    renderChannelList();
+  });
+
   // ── VAD callback ──
   voiceClient.onSpeakingChange = (speaking) => {
     if (!state.currentRoomId || state.muted) return;
@@ -312,14 +354,30 @@ function renderChannelList() {
     const members = state.lobbyPresence.get(roomId) || [];
     const cap = room.capacity === 0 ? '∞' : room.capacity;
     const occ = members.length;
+    const icon = roomTypeIcon(room.type);
+    const badge = roomTypeBadge(room.type);
 
     item.innerHTML = `
-      <span class="channel-icon">🔊</span>
+      <span class="channel-icon">${icon}</span>
       <span class="channel-name">${escapeHtml(room.name)}</span>
+      ${badge}
       <span class="channel-occupancy">${occ}/${cap}</span>
+      <button class="channel-delete-btn" title="Delete channel">&times;</button>
     `;
 
-    item.addEventListener('click', () => handleChannelClick(roomId));
+    // Click on the row → join the channel
+    item.addEventListener('click', (e) => {
+      if (e.target.closest('.channel-delete-btn')) return;
+      handleChannelClick(roomId);
+    });
+
+    // Delete button handler
+    const delBtn = item.querySelector('.channel-delete-btn');
+    delBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      handleDeleteChannel(roomId, room.name);
+    });
+
     channelList.appendChild(item);
 
     // Member sub-list below the channel row (populated by lobby presence)
@@ -392,6 +450,8 @@ async function joinRoom(roomId) {
   emptyState.classList.add('hidden');
   voiceRoomPanel.classList.remove('hidden');
   roomHeaderName.textContent = room.name;
+  const headerIcon = document.querySelector('.room-header-icon');
+  if (headerIcon) headerIcon.textContent = roomTypeIcon(room.type);
   roomMemberCount.textContent = '0 members';
   memberRoster.innerHTML = '<div style="color:var(--color-text-muted);font-size:13px;padding:8px;">Joining…</div>';
 
@@ -743,6 +803,55 @@ function updateChatInputState() {
   chatInput.disabled = !active;
   chatSendBtn.disabled = !active;
   chatInput.placeholder = active ? 'Message the room…' : 'Join a channel to chat';
+}
+
+// ── Create / Delete Channel ────────────────────────────────────────────────
+
+function openCreateChannelModal() {
+  channelNameInput.value = '';
+  channelTypeSelect.value = 'voice';
+  channelCapacityInput.value = '0';
+  createChannelOverlay.classList.remove('hidden');
+  channelNameInput.focus();
+}
+
+function closeCreateChannelModal() {
+  createChannelOverlay.classList.add('hidden');
+}
+
+btnAddChannel.addEventListener('click', openCreateChannelModal);
+createChannelCancel.addEventListener('click', closeCreateChannelModal);
+
+createChannelOverlay.addEventListener('click', (e) => {
+  if (e.target === createChannelOverlay) closeCreateChannelModal();
+});
+
+createChannelForm.addEventListener('submit', (e) => {
+  e.preventDefault();
+  if (!state.socket || !state.socket.connected) {
+    showToast('Not connected to server', 'error');
+    return;
+  }
+
+  const name = channelNameInput.value.trim();
+  if (!name) return;
+
+  state.socket.emit('create-room', {
+    name,
+    type: channelTypeSelect.value,
+    capacity: parseInt(channelCapacityInput.value, 10) || 0,
+  });
+
+  closeCreateChannelModal();
+});
+
+function handleDeleteChannel(roomId, roomName) {
+  if (!state.socket || !state.socket.connected) {
+    showToast('Not connected to server', 'error');
+    return;
+  }
+  if (!confirm(`Delete "${roomName}"? Everyone in this channel will be disconnected.`)) return;
+  state.socket.emit('delete-room', { roomId });
 }
 
 // ── Bootstrap ──────────────────────────────────────────────────────────────
