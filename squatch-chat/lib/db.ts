@@ -42,12 +42,18 @@ function createPrismaClient(): InstanceType<typeof PrismaClient> {
 }
 
 const globalForPrisma = globalThis as unknown as {
-  prisma: InstanceType<typeof PrismaClient>;
+  prisma: InstanceType<typeof PrismaClient> | undefined;
 };
 
-export const prisma = globalForPrisma.prisma || createPrismaClient();
-
-if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
+/** Lazy-initialized Prisma client — avoids connection during build */
+export const prisma = new Proxy({} as InstanceType<typeof PrismaClient>, {
+  get(_target, prop) {
+    if (!globalForPrisma.prisma) {
+      globalForPrisma.prisma = createPrismaClient();
+    }
+    return (globalForPrisma.prisma as unknown as Record<string | symbol, unknown>)[prop];
+  },
+});
 
 /** Returns which database backend is active */
 export function getDbType(): DbType {

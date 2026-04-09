@@ -28,7 +28,7 @@ export async function GET(request: Request) {
 
     const messages = await prisma.message.findMany({
       where: {
-        content: { contains: query, mode: "insensitive" },
+        content: { contains: query },
         channel: { serverId },
       },
       include: {

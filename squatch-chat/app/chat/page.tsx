@@ -19,7 +19,7 @@ import DMPanel from "@/components/DMPanel";
 import UserProfileModal from "@/components/UserProfileModal";
 import FriendPanel from "@/components/FriendPanel";
 import OnboardingWizard from "@/components/OnboardingWizard";
-import { connectSocket, disconnectSocket } from "@/lib/socket";
+import { connectSocket, disconnectSocket, getSocket } from "@/lib/socket";
 import { displayName } from "@/lib/utils";
 
 import { useAuth } from "@/hooks/useAuth";
@@ -95,7 +95,6 @@ function ChatPageInner() {
 
   // Notification socket listeners
   useEffect(() => {
-    const { getSocket } = require("@/lib/socket");
     const s = getSocket();
 
     function pushNotification(title: string, body: string) {
