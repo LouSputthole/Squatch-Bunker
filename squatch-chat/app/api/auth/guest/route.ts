@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import jwt from "jsonwebtoken";
+import { config } from "@/lib/config";
 
-const JWT_SECRET = process.env.JWT_SECRET || "campfire-secret-change-me";
-const COOKIE_NAME = process.env.COOKIE_NAME || "squatch-token";
+const JWT_SECRET = config.jwtSecret;
+const COOKIE_NAME = config.cookieName;
 
 export async function POST(request: Request) {
   try {
@@ -53,11 +54,6 @@ export async function POST(request: Request) {
     const userId = persistedUser?.id || guestUserId;
     const token = jwt.sign({ userId, username: guestUsername }, JWT_SECRET, { expiresIn: "7d" });
 
-    const isProduction = process.env.NODE_ENV === "production";
-    const secure = isProduction ? " Secure;" : "";
-    const sameSite = isProduction ? "None" : "Lax";
-    const cookieFlags = `Path=/; HttpOnly; SameSite=${sameSite};${secure} Max-Age=${60 * 60 * 24 * 7}`;
-
     const response = NextResponse.json(
       {
         user: {
@@ -69,7 +65,7 @@ export async function POST(request: Request) {
       },
       { status: 201 }
     );
-    response.headers.append("Set-Cookie", `${COOKIE_NAME}=${token}; ${cookieFlags}`);
+    response.headers.append("Set-Cookie", `${COOKIE_NAME}=${token}; ${config.cookieFlags}`);
     return response;
   } catch (err) {
     console.error("[Campfire] Guest auth error:", err);

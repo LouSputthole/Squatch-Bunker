@@ -18,10 +18,13 @@ export const config = {
   // Environment
   isProduction: process.env.NODE_ENV === "production",
 
-  // Cookie settings — auto-adjust for production
+  // Cookie settings — use Lax by default (works for same-origin on HTTP LAN).
+  // SameSite=None requires Secure (HTTPS). Only opt in via COOKIE_SECURE=1
+  // when running behind HTTPS with cross-origin needs.
   get cookieFlags(): string {
-    const secure = this.isProduction ? " Secure;" : "";
-    const sameSite = this.isProduction ? "None" : "Lax";
+    const forceSecure = process.env.COOKIE_SECURE === "1";
+    const secure = forceSecure ? " Secure;" : "";
+    const sameSite = forceSecure ? "None" : "Lax";
     return `Path=/; HttpOnly; SameSite=${sameSite};${secure} Max-Age=${60 * 60 * 24 * 7}`;
   },
 
