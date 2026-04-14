@@ -11,6 +11,7 @@ import GifPicker from "./GifPicker";
 import SlashCommandMenu, { SLASH_COMMANDS } from "./SlashCommandMenu";
 import MentionAutocomplete from "./MentionAutocomplete";
 import LinkPreviews from "./LinkPreview";
+import { checkAutoMod } from "./AutoModSettings";
 
 // ── Formatting toolbar ────────────────────────────────────────────────────────
 
@@ -457,6 +458,15 @@ export default function ChatPanel({
     if (!newMessage.trim()) return;
 
     let content = newMessage.trim();
+
+    // Auto-mod check
+    if (serverId) {
+      const automod = checkAutoMod(serverId, content);
+      if (automod.blocked) {
+        alert(`Message blocked by auto-mod: contains "${automod.word}"`);
+        return;
+      }
+    }
 
     // Process slash commands
     if (content.startsWith("/")) {

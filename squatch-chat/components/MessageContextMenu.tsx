@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
+import EmojiPicker from "./EmojiPicker";
 
 interface MessageContextMenuProps {
   x: number;
@@ -48,6 +49,7 @@ export default function MessageContextMenu({
   const menuRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ x, y });
   const [showEmojiRow, setShowEmojiRow] = useState(false);
+  const [showFullPicker, setShowFullPicker] = useState(false);
   const [focusIdx, setFocusIdx] = useState(0);
 
   const isOwn = message.author.id === currentUserId;
@@ -158,7 +160,7 @@ export default function MessageContextMenu({
         <span>😀</span>
         <span>React</span>
       </button>
-      {showEmojiRow && (
+      {showEmojiRow && !showFullPicker && (
         <div className="flex gap-0.5 px-2 py-1 flex-wrap">
           {QUICK_EMOJIS.map((emoji) => (
             <button
@@ -171,6 +173,21 @@ export default function MessageContextMenu({
               {emoji}
             </button>
           ))}
+          <button
+            className="text-xs p-1 rounded hover:bg-[var(--panel-2)] transition-colors text-[var(--muted)] hover:text-[var(--text)]"
+            onClick={() => setShowFullPicker(true)}
+            role="menuitem"
+          >
+            More...
+          </button>
+        </div>
+      )}
+      {showFullPicker && (
+        <div className="absolute left-full top-0 ml-1 z-[10000]" onMouseDown={(e) => e.stopPropagation()}>
+          <EmojiPicker
+            onSelect={(emoji) => { onReact(emoji); onClose(); }}
+            onClose={() => setShowFullPicker(false)}
+          />
         </div>
       )}
 
