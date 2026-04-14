@@ -6,6 +6,11 @@ import { truncateName } from "@/lib/utils";
 import { sounds } from "@/lib/sounds";
 import MessageBubble from "./MessageBubble";
 import PinnedMessagesPanel from "./PinnedMessagesPanel";
+import EmojiPicker from "./EmojiPicker";
+import GifPicker from "./GifPicker";
+import SlashCommandMenu, { SLASH_COMMANDS } from "./SlashCommandMenu";
+import MentionAutocomplete from "./MentionAutocomplete";
+import LinkPreviews from "./LinkPreview";
 
 // ── Formatting toolbar ────────────────────────────────────────────────────────
 
@@ -157,6 +162,12 @@ interface Message {
   isSystem?: boolean;
 }
 
+interface MemberInfo {
+  id: string;
+  username: string;
+  avatar?: string | null;
+}
+
 interface ChatPanelProps {
   channelId: string;
   channelName: string;
@@ -167,6 +178,7 @@ interface ChatPanelProps {
   currentAvatar?: string | null;
   canPin?: boolean;
   canEditTopic?: boolean;
+  serverId?: string;
 }
 
 export default function ChatPanel({
@@ -179,6 +191,7 @@ export default function ChatPanel({
   currentAvatar,
   canPin,
   canEditTopic,
+  serverId,
 }: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState("");
@@ -209,6 +222,12 @@ export default function ChatPanel({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const [showToolbar, setShowToolbar] = useState(false);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [showGifPicker, setShowGifPicker] = useState(false);
+  const [slashQuery, setSlashQuery] = useState<string | null>(null);
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const [translations, setTranslations] = useState<Map<string, string>>(new Map());
+  const [members, setMembers] = useState<MemberInfo[]>([]);
   const dragCounterRef = useRef(0);
   const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pendingIdCounter = useRef(0);
@@ -227,6 +246,22 @@ export default function ChatPanel({
   }, []);
 
 
+
+  // Fetch server members for @mention autocomplete
+  useEffect(() => {
+    if (!serverId) return;
+    fetch(`/api/servers/${serverId}/members`)
+      .then((r) => r.json())
+      .then((data) => {
+        const list = (data.members || []).map((m: { id: string; username: string; avatar?: string | null }) => ({
+          id: m.id,
+          username: m.username,
+          avatar: m.avatar,
+        }));
+        setMembers(list);
+      })
+      .catch(() => {});
+  }, [serverId]);
 
   // Sync topic when channel changes
   useEffect(() => {
@@ -368,10 +403,26 @@ export default function ChatPanel({
   }, [channelId, scrollToBottom, currentUserId]);
 
   function handleInputChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
-    setNewMessage(e.target.value);
+    const val = e.target.value;
+    setNewMessage(val);
+
+    // Slash command detection
+    if (val.startsWith("/") && !val.includes(" ")) {
+      setSlashQuery(val.slice(1));
+    } else {
+      setSlashQuery(null);
+    }
+
+    // @mention detection
+    const mentionMatch = val.match(/@(\w*)$/);
+    if (mentionMatch) {
+      setMentionQuery(mentionMatch[1]);
+    } else {
+      setMentionQuery(null);
+    }
 
     const socket = getSocket();
-    if (!isTypingRef.current && e.target.value.length > 0) {
+    if (!isTypingRef.current && val.length > 0) {
       isTypingRef.current = true;
       socket.emit("typing:start", channelId);
     }
@@ -383,11 +434,41 @@ export default function ChatPanel({
     }, 3000);
   }
 
+  async function handleTranslate(messageId: string, text: string) {
+    if (translations.has(messageId)) {
+      setTranslations((prev) => { const next = new Map(prev); next.delete(messageId); return next; });
+      return;
+    }
+    try {
+      const res = await fetch("/api/translate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, target: "en" }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setTranslations((prev) => new Map(prev).set(messageId, data.translatedText));
+      }
+    } catch { /* ignore */ }
+  }
+
   async function handleSend(e: React.FormEvent) {
     e.preventDefault();
     if (!newMessage.trim()) return;
 
-    const content = newMessage.trim();
+    let content = newMessage.trim();
+
+    // Process slash commands
+    if (content.startsWith("/")) {
+      const spaceIdx = content.indexOf(" ");
+      const cmdName = spaceIdx > 0 ? content.slice(1, spaceIdx) : content.slice(1);
+      const args = spaceIdx > 0 ? content.slice(spaceIdx + 1) : "";
+      const cmd = SLASH_COMMANDS.find((c) => c.name === cmdName);
+      if (cmd) {
+        content = cmd.execute(args);
+        if (!content) return;
+      }
+    }
     setNewMessage("");
     setFirstUnreadId(null);
 
@@ -814,6 +895,8 @@ export default function ChatPanel({
                 onScrollToMessage={scrollToMessage}
                 onPin={handlePin}
                 onThread={openThread}
+                onTranslate={handleTranslate}
+                translatedText={translations.get(msg.id) ?? null}
               />
             </div>
           ))
@@ -852,7 +935,75 @@ export default function ChatPanel({
         </div>
       )}
 
-      <form onSubmit={handleSend} className={`px-4 pb-4 pb-safe shrink-0 ${replyingTo ? "pt-0" : "pt-1"}`}>
+      <form onSubmit={handleSend} className={`px-4 pb-4 pb-safe shrink-0 ${replyingTo ? "pt-0" : "pt-1"} relative`}>
+        {/* Slash command menu */}
+        {slashQuery !== null && (
+          <SlashCommandMenu
+            query={slashQuery}
+            onSelect={(cmd) => {
+              const spaceIdx = newMessage.indexOf(" ");
+              const args = spaceIdx > 0 ? newMessage.slice(spaceIdx + 1) : "";
+              setNewMessage(cmd.execute(args));
+              setSlashQuery(null);
+              inputRef.current?.focus();
+            }}
+            onClose={() => setSlashQuery(null)}
+          />
+        )}
+
+        {/* @mention autocomplete */}
+        {mentionQuery !== null && members.length > 0 && (
+          <MentionAutocomplete
+            query={mentionQuery}
+            members={members}
+            onSelect={(user) => {
+              const mentionRegex = /@\w*$/;
+              setNewMessage((prev) => prev.replace(mentionRegex, `@${user.username} `));
+              setMentionQuery(null);
+              inputRef.current?.focus();
+            }}
+            onClose={() => setMentionQuery(null)}
+          />
+        )}
+
+        {/* Emoji picker popover */}
+        {showEmojiPicker && (
+          <div className="absolute bottom-full right-4 mb-2 z-50">
+            <EmojiPicker
+              onSelect={(emoji) => {
+                setNewMessage((prev) => prev + emoji);
+                inputRef.current?.focus();
+              }}
+              onClose={() => setShowEmojiPicker(false)}
+            />
+          </div>
+        )}
+
+        {/* GIF picker popover */}
+        {showGifPicker && (
+          <div className="absolute bottom-full right-4 mb-2 z-50">
+            <GifPicker
+              onSelect={async (gifUrl) => {
+                // Send GIF as an attachment message
+                const res = await fetch("/api/messages", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ channelId, content: "", attachmentUrl: gifUrl, attachmentName: "gif" }),
+                });
+                if (res.ok) {
+                  const { message } = await res.json();
+                  setMessages((prev) => [...prev, message]);
+                  setTimeout(scrollToBottom, 50);
+                  const socket = getSocket();
+                  socket.emit("message:send", { channelId, message });
+                }
+                setShowGifPicker(false);
+              }}
+              onClose={() => setShowGifPicker(false)}
+            />
+          </div>
+        )}
+
         {showToolbar && (
           <FormattingToolbar
             inputRef={inputRef}
@@ -939,6 +1090,24 @@ export default function ChatPanel({
             title="Toggle formatting toolbar"
           >
             Aa
+          </button>
+          <button
+            type="button"
+            onClick={() => { setShowEmojiPicker((v) => !v); setShowGifPicker(false); }}
+            className={`px-1.5 py-3 text-base transition-colors ${showEmojiPicker ? "text-[var(--accent-2)]" : "text-[var(--muted)] hover:text-[var(--text)]"}`}
+            title="Emoji picker"
+            aria-label="Emoji picker"
+          >
+            😀
+          </button>
+          <button
+            type="button"
+            onClick={() => { setShowGifPicker((v) => !v); setShowEmojiPicker(false); }}
+            className={`px-1.5 py-3 text-xs font-bold transition-colors ${showGifPicker ? "text-[var(--accent-2)]" : "text-[var(--muted)] hover:text-[var(--text)]"}`}
+            title="GIF picker"
+            aria-label="GIF picker"
+          >
+            GIF
           </button>
           <button
             type="submit"

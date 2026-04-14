@@ -20,6 +20,7 @@ interface MessageContextMenuProps {
   onReact: (emoji: string) => void;
   onCopyText: () => void;
   onBookmark: () => void;
+  onTranslate?: () => void;
   onClose: () => void;
 }
 
@@ -41,6 +42,7 @@ export default function MessageContextMenu({
   onReact,
   onCopyText,
   onBookmark,
+  onTranslate,
   onClose,
 }: MessageContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
@@ -54,10 +56,11 @@ export default function MessageContextMenu({
     const items: string[] = ["reply", "react"];
     if (isOwn && onEdit) items.push("edit");
     items.push("copytext", "bookmark");
+    if (onTranslate && message.content) items.push("translate");
     if (canPin) items.push("pin");
     if (isOwn && onDelete) items.push("delete");
     return items;
-  }, [isOwn, canPin, onEdit, onDelete]);
+  }, [isOwn, canPin, onEdit, onDelete, onTranslate, message.content]);
 
   // Flip position to avoid viewport overflow
   useEffect(() => {
@@ -193,7 +196,15 @@ export default function MessageContextMenu({
         <span>Bookmark</span>
       </button>
 
-      {/* 7. Pin/Unpin — only if canPin */}
+      {/* 7. Translate */}
+      {onTranslate && message.content && (
+        <button className={ITEM_CLASS} onClick={wrap(onTranslate)} {...itemProps("translate")}>
+          <span>🌐</span>
+          <span>Translate</span>
+        </button>
+      )}
+
+      {/* 8. Pin/Unpin — only if canPin */}
       {canPin && (
         <button
           className={ITEM_CLASS}

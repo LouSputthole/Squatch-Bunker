@@ -9,21 +9,42 @@ interface OGData {
   url: string;
 }
 
-export function LinkPreview({ url }: { url: string }) {
-  const [data, setData] = useState<OGData | null>(null);
-  const [failed, setFailed] = useState(false);
+const previewCache = new Map<string, OGData | null>();
+
+const URL_REGEX = /https?:\/\/[^\s<)]+/g;
+
+/** Extract up to 3 URLs from text */
+export function extractUrls(text: string): string[] {
+  return Array.from(text.matchAll(URL_REGEX), (m) => m[0]).slice(0, 3);
+}
+
+function LinkPreviewCard({ url }: { url: string }) {
+  const [data, setData] = useState<OGData | null>(previewCache.get(url) ?? null);
+  const [loaded, setLoaded] = useState(previewCache.has(url));
 
   useEffect(() => {
-    fetch(`/api/og-preview?url=${encodeURIComponent(url)}`)
+    if (previewCache.has(url)) {
+      setData(previewCache.get(url) ?? null);
+      setLoaded(true);
+      return;
+    }
+    const controller = new AbortController();
+    fetch(`/api/og-preview?url=${encodeURIComponent(url)}`, { signal: controller.signal })
       .then((r) => r.json())
       .then((d) => {
-        if (d.title || d.description) setData(d);
-        else setFailed(true);
+        if (d.title || d.description) {
+          previewCache.set(url, d);
+          setData(d);
+        } else {
+          previewCache.set(url, null);
+        }
       })
-      .catch(() => setFailed(true));
+      .catch(() => { previewCache.set(url, null); })
+      .finally(() => setLoaded(true));
+    return () => controller.abort();
   }, [url]);
 
-  if (failed || !data) return null;
+  if (!loaded || !data) return null;
 
   return (
     <a
@@ -37,6 +58,7 @@ export function LinkPreview({ url }: { url: string }) {
           src={data.image}
           alt={data.title ?? ""}
           className="w-full h-32 object-cover"
+          loading="lazy"
           onError={(e) => (e.currentTarget.style.display = "none")}
         />
       )}
@@ -48,5 +70,22 @@ export function LinkPreview({ url }: { url: string }) {
         )}
       </div>
     </a>
+  );
+}
+
+export function LinkPreview({ url }: { url: string }) {
+  return <LinkPreviewCard url={url} />;
+}
+
+/** Render link previews for all URLs found in message content */
+export default function LinkPreviews({ content }: { content: string }) {
+  const urls = extractUrls(content);
+  if (urls.length === 0) return null;
+  return (
+    <div className="space-y-1">
+      {urls.map((u) => (
+        <LinkPreviewCard key={u} url={u} />
+      ))}
+    </div>
   );
 }

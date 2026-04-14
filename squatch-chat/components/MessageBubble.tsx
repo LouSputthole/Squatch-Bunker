@@ -327,11 +327,13 @@ interface MessageBubbleProps {
   onPin?: (messageId: string, pinned: boolean) => void;
   onThread?: (messageId: string, author: { id: string; username: string }) => void;
   onBookmark?: (messageId: string, bookmarked: boolean) => void;
+  onTranslate?: (messageId: string, text: string) => void;
+  translatedText?: string | null;
   isBookmarked?: boolean;
   highlighted?: boolean;
 }
 
-export default function MessageBubble({ message, isOwn, currentUserId, authorColor, canPin, onEdit, onDelete, onReact, onReply, onScrollToMessage, onPin, onThread, onBookmark, isBookmarked, highlighted }: MessageBubbleProps) {
+export default function MessageBubble({ message, isOwn, currentUserId, authorColor, canPin, onEdit, onDelete, onReact, onReply, onScrollToMessage, onPin, onThread, onBookmark, onTranslate, translatedText, isBookmarked, highlighted }: MessageBubbleProps) {
   const [editing, setEditing] = useState(false);
   const [glowing, setGlowing] = useState(false);
 
@@ -492,6 +494,12 @@ export default function MessageBubble({ message, isOwn, currentUserId, authorCol
           <>
             {message.content && (
               <div className="text-[var(--text)] text-sm break-words">{renderContent(message.content)}</div>
+            )}
+            {translatedText && (
+              <div className="mt-1 px-2 py-1 bg-[var(--accent-2)]/10 border-l-2 border-[var(--accent-2)] rounded-r text-sm text-[var(--text)] italic">
+                <span className="text-[10px] text-[var(--muted)] uppercase font-semibold block mb-0.5">🌐 Translation</span>
+                {translatedText}
+              </div>
             )}
             {message.content && extractUrls(message.content).map((url) => (
               <LinkPreview key={url} url={url} />
@@ -717,6 +725,7 @@ export default function MessageBubble({ message, isOwn, currentUserId, authorCol
           onReact={(emoji) => onReact?.(message.id, emoji)}
           onCopyText={() => { navigator.clipboard.writeText(message.content).catch(() => {}); }}
           onBookmark={() => onBookmark?.(message.id, !isBookmarked)}
+          onTranslate={onTranslate ? () => onTranslate(message.id, message.content) : undefined}
           onClose={() => setContextMenu(null)}
         />
       )}
