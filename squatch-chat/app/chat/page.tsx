@@ -20,6 +20,9 @@ import UserProfileModal from "@/components/UserProfileModal";
 import FriendPanel from "@/components/FriendPanel";
 import OnboardingWizard from "@/components/OnboardingWizard";
 import ServerSettingsModal from "@/components/ServerSettingsModal";
+import CustomEmojiManager from "@/components/CustomEmojiManager";
+import ModerationPanel from "@/components/ModerationPanel";
+import { ScheduleMessageModal } from "@/components/ScheduleMessageModal";
 import { connectSocket, disconnectSocket, getSocket } from "@/lib/socket";
 import { displayName } from "@/lib/utils";
 
@@ -74,6 +77,9 @@ function ChatPageInner() {
   const [mobileView, setMobileView] = useState<"channels" | "chat" | "members">("channels");
   const [statusMessage, setStatusMessage] = useState("");
   const [serverSettingsOpen, setServerSettingsOpen] = useState(false);
+  const [emojiManagerOpen, setEmojiManagerOpen] = useState(false);
+  const [moderationOpen, setModerationOpen] = useState(false);
+  const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
 
   async function saveStatusMessage(msg: string) {
     await fetch("/api/auth/status", {
@@ -590,15 +596,48 @@ function ChatPageInner() {
             ?
           </button>
           {srv.activeServer && (presence.userRole === "owner" || presence.userRole === "admin") && (
+            <>
+              <button
+                onClick={() => setServerSettingsOpen(true)}
+                className="text-[var(--muted)] hover:text-[var(--text)] transition-colors"
+                title="Server Settings"
+                aria-label="Server Settings"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="3" />
+                  <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z" />
+                </svg>
+              </button>
+              <button
+                onClick={() => setModerationOpen(true)}
+                className="text-[var(--muted)] hover:text-[var(--text)] transition-colors"
+                title="Moderation"
+                aria-label="Moderation panel"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                </svg>
+              </button>
+              <button
+                onClick={() => setEmojiManagerOpen(true)}
+                className="text-[var(--muted)] hover:text-[var(--text)] transition-colors text-sm"
+                title="Custom Emoji"
+                aria-label="Custom emoji manager"
+              >
+                😎
+              </button>
+            </>
+          )}
+          {ch.activeChannel && (
             <button
-              onClick={() => setServerSettingsOpen(true)}
+              onClick={() => setScheduleModalOpen(true)}
               className="text-[var(--muted)] hover:text-[var(--text)] transition-colors"
-              title="Server Settings"
-              aria-label="Server Settings"
+              title="Schedule Message"
+              aria-label="Schedule a message"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="3" />
-                <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z" />
+                <circle cx="12" cy="12" r="10" />
+                <polyline points="12 6 12 12 16 14" />
               </svg>
             </button>
           )}
@@ -688,6 +727,34 @@ function ChatPageInner() {
             if (updates.name) srv.renameActiveServer(updates.name);
             srv.fetchServers();
           }}
+        />
+      )}
+
+      {/* Custom emoji manager */}
+      {srv.activeServer && (
+        <CustomEmojiManager
+          serverId={srv.activeServer.id}
+          open={emojiManagerOpen}
+          onClose={() => setEmojiManagerOpen(false)}
+        />
+      )}
+
+      {/* Moderation panel */}
+      {srv.activeServer && auth.user && (
+        <ModerationPanel
+          serverId={srv.activeServer.id}
+          currentUserId={auth.user.id}
+          currentUserRole={presence.userRole}
+          open={moderationOpen}
+          onClose={() => setModerationOpen(false)}
+        />
+      )}
+
+      {/* Schedule message modal */}
+      {scheduleModalOpen && ch.activeChannel && (
+        <ScheduleMessageModal
+          channelId={ch.activeChannel.id}
+          onClose={() => setScheduleModalOpen(false)}
         />
       )}
 

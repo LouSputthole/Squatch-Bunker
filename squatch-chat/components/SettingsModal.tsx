@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import Avatar from "@/components/Avatar";
-import { useTheme, THEMES } from "@/hooks/useTheme";
+import { useTheme, THEMES, THEME_LABELS } from "@/hooks/useTheme";
 
 interface SettingsModalProps {
   open: boolean;
@@ -15,7 +15,7 @@ interface SettingsModalProps {
 
 export default function SettingsModal({ open, onClose, username, currentAvatar, onAvatarChange, onInputSensitivityChange }: SettingsModalProps) {
   const [tab, setTab] = useState<"audio" | "account" | "appearance">("audio");
-  const { theme, setTheme } = useTheme();
+  const { theme, setTheme, themes, customColors, setCustomColors } = useTheme();
   const [inputDevices, setInputDevices] = useState<MediaDeviceInfo[]>([]);
   const [outputDevices, setOutputDevices] = useState<MediaDeviceInfo[]>([]);
   const [videoDevices, setVideoDevices] = useState<MediaDeviceInfo[]>([]);
@@ -519,25 +519,56 @@ export default function SettingsModal({ open, onClose, username, currentAvatar, 
             <div className="space-y-6">
               <div>
                 <label className="block text-sm font-semibold text-[var(--text)] mb-3">
-                  Appearance
+                  Theme
                 </label>
-                <div className="flex gap-3">
-                  {(["dark", "light", "midnight"] as const).map((t) => (
+                <div className="grid grid-cols-4 gap-2">
+                  {themes.filter((t) => t !== "custom").map((t) => (
                     <button
                       key={t}
                       onClick={() => setTheme(t)}
-                      className={`flex flex-col items-center gap-1 ${theme === t ? "opacity-100" : "opacity-60 hover:opacity-80"}`}
+                      className={`flex flex-col items-center gap-1.5 p-2 rounded-lg transition-all ${theme === t ? "bg-[var(--accent-2)]/20 ring-1 ring-[var(--accent-2)]" : "hover:bg-[var(--accent-2)]/10"}`}
                     >
-                      <div
-                        className={`w-12 h-8 rounded border-2 ${theme === t ? "border-[var(--accent)]" : "border-[var(--accent-2)]/30"}`}
-                        style={{ background: THEMES[t]["--panel"] }}
-                      />
-                      <span className="text-xs capitalize text-[var(--text)]">{t}</span>
+                      <div className="flex w-full h-6 rounded overflow-hidden border border-[var(--accent-2)]/30">
+                        <div className="flex-1" style={{ background: THEMES[t]["--bg"] }} />
+                        <div className="flex-1" style={{ background: THEMES[t]["--panel"] }} />
+                        <div className="flex-1" style={{ background: THEMES[t]["--accent-2"] }} />
+                      </div>
+                      <span className="text-[10px] text-[var(--text)]">{THEME_LABELS[t] || t}</span>
                     </button>
                   ))}
                 </div>
-                <p className="text-xs text-[var(--muted)] mt-3">
-                  Preference is saved and applied instantly.
+              </div>
+
+              {/* Custom theme editor */}
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <label className="text-sm font-semibold text-[var(--text)]">Custom Theme</label>
+                  <button
+                    onClick={() => setTheme("custom")}
+                    className={`text-xs px-3 py-1 rounded transition-colors ${
+                      theme === "custom"
+                        ? "bg-[var(--accent-2)] text-[var(--text)]"
+                        : "bg-[var(--panel-2)] text-[var(--muted)] hover:text-[var(--text)]"
+                    }`}
+                  >
+                    {theme === "custom" ? "Active" : "Apply"}
+                  </button>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  {(["--bg", "--panel", "--panel-2", "--text", "--muted", "--accent", "--accent-2", "--danger"] as const).map((key) => (
+                    <div key={key} className="flex items-center gap-2">
+                      <input
+                        type="color"
+                        value={customColors[key] || "#000000"}
+                        onChange={(e) => setCustomColors({ ...customColors, [key]: e.target.value })}
+                        className="w-6 h-6 rounded cursor-pointer border border-[var(--accent-2)]/30"
+                      />
+                      <span className="text-xs text-[var(--muted)]">{key.replace("--", "")}</span>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-xs text-[var(--muted)] mt-2">
+                  Pick colors, then click Apply to use your custom theme.
                 </p>
               </div>
             </div>
