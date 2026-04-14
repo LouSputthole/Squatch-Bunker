@@ -16,6 +16,8 @@ interface UserData {
   id: string;
   username: string;
   avatar?: string | null;
+  banner?: string | null;
+  bio?: string | null;
   statusMessage?: string | null;
   createdAt: string;
 }
@@ -48,6 +50,12 @@ export default function UserProfileModal({
   const [serversLoading, setServersLoading] = useState(false);
   const [friendStatus, setFriendStatus] = useState<"idle" | "sending" | "sent" | "friends" | "error">("idle");
 
+  // Edit state
+  const [editing, setEditing] = useState(false);
+  const [editBio, setEditBio] = useState("");
+  const [editBanner, setEditBanner] = useState("");
+  const [saving, setSaving] = useState(false);
+
   const isSelf = userId === currentUserId;
 
   useEffect(() => {
@@ -55,7 +63,11 @@ export default function UserProfileModal({
     fetch(`/api/users/${userId}`)
       .then((r) => r.json())
       .then((data) => {
-        if (data.user) setUser(data.user);
+        if (data.user) {
+          setUser(data.user);
+          setEditBio(data.user.bio || "");
+          setEditBanner(data.user.banner || "");
+        }
       })
       .finally(() => setLoading(false));
   }, [userId]);
@@ -105,6 +117,35 @@ export default function UserProfileModal({
     }
   }
 
+  async function handleSaveProfile() {
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/users/${userId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bio: editBio, banner: editBanner }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setUser(data.user);
+        setEditing(false);
+      }
+    } catch { /* ignore */ }
+    setSaving(false);
+  }
+
+  async function handleBannerUpload(file: File) {
+    const formData = new FormData();
+    formData.append("file", file);
+    try {
+      const res = await fetch("/api/upload", { method: "POST", body: formData });
+      if (res.ok) {
+        const data = await res.json();
+        setEditBanner(data.url);
+      }
+    } catch { /* ignore */ }
+  }
+
   return (
     <div
       ref={backdropRef}
@@ -128,8 +169,36 @@ export default function UserProfileModal({
           </svg>
         </button>
 
+        {/* Banner */}
+        {(user?.banner || editBanner) && !loading ? (
+          <div className="relative h-28 overflow-hidden">
+            <img
+              src={editing ? editBanner || user?.banner || "" : user?.banner || ""}
+              alt="Banner"
+              className="w-full h-full object-cover"
+            />
+            {editing && (
+              <label className="absolute inset-0 flex items-center justify-center bg-black/40 cursor-pointer opacity-0 hover:opacity-100 transition-opacity">
+                <span className="text-xs text-white font-medium">Change Banner</span>
+                <input type="file" accept="image/*" className="hidden" onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) handleBannerUpload(f);
+                }} />
+              </label>
+            )}
+          </div>
+        ) : editing ? (
+          <label className="h-28 flex items-center justify-center bg-[var(--panel-2)] cursor-pointer hover:bg-[var(--accent-2)]/10 transition-colors border-b border-[var(--accent-2)]/20">
+            <span className="text-xs text-[var(--muted)]">Click to add banner</span>
+            <input type="file" accept="image/*" className="hidden" onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) handleBannerUpload(f);
+            }} />
+          </label>
+        ) : null}
+
         {/* Header */}
-        <div className="px-6 pt-6 pb-4 border-b border-[var(--accent-2)]/20">
+        <div className="px-6 pt-4 pb-4 border-b border-[var(--accent-2)]/20">
           {loading ? (
             <div className="flex items-center gap-4">
               <div className="w-[72px] h-[72px] rounded-full bg-[var(--accent-2)]/30 animate-pulse shrink-0" />
@@ -198,6 +267,15 @@ export default function UserProfileModal({
                   </button>
                 </div>
               )}
+
+              {isSelf && !editing && (
+                <button
+                  onClick={() => setEditing(true)}
+                  className="mt-3 text-xs px-3 py-1.5 rounded-lg bg-[var(--panel-2)] text-[var(--muted)] hover:text-[var(--text)] transition-colors"
+                >
+                  Edit Profile
+                </button>
+              )}
             </>
           ) : (
             <p className="text-sm text-[var(--muted)]">User not found.</p>
@@ -232,6 +310,52 @@ export default function UserProfileModal({
         <div className="flex-1 overflow-y-auto px-6 py-4">
           {tab === "about" && user && (
             <div className="space-y-4">
+              {/* Bio section */}
+              {editing ? (
+                <div>
+                  <h3 className="text-xs font-semibold text-[var(--muted)] uppercase tracking-wide mb-2">
+                    Bio
+                  </h3>
+                  <textarea
+                    value={editBio}
+                    onChange={(e) => setEditBio(e.target.value.slice(0, 500))}
+                    placeholder="Tell others about yourself..."
+                    rows={3}
+                    className="w-full px-3 py-2 text-sm bg-[var(--panel-2)] text-[var(--text)] border border-[var(--accent-2)]/30 rounded-lg focus:outline-none focus:border-[var(--accent-2)] placeholder:text-[var(--muted)] resize-none"
+                  />
+                  <div className="text-[10px] text-[var(--muted)] text-right">{editBio.length}/500</div>
+                  <div className="flex gap-2 mt-2">
+                    <button
+                      onClick={handleSaveProfile}
+                      disabled={saving}
+                      className="flex-1 py-1.5 text-xs bg-[var(--accent-2)] text-[var(--text)] rounded-lg hover:bg-[var(--accent)] transition-colors disabled:opacity-50"
+                    >
+                      {saving ? "Saving..." : "Save"}
+                    </button>
+                    <button
+                      onClick={() => { setEditing(false); setEditBio(user.bio || ""); setEditBanner(user.banner || ""); }}
+                      className="flex-1 py-1.5 text-xs bg-[var(--panel-2)] text-[var(--muted)] rounded-lg hover:text-[var(--text)] transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : user.bio ? (
+                <div>
+                  <h3 className="text-xs font-semibold text-[var(--muted)] uppercase tracking-wide mb-2">
+                    Bio
+                  </h3>
+                  <p className="text-sm text-[var(--text)] whitespace-pre-wrap">{user.bio}</p>
+                </div>
+              ) : isSelf ? (
+                <div>
+                  <h3 className="text-xs font-semibold text-[var(--muted)] uppercase tracking-wide mb-2">
+                    Bio
+                  </h3>
+                  <p className="text-xs text-[var(--muted)] italic">No bio yet. Click Edit Profile to add one.</p>
+                </div>
+              ) : null}
+
               <div>
                 <h3 className="text-xs font-semibold text-[var(--muted)] uppercase tracking-wide mb-2">
                   Status

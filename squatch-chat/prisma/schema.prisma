@@ -13,6 +13,8 @@ model User {
   username       String    @unique
   passwordHash   String
   avatar         String?
+  banner         String?
+  bio            String?
   statusMessage  String?
   isGuest        Boolean   @default(false)
   guestExpiresAt DateTime?
