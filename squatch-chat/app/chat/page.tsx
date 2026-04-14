@@ -39,7 +39,7 @@ import NotificationBell from "@/components/NotificationBell";
 
 import type { Channel } from "@/types/chat";
 
-const APP_VERSION = "v0.0.7";
+const APP_VERSION = "v0.1.0";
 
 export default function ChatPage() {
   return (
