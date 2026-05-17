@@ -11,10 +11,13 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: "Status too long (max 128 chars)" }, { status: 400 });
   }
 
-  const user = await prisma.user.update({
-    where: { id: session.userId },
-    data: { statusMessage: statusMessage || null },
-  });
-
-  return NextResponse.json({ statusMessage: user.statusMessage });
+  try {
+    const user = await prisma.user.update({
+      where: { id: session.userId },
+      data: { statusMessage: statusMessage || null },
+    });
+    return NextResponse.json({ statusMessage: user.statusMessage });
+  } catch {
+    return NextResponse.json({ error: "Failed to update status" }, { status: 503 });
+  }
 }
