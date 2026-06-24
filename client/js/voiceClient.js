@@ -282,7 +282,9 @@ class VoiceClient {
     pc.onconnectionstatechange = () => {
       console.log(`[VoiceClient] Peer ${peerId} state: ${pc.connectionState}`);
       if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
-        this.peers.delete(peerId);
+        // Fully tear down: close the connection and remove the remote <audio>
+        // element so failed peers don't leak DOM nodes / map entries.
+        this.onMemberLeft(peerId);
       }
     };
 

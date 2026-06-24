@@ -95,6 +95,15 @@ function setConnectionStatus(label, cls) {
   connectionStatus.className = cls || '';
 }
 
+/**
+ * Deterministic tie-break for WebRTC: for any pair of users, exactly one
+ * side initiates the connection. We initiate when our userId sorts after
+ * the other's. Both clients agree, so there's no offer collision.
+ */
+function shouldInitiateTo(otherUserId) {
+  return state.userId > otherUserId;
+}
+
 // ── Username modal ─────────────────────────────────────────────────────────
 
 function checkExistingSession() {
@@ -178,6 +187,14 @@ function connectSocket() {
       state.activeRoomMembers.set(m.userId, m);
     }
     renderMemberRoster();
+    // Connect to members already in the room. To avoid offer glare (both
+    // peers offering at once), exactly one side initiates per pair, decided
+    // by a deterministic userId comparison.
+    for (const m of members) {
+      if (m.userId !== state.userId && shouldInitiateTo(m.userId)) {
+        voiceClient.onNewMember(m.userId);
+      }
+    }
   });
 
   socket.on('presence:member-joined', ({ roomId, member }) => {
@@ -185,8 +202,9 @@ function connectSocket() {
     state.activeRoomMembers.set(member.userId, member);
     renderMemberRoster();
     showToast(`${member.username} joined the channel`);
-    // Initiate WebRTC connection to new member
-    if (member.userId !== state.userId) {
+    // Initiate WebRTC connection to the new member only if we're the
+    // designated initiator for this pair (the other side handles the inverse).
+    if (member.userId !== state.userId && shouldInitiateTo(member.userId)) {
       voiceClient.onNewMember(member.userId);
     }
   });

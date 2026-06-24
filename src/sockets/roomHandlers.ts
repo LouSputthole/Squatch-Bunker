@@ -13,6 +13,13 @@ export function registerRoomHandlers(io: SocketServer, socket: Socket): void {
 
       if (!roomId || !userId || !username) return;
 
+      // Ensure the session identity (and userId→socket mapping used by signaling)
+      // is in sync, even if the client somehow joins before emitting identify.
+      const session = sessionRegistry.get(socket.id);
+      if (!session || session.userId !== userId || session.username !== username) {
+        sessionRegistry.identify(socket.id, userId, username);
+      }
+
       // Verify room exists
       const room = roomService.getRoom(roomId);
       if (!room) {
@@ -162,6 +169,7 @@ export function registerRoomHandlers(io: SocketServer, socket: Socket): void {
 
   // Built-in disconnect event
   socket.on('disconnect', () => {
+    console.log(`[socket] disconnected: ${socket.id}`);
     const session = sessionRegistry.unregister(socket.id);
     if (!session) return;
 

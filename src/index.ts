@@ -38,9 +38,11 @@ app.use('/api/users', usersRouter);
 
 // Fallback: serve index.html for any non-API route
 app.get('*', (req, res) => {
-  if (!req.path.startsWith('/api')) {
-    res.sendFile(path.join(__dirname, '..', 'client', 'index.html'));
+  if (req.path.startsWith('/api')) {
+    res.status(404).json({ error: 'Not found' });
+    return;
   }
+  res.sendFile(path.join(__dirname, '..', 'client', 'index.html'));
 });
 
 // Socket.io connection handler
@@ -58,11 +60,9 @@ io.on('connection', (socket) => {
 
   // Update session with userId/username when first provided via join-room
   socket.on('identify', (payload: { userId: string; username: string }) => {
-    const session = sessionRegistry.get(socket.id);
-    if (session) {
-      session.userId = payload.userId;
-      session.username = payload.username;
-    }
+    if (!payload?.userId || !payload?.username) return;
+    // Sync the reverse userId→socket mapping so signaling can route to this user.
+    sessionRegistry.identify(socket.id, payload.userId, payload.username);
     // Join global lobby so this socket receives cross-room presence updates
     socket.join('lobby');
     // Send current presence snapshot so the sidebar can populate immediately
@@ -73,10 +73,6 @@ io.on('connection', (socket) => {
   registerRoomHandlers(io, socket);
   registerSignalingHandlers(socket);
   registerChatHandlers(io, socket);
-
-  socket.on('disconnect', () => {
-    console.log(`[socket] disconnected: ${socket.id}`);
-  });
 });
 
 // Start presence heartbeat cleanup
