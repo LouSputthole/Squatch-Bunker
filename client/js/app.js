@@ -413,7 +413,16 @@ async function joinRoom(roomId) {
   roomMemberCount.textContent = '0 members';
   memberRoster.innerHTML = '<div style="color:var(--color-text-muted);font-size:13px;padding:8px;">Joining…</div>';
 
-  // Tell server
+  // Acquire the mic and set up the voice client BEFORE announcing to the
+  // server. Emitting join-room triggers room:state (and member-joined on
+  // other clients), both of which create peer connections — and connectToPeer/
+  // handleOffer only attach tracks if localStream is already set. Doing this
+  // first guarantees the stream (or its known-null failure) is ready before
+  // any offer/answer is negotiated, so first-time joiners don't end up with
+  // audio-less peer connections while the mic permission prompt is open.
+  await voiceClient.joinRoom(roomId, state.userId, state.socket, []);
+
+  // Tell server (now that the voice client is ready to negotiate)
   state.socket.emit('join-room', {
     roomId,
     userId: state.userId,
@@ -422,10 +431,6 @@ async function joinRoom(roomId) {
 
   // Start heartbeat
   startHeartbeat(roomId);
-
-  // Initialize voice (room:state event will give us the member list)
-  // We pass empty array here; connectToPeer calls happen after room:state
-  await voiceClient.joinRoom(roomId, state.userId, state.socket, []);
 
   // If PTT mode is active, start in muted state
   if (state.pttMode) {
