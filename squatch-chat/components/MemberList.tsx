@@ -24,6 +24,7 @@ interface Member {
   username: string;
   avatar?: string | null;
   role?: string;
+  roleIds?: string[];
   joinedAt?: string;
   banned?: boolean;
   statusMessage?: string | null;
@@ -62,6 +63,7 @@ export default function MemberList({ serverId, currentUserId, currentUserRole, o
   const [joinError, setJoinError] = useState("");
   const [contextMenu, setContextMenu] = useState<{ memberId: string; x: number; y: number } | null>(null);
   const [profileCard, setProfileCard] = useState<{ member: Member; x: number; y: number } | null>(null);
+  const [serverRoles, setServerRoles] = useState<{ id: string; name: string; color: string; isDefault: boolean }[]>([]);
 
   useEffect(() => {
     fetch(`/api/servers/${serverId}/members`)
@@ -74,6 +76,27 @@ export default function MemberList({ serverId, currentUserId, currentUserRole, o
         setLoading(false);
       });
   }, [serverId]);
+
+  useEffect(() => {
+    fetch(`/api/servers/${serverId}/roles`)
+      .then((res) => (res.ok ? res.json() : { roles: [] }))
+      .then((data) => setServerRoles(data.roles || []))
+      .catch(() => {});
+  }, [serverId]);
+
+  async function toggleMemberRole(userId: string, roleId: string) {
+    const member = members.find((m) => m.id === userId);
+    if (!member) return;
+    const current = member.roleIds || [];
+    const next = current.includes(roleId) ? current.filter((r) => r !== roleId) : [...current, roleId];
+    setMembers((prev) => prev.map((m) => (m.id === userId ? { ...m, roleIds: next } : m))); // optimistic
+    const res = await fetch(`/api/servers/${serverId}/members/${userId}/roles`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ roleIds: next }),
+    });
+    if (!res.ok) setMembers((prev) => prev.map((m) => (m.id === userId ? { ...m, roleIds: current } : m))); // revert
+  }
 
   // Close context menu on click outside
   useEffect(() => {
@@ -367,6 +390,26 @@ export default function MemberList({ serverId, currentUserId, currentUserRole, o
               <button onClick={() => handleRoleChange(target.id, "member")} className="w-full text-left px-3 py-1.5 text-xs text-[var(--text)] hover:bg-[var(--panel-2)]">
                 Remove Role
               </button>
+            )}
+            {/* Custom roles — toggle assignment (checkmark = assigned) */}
+            {serverRoles.filter((r) => !r.isDefault).length > 0 && (
+              <div className="border-t border-[var(--accent-2)]/20 mt-1 pt-1 max-h-40 overflow-y-auto">
+                <div className="px-3 py-1 text-[10px] text-[var(--muted)] uppercase tracking-wide">Roles</div>
+                {serverRoles.filter((r) => !r.isDefault).map((r) => {
+                  const has = (target.roleIds || []).includes(r.id);
+                  return (
+                    <button
+                      key={r.id}
+                      onClick={() => toggleMemberRole(target.id, r.id)}
+                      className="w-full text-left px-3 py-1.5 text-xs text-[var(--text)] hover:bg-[var(--panel-2)] flex items-center gap-2"
+                    >
+                      <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: r.color }} />
+                      <span className="flex-1 truncate">{r.name}</span>
+                      {has && <span className="text-[var(--accent)]">✓</span>}
+                    </button>
+                  );
+                })}
+              </div>
             )}
             <div className="border-t border-[var(--accent-2)]/20 mt-1 pt-1">
               <button onClick={() => handleKick(target.id)} className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-red-600/10">

@@ -28,6 +28,13 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Not a server member" }, { status: 403 });
     }
 
+    // Requires the Manage Channels permission (owner/admin have it by default;
+    // grant it via a custom role to let others create channels).
+    const { memberHasPermission } = await import("@/lib/serverRoles");
+    if (!(await memberHasPermission(serverId, session.userId, "MANAGE_CHANNELS"))) {
+      return NextResponse.json({ error: "You need the Manage Channels permission to create channels" }, { status: 403 });
+    }
+
     const channel = await prisma.channel.create({
       data: {
         serverId,

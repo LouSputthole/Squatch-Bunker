@@ -28,6 +28,7 @@ export async function GET(
     where: { serverId },
     include: {
       user: { select: { id: true, username: true, avatar: true, statusMessage: true } },
+      memberRoles: { select: { roleId: true } },
     },
     orderBy: { createdAt: "asc" },
   });
@@ -44,6 +45,7 @@ export async function GET(
       username: m.user.username,
       avatar: m.user.avatar,
       role: m.role,
+      roleIds: m.memberRoles.map((mr) => mr.roleId),
       joinedAt: m.createdAt,
       statusMessage: m.user.statusMessage,
     })),
