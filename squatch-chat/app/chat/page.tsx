@@ -84,6 +84,9 @@ function ChatPageInner() {
   // CONNECTION (voice.activeVoiceChannel) so you can browse text channels while
   // staying in the call. The connection persists; only the VIEW changes.
   const [viewingVoiceRoom, setViewingVoiceRoom] = useState(false);
+  // Opening DMs/Friends takes the voice room off-screen — drop the room view so
+  // the persistent VoiceStatusBar (mute/disconnect) shows instead of a hidden hot mic.
+  useEffect(() => { if (dmOpen || friendsOpen) setViewingVoiceRoom(false); }, [dmOpen, friendsOpen]);
   const [statusMessage, setStatusMessage] = useState("");
   const [serverSettingsOpen, setServerSettingsOpen] = useState(false);
   const [emojiManagerOpen, setEmojiManagerOpen] = useState(false);
@@ -401,6 +404,7 @@ function ChatPageInner() {
           call keeps running in the background (VoicePanel) while you browse text. */}
       {viewingVoiceRoom && voice.activeVoiceChannel && auth.user ? (
         <VoiceRoom
+          key={voice.activeVoiceChannel.id}
           channelId={voice.activeVoiceChannel.id}
           channelName={voice.activeVoiceChannel.name}
           participants={voice.voiceState.participants}
@@ -510,6 +514,7 @@ function ChatPageInner() {
       {/* Headless voice engine */}
       {voice.activeVoiceChannel && auth.user && (
         <VoicePanel
+          key={voice.activeVoiceChannel.id}
           ref={voice.voicePanelRef}
           channelId={voice.activeVoiceChannel.id}
           channelName={voice.activeVoiceChannel.name}

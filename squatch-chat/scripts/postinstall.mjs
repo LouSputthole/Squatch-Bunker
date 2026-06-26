@@ -21,8 +21,9 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const envPath = join(root, ".env");
 const schemaPath = join(root, "prisma", "schema.prisma");
 
-// 1. Create .env (SQLite, self-host defaults) if missing.
-if (!existsSync(envPath)) {
+// 1. Create .env (SQLite, self-host defaults) only if there's no .env AND no
+//    DATABASE_URL already in the environment (don't clobber a hosted/Postgres setup).
+if (!existsSync(envPath) && !process.env.DATABASE_URL) {
   const secret = randomBytes(32).toString("hex");
   writeFileSync(
     envPath,
@@ -40,11 +41,12 @@ if (!existsSync(envPath)) {
 
 // 2. Detect provider from DATABASE_URL (unset or file: => sqlite).
 function readEnvVar(key) {
+  if (process.env[key]) return process.env[key]; // a real environment value wins over the .env file
   if (existsSync(envPath)) {
     const m = readFileSync(envPath, "utf8").match(new RegExp(`^${key}=(.*)$`, "m"));
     if (m) return m[1].trim().replace(/^["']|["']$/g, "");
   }
-  return process.env[key] || "";
+  return "";
 }
 const dbUrl = readEnvVar("DATABASE_URL");
 const provider = !dbUrl || dbUrl.startsWith("file:") ? "sqlite" : "postgresql";

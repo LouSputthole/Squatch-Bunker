@@ -79,8 +79,9 @@ export default function SoundBoard({
 
   async function del(id: string) {
     if (!serverId) return;
-    await fetch(`/api/servers/${serverId}/sounds/${id}`, { method: "DELETE" });
-    setCustom((c) => c.filter((s) => s.id !== id));
+    const r = await fetch(`/api/servers/${serverId}/sounds/${id}`, { method: "DELETE" });
+    if (r.ok) setCustom((c) => c.filter((s) => s.id !== id));
+    else setError("Couldn't delete that sound");
   }
 
   return (

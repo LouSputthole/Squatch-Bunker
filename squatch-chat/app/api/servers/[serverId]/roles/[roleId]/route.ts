@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { getPermContext } from "@/lib/serverRoles";
-import { hasPermission, ALL_PERMISSIONS, type PermKey } from "@/lib/permissions";
+import { hasPermission, effectivePermissions, ALL_PERMISSIONS, type PermKey } from "@/lib/permissions";
 
 function sanitizePerms(input: unknown): PermKey[] {
   if (!Array.isArray(input)) return [];
@@ -25,7 +25,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ se
   const data: Record<string, unknown> = {};
   if (typeof body.name === "string" && body.name.trim()) data.name = body.name.trim().slice(0, 40);
   if (typeof body.color === "string" && /^#[0-9a-fA-F]{6}$/.test(body.color)) data.color = body.color;
-  if ("permissions" in body) data.permissions = JSON.stringify(sanitizePerms(body.permissions));
+  if ("permissions" in body) {
+    const perms = sanitizePerms(body.permissions);
+    if (!ctx.isOwner) {
+      const mine = effectivePermissions(ctx);
+      const denied = perms.filter((p) => !mine.has(p));
+      if (denied.length) return NextResponse.json({ error: `You can't grant permissions you don't have: ${denied.join(", ")}` }, { status: 403 });
+    }
+    data.permissions = JSON.stringify(perms);
+  }
   if (typeof body.position === "number") data.position = body.position;
 
   const updated = await prisma.role.update({ where: { id: roleId }, data });

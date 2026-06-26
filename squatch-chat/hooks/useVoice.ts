@@ -114,15 +114,19 @@ export function useVoice(activeServer: Server | null) {
   }, []);
 
   // ─── Soundboard ───
+  const deafenedRef = useRef(false);
+  useEffect(() => { deafenedRef.current = voiceState.deafened; }, [voiceState.deafened]);
+
   const playSound = useCallback((src: string, name?: string) => {
-    try { const a = new Audio(src); a.volume = 0.85; a.play().catch(() => {}); } catch { /* ignore */ }
+    if (!deafenedRef.current) { try { const a = new Audio(src); a.volume = 0.85; a.play().catch(() => {}); } catch { /* ignore */ } }
     if (activeVoiceChannel) getSocket().emit("soundboard:play", { channelId: activeVoiceChannel.id, src, name });
   }, [activeVoiceChannel]);
 
-  // Play sounds others trigger in our voice channel.
+  // Play sounds others trigger in our voice channel (unless we're deafened).
   useEffect(() => {
     const socket = getSocket();
     function onSound(data: { src: string }) {
+      if (deafenedRef.current) return;
       try { const a = new Audio(data.src); a.volume = 0.85; a.play().catch(() => {}); } catch { /* ignore */ }
     }
     socket.on("soundboard:play", onSound);

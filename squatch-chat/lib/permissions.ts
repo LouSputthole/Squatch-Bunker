@@ -114,7 +114,7 @@ export function parsePermissions(json: string | null | undefined): PermKey[] {
   if (!json) return [];
   try {
     const arr = JSON.parse(json);
-    return Array.isArray(arr) ? arr.filter((k): k is PermKey => typeof k === "string" && k in PERMISSIONS) : [];
+    return Array.isArray(arr) ? arr.filter((k): k is PermKey => typeof k === "string" && (ALL_PERMISSIONS as string[]).includes(k)) : [];
   } catch {
     return [];
   }

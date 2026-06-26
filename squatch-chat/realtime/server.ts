@@ -198,7 +198,12 @@ export function attachSocketIO(httpServer: HttpServer): Server {
     // The clicker plays it locally; this broadcasts to the rest of the room.
     socket.on("soundboard:play", (data: { channelId: string; src: string; name?: string }) => {
       if (!data?.channelId || typeof data.src !== "string") return;
-      if (data.src.length > 1_000_000) return; // guard against oversized payloads
+      // Must actually be in that voice channel.
+      if (!voiceRooms.get(data.channelId)?.has(currentUserId)) return;
+      // Allowlist the source: built-in static path or an inline audio data URL only
+      // (stops it being used to make every client fetch an arbitrary attacker URL).
+      const okSrc = data.src.startsWith("/soundboard/") || data.src.startsWith("data:audio/");
+      if (!okSrc || data.src.length > 1_000_000) return;
       socket.to(`voice:${data.channelId}`).emit("soundboard:play", { src: data.src, name: data.name, by: currentUsername });
     });
 
