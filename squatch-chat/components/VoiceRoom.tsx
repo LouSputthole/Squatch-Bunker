@@ -7,6 +7,7 @@ import CircleView from "@/components/CircleView";
 import EmberReactions from "@/components/EmberReactions";
 import ConnectionQualityIcon from "@/components/ConnectionQualityIcon";
 import AmbientSounds from "@/components/AmbientSounds";
+import SoundBoard from "@/components/SoundBoard";
 import type { ScreenShareInfo } from "@/components/VoicePanel";
 
 interface VoiceParticipant {
@@ -45,6 +46,8 @@ interface VoiceRoomProps {
   onKickFromVoice?: (channelId: string, targetUserId: string) => void;
   onMoveUser?: (fromChannelId: string, toChannelId: string, targetUserId: string) => void;
   voiceChannels?: VoiceChannel[];
+  serverId?: string;
+  onPlaySound?: (src: string, name?: string) => void;
   reconnecting?: boolean;
   sharing?: boolean;
   cameraOn?: boolean;
@@ -308,6 +311,8 @@ export default function VoiceRoom({
   onKickFromVoice,
   onMoveUser,
   voiceChannels,
+  serverId,
+  onPlaySound,
   reconnecting,
   sharing,
   cameraOn,
@@ -698,6 +703,12 @@ export default function VoiceRoom({
           <div className="p-3 rounded-full bg-[var(--panel-2)] hover:bg-[var(--accent-2)]/30 transition-colors flex items-center justify-center">
             <AmbientSounds />
           </div>
+          {/* Soundboard */}
+          {onPlaySound && (
+            <div className="p-3 rounded-full bg-[var(--panel-2)] hover:bg-[var(--accent-2)]/30 transition-colors flex items-center justify-center">
+              <SoundBoard serverId={serverId} currentUserId={currentUserId} onPlay={onPlaySound} />
+            </div>
+          )}
           {onTogglePTT && (
             <button
               onClick={onTogglePTT}

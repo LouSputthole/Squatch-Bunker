@@ -78,8 +78,21 @@ model Server {
   customEmojis CustomEmoji[]
   auditLogs    AuditLog[]
   roles        Role[]
+  sounds       Sound[]
 
   soundscape   String?
+}
+
+model Sound {
+  id        String   @id @default(uuid())
+  serverId  String
+  name      String
+  emoji     String   @default("🔊")
+  dataUrl   String   // base64 data URL of the uploaded clip (<= 8s)
+  createdBy String
+  createdAt DateTime @default(now())
+
+  server Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
 }
 
 model Role {

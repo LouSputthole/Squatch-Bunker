@@ -194,6 +194,14 @@ export function attachSocketIO(httpServer: HttpServer): Server {
       socket.to(`voice:${data.channelId}`).emit("voice:speaking", { userId: currentUserId, speaking: data.speaking });
     });
 
+    // Soundboard — relay a one-shot sound to everyone else in the voice channel.
+    // The clicker plays it locally; this broadcasts to the rest of the room.
+    socket.on("soundboard:play", (data: { channelId: string; src: string; name?: string }) => {
+      if (!data?.channelId || typeof data.src !== "string") return;
+      if (data.src.length > 1_000_000) return; // guard against oversized payloads
+      socket.to(`voice:${data.channelId}`).emit("soundboard:play", { src: data.src, name: data.name, by: currentUsername });
+    });
+
     // ─── Ember Reactions ───
     socket.on("ember:react", (data: { channelId: string; emoji: string }) => {
       const ALLOWED = ["laugh", "applause", "agree", "wow", "skull", "clink", "nod"];

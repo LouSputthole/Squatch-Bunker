@@ -113,6 +113,22 @@ export function useVoice(activeServer: Server | null) {
     voicePanelRef.current?.setInputSensitivity(threshold);
   }, []);
 
+  // ─── Soundboard ───
+  const playSound = useCallback((src: string, name?: string) => {
+    try { const a = new Audio(src); a.volume = 0.85; a.play().catch(() => {}); } catch { /* ignore */ }
+    if (activeVoiceChannel) getSocket().emit("soundboard:play", { channelId: activeVoiceChannel.id, src, name });
+  }, [activeVoiceChannel]);
+
+  // Play sounds others trigger in our voice channel.
+  useEffect(() => {
+    const socket = getSocket();
+    function onSound(data: { src: string }) {
+      try { const a = new Audio(data.src); a.volume = 0.85; a.play().catch(() => {}); } catch { /* ignore */ }
+    }
+    socket.on("soundboard:play", onSound);
+    return () => { socket.off("soundboard:play", onSound); };
+  }, []);
+
   // ─── Screen Share ───
 
   const startScreenShare = useCallback(async () => {
@@ -217,6 +233,7 @@ export function useVoice(activeServer: Server | null) {
     togglePTT,
     setUserVolume,
     setInputSensitivity,
+    playSound,
     serverMuteUser,
     serverDeafenUser,
     kickFromVoice,

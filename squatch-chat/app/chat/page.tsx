@@ -419,6 +419,8 @@ function ChatPageInner() {
           onKickFromVoice={voice.kickFromVoice}
           onMoveUser={voice.moveUser}
           voiceChannels={srv.activeServer?.channels.filter((c) => c.type === "voice")}
+          serverId={srv.activeServer?.id}
+          onPlaySound={voice.playSound}
           reconnecting={voice.voiceState.reconnecting}
           sharing={voice.voiceState.sharing}
           cameraOn={voice.voiceState.cameraOn}
