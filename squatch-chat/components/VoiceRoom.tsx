@@ -6,6 +6,7 @@ import Avatar from "@/components/Avatar";
 import CircleView from "@/components/CircleView";
 import EmberReactions from "@/components/EmberReactions";
 import ConnectionQualityIcon from "@/components/ConnectionQualityIcon";
+import AmbientSounds from "@/components/AmbientSounds";
 import type { ScreenShareInfo } from "@/components/VoicePanel";
 
 interface VoiceParticipant {
@@ -311,6 +312,7 @@ export default function VoiceRoom({
   const [volumePopup, setVolumePopup] = useState<{ userId: string; volume: number } | null>(null);
   const [modMenu, setModMenu] = useState<{ userId: string; username: string; x: number; y: number; muted: boolean; deafened?: boolean } | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [viewMode, setViewMode] = useState<"campfire" | "grid">("campfire");
   const prevParticipantsRef = useRef<VoiceParticipant[]>([]);
   const toastCounterRef = useRef(0);
   const isFirstRenderRef = useRef(true);
@@ -364,6 +366,24 @@ export default function VoiceRoom({
             {participants.length} {participants.length === 1 ? "person" : "people"} connected
           </span>
         )}
+        {/* View toggle: campfire circle <-> standard grid */}
+        <button
+          onClick={() => setViewMode((m) => (m === "campfire" ? "grid" : "campfire"))}
+          className="ml-auto flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-md bg-[var(--panel-2)] text-[var(--muted)] hover:text-amber-200 transition-colors"
+          title={viewMode === "campfire" ? "Switch to grid view (Discord-style)" : "Switch to campfire view"}
+        >
+          {viewMode === "campfire" ? (
+            <>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></svg>
+              Grid
+            </>
+          ) : (
+            <>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2s4 4 4 8a4 4 0 0 1-8 0c0-1.5.5-2.5 1-3.5" /><path d="M8 14a4 4 0 1 0 8 0c0-2-2-3-2-3" /></svg>
+              Campfire
+            </>
+          )}
+        </button>
       </div>
 
       {/* Reconnecting banner */}
@@ -377,84 +397,94 @@ export default function VoiceRoom({
       {/* Ember Reactions overlay */}
       <EmberReactions channelId={channelId} />
 
-      {/* Screen Share Viewer — takes priority over participant grid */}
-      {(incomingScreenShares && incomingScreenShares.length > 0) && (
-        <ScreenViewer shares={incomingScreenShares} />
-      )}
-
-      {/* Screen share self-preview — small PiP when you're sharing */}
-      {sharing && localScreenStream && (
-        <SelfScreenPreview stream={localScreenStream} />
-      )}
-
-      {/* Video Grid — shows when any cameras are on */}
+      {/* Main stage: screen share > campfire circle / standard grid */}
       {(() => {
-        const hasVideo = (remoteVideoStreams && remoteVideoStreams.size > 0) || localCameraStream;
-        if (!hasVideo) return null;
-        const hasScreenShare = incomingScreenShares && incomingScreenShares.length > 0;
+        const screenActive = !!(incomingScreenShares && incomingScreenShares.length > 0);
+        const handleCtx = (e: React.MouseEvent, p: VoiceParticipant) => {
+          if (canMod) {
+            setModMenu({ userId: p.userId, username: p.username, x: e.clientX, y: e.clientY, muted: p.muted, deafened: p.deafened });
+            setVolumePopup(null);
+          } else if (p.userId !== currentUserId) {
+            setVolumePopup({ userId: p.userId, volume: 1 });
+          }
+        };
+
+        if (screenActive) {
+          return (
+            <>
+              <ScreenViewer shares={incomingScreenShares!} />
+              {/* Compact participant strip under the shared screen */}
+              <div className="h-24 shrink-0 overflow-x-auto overflow-y-hidden px-4 py-2 flex items-center gap-3 justify-center bg-[#1a1a1e]/50">
+                {participants.map((p) => {
+                  const isSelf = p.userId === currentUserId;
+                  return (
+                    <div key={p.userId} className="flex flex-col items-center gap-1 shrink-0">
+                      <div className="relative">
+                        <Avatar username={p.username} avatarUrl={p.avatar} size={40}
+                          className={`${isSelf ? "bg-amber-600/80 text-[var(--bg)]" : "bg-[#2a2a2e] text-[var(--text)]"} ${p.muted ? "opacity-50" : ""}`} />
+                        {p.speaking && !p.muted && <div className="absolute inset-[-2px] rounded-full border-2 border-amber-400/60" />}
+                      </div>
+                      <span className={`text-[10px] truncate max-w-[50px] ${p.speaking && !p.muted ? "text-amber-300" : "text-[var(--muted)]"}`}>
+                        {isSelf ? "You" : displayName(p.username)}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          );
+        }
+
+        if (viewMode === "campfire") {
+          return (
+            <CircleView
+              participants={participants}
+              currentUserId={currentUserId}
+              cameraOn={cameraOn}
+              localCameraStream={localCameraStream}
+              remoteVideoStreams={remoteVideoStreams}
+              onContextMenu={handleCtx}
+            />
+          );
+        }
+
+        // Standard grid view (Discord-style) — cameras show as tiles, others as avatars
         return (
-          <div className={`${hasScreenShare ? "h-32 shrink-0" : "flex-1"} grid gap-2 p-2 min-h-0`}
-            style={{ gridTemplateColumns: `repeat(auto-fit, minmax(200px, 1fr))` }}
-          >
-            {localCameraStream && (
-              <VideoTile stream={localCameraStream} label="You" isSelf />
-            )}
-            {remoteVideoStreams && Array.from(remoteVideoStreams.entries()).map(([userId, stream]) => {
-              const p = participants.find((pp) => pp.userId === userId);
-              return (
-                <VideoTile key={userId} stream={stream} label={p ? displayName(p.username) : userId} />
-              );
-            })}
+          <div className="flex-1 overflow-y-auto p-4 min-h-0">
+            <div className="grid gap-3 content-center min-h-full" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
+              {participants.map((p) => {
+                const isSelf = p.userId === currentUserId;
+                const stream = isSelf ? (cameraOn ? localCameraStream : null) : (remoteVideoStreams?.get(p.userId) || null);
+                const isSpeaking = p.speaking && !p.muted;
+                return (
+                  <div
+                    key={p.userId}
+                    onContextMenu={(e) => { if (p.userId !== currentUserId) { e.preventDefault(); handleCtx(e, p); } }}
+                    className="aspect-video"
+                  >
+                    {stream ? (
+                      <VideoTile stream={stream} label={isSelf ? "You" : displayName(p.username)} isSelf={isSelf} />
+                    ) : (
+                      <div className={`w-full h-full rounded-xl border-2 flex flex-col items-center justify-center gap-2 bg-[#202024] ${isSpeaking ? "border-amber-400" : "border-transparent"}`}>
+                        <Avatar username={p.username} avatarUrl={p.avatar} size={56}
+                          className={`${isSelf ? "bg-amber-600/80 text-[var(--bg)]" : "bg-[#2a2a2e] text-[var(--text)]"} ${p.muted ? "opacity-60" : ""}`} />
+                        <span className="text-xs text-white/80 flex items-center gap-1">
+                          {p.muted && <span className="text-red-400">🔇</span>}
+                          {isSelf ? "You" : displayName(p.username)}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </div>
         );
       })()}
 
-      {/* The Circle — seats around the fire */}
-      {!((incomingScreenShares && incomingScreenShares.length > 0) || (remoteVideoStreams && remoteVideoStreams.size > 0) || localCameraStream) && (
-        <CircleView
-          participants={participants}
-          currentUserId={currentUserId}
-          onContextMenu={(e, p) => {
-            if (canMod) {
-              setModMenu({ userId: p.userId, username: p.username, x: e.clientX, y: e.clientY, muted: p.muted, deafened: p.deafened });
-              setVolumePopup(null);
-            } else {
-              setVolumePopup({ userId: p.userId, volume: 1 });
-            }
-          }}
-        />
-      )}
-
-      {/* Compact participant strip when video/screen share is active */}
-      {((incomingScreenShares && incomingScreenShares.length > 0) || (remoteVideoStreams && remoteVideoStreams.size > 0) || localCameraStream) && (
-        <div className="h-24 shrink-0 overflow-x-auto overflow-y-hidden px-4 py-2 flex items-center gap-3 justify-center bg-[#1a1a1e]/50">
-          {participants.map((p) => {
-            const isSelf = p.userId === currentUserId;
-            return (
-              <div key={p.userId} className="flex flex-col items-center gap-1 shrink-0">
-                <div className="relative">
-                  <Avatar
-                    username={p.username}
-                    avatarUrl={p.avatar}
-                    size={40}
-                    className={`${isSelf ? "bg-amber-600/80 text-[var(--bg)]" : "bg-[#2a2a2e] text-[var(--text)]"} ${p.muted ? "opacity-50" : ""}`}
-                  />
-                  {p.speaking && !p.muted && (
-                    <div className="absolute inset-[-2px] rounded-full border-2 border-amber-400/60" />
-                  )}
-                  {!isSelf && p.connectionQuality && (
-                    <div className="absolute -top-1 -right-1 bg-[#1a1a1e]/80 rounded px-0.5">
-                      <ConnectionQualityIcon quality={p.connectionQuality} pingMs={p.pingMs} />
-                    </div>
-                  )}
-                </div>
-                <span className={`text-[10px] truncate max-w-[50px] ${p.speaking && !p.muted ? "text-amber-300" : "text-[var(--muted)]"}`}>
-                  {isSelf ? "You" : displayName(p.username)}
-                </span>
-              </div>
-            );
-          })}
-        </div>
+      {/* Screen share self-preview — small PiP when you're sharing */}
+      {sharing && localScreenStream && (
+        <SelfScreenPreview stream={localScreenStream} />
       )}
 
       {/* Mod context menu */}
@@ -604,6 +634,10 @@ export default function VoiceRoom({
           >
             <HeadphonesIcon deafened={deafened} />
           </button>
+          {/* Ambient soundscape — right in the call controls */}
+          <div className="p-3 rounded-full bg-[var(--panel-2)] hover:bg-[var(--accent-2)]/30 transition-colors flex items-center justify-center">
+            <AmbientSounds />
+          </div>
           {onTogglePTT && (
             <button
               onClick={onTogglePTT}
