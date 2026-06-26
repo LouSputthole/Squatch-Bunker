@@ -14,6 +14,13 @@ interface ServerSettingsModalProps {
   welcomeMessage?: string | null;
   onClose: () => void;
   onUpdated: (updates: { name?: string; description?: string; icon?: string; banner?: string; isPublic?: boolean; welcomeMessage?: string }) => void;
+  hasActiveChannel?: boolean;
+  onOpenModeration?: () => void;
+  onOpenEmoji?: () => void;
+  onOpenAutoMod?: () => void;
+  onOpenAudit?: () => void;
+  onOpenPurge?: () => void;
+  onOpenChannelPerms?: () => void;
 }
 
 export default function ServerSettingsModal({
@@ -27,8 +34,15 @@ export default function ServerSettingsModal({
   welcomeMessage: initialWelcome,
   onClose,
   onUpdated,
+  hasActiveChannel,
+  onOpenModeration,
+  onOpenEmoji,
+  onOpenAutoMod,
+  onOpenAudit,
+  onOpenPurge,
+  onOpenChannelPerms,
 }: ServerSettingsModalProps) {
-  const [tab, setTab] = useState<"general" | "welcome" | "roles" | "danger">("general");
+  const [tab, setTab] = useState<"general" | "welcome" | "roles" | "tools" | "danger">("general");
   const [name, setName] = useState(serverName);
   const [description, setDescription] = useState(serverDescription ?? "");
   const [isPublic, setIsPublic] = useState(initialPublic ?? false);
@@ -134,6 +148,7 @@ export default function ServerSettingsModal({
     { id: "general" as const, label: "General" },
     { id: "welcome" as const, label: "Welcome" },
     { id: "roles" as const, label: "Roles" },
+    { id: "tools" as const, label: "Tools" },
     { id: "danger" as const, label: "Danger Zone" },
   ];
 
@@ -280,6 +295,52 @@ export default function ServerSettingsModal({
           )}
 
           {tab === "roles" && <RolesManager serverId={serverId} />}
+
+          {tab === "tools" && (
+            <div className="space-y-1.5">
+              {([
+                ["🛡️", "Moderation", "Mute, kick, ban, manage members", onOpenModeration],
+                ["🤖", "Auto-Moderation", "Word filters & automatic actions", onOpenAutoMod],
+                ["😎", "Custom Emoji", "Add and remove server emoji", onOpenEmoji],
+                ["📋", "Audit Log", "Review recent server actions", onOpenAudit],
+              ] as const).map(([icon, label, desc, fn]) => (
+                <button
+                  key={label}
+                  onClick={fn}
+                  disabled={!fn}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg bg-[var(--panel-2)] hover:bg-[var(--accent-2)]/20 text-left transition-colors disabled:opacity-40"
+                >
+                  <span className="text-xl shrink-0">{icon}</span>
+                  <span className="min-w-0">
+                    <span className="block text-sm text-[var(--text)]">{label}</span>
+                    <span className="block text-[11px] text-[var(--muted)]">{desc}</span>
+                  </span>
+                </button>
+              ))}
+              {hasActiveChannel && (
+                <>
+                  <div className="text-[10px] text-[var(--muted)] uppercase tracking-wide pt-2">This channel</div>
+                  {([
+                    ["🔒", "Channel Permissions", "Who can view / send here", onOpenChannelPerms],
+                    ["🗑️", "Purge Messages", "Bulk-delete messages here", onOpenPurge],
+                  ] as const).map(([icon, label, desc, fn]) => (
+                    <button
+                      key={label}
+                      onClick={fn}
+                      disabled={!fn}
+                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg bg-[var(--panel-2)] hover:bg-[var(--accent-2)]/20 text-left transition-colors disabled:opacity-40"
+                    >
+                      <span className="text-xl shrink-0">{icon}</span>
+                      <span className="min-w-0">
+                        <span className="block text-sm text-[var(--text)]">{label}</span>
+                        <span className="block text-[11px] text-[var(--muted)]">{desc}</span>
+                      </span>
+                    </button>
+                  ))}
+                </>
+              )}
+            </div>
+          )}
 
           {tab === "danger" && (
             <div className="border border-red-500/30 rounded-lg p-4 space-y-3">
