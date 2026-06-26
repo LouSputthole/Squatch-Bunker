@@ -53,7 +53,7 @@ export async function POST(request: Request) {
   } catch (err) {
     console.error("[Campfire] Failed to upsert notification preference:", err);
     return NextResponse.json(
-      { error: "Database not available. Please check your PostgreSQL connection." },
+      { error: "Database unavailable. Check the server's database connection (DATABASE_URL)." },
       { status: 503 }
     );
   }

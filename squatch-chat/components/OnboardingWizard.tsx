@@ -45,14 +45,12 @@ export default function OnboardingWizard({
         const srvRes = await fetch("/api/servers");
         if (srvRes.ok) {
           const { servers = [] } = await srvRes.json();
-          if (servers.length > 0) {
-            const invRes = await fetch(`/api/servers/${servers[0].id}/invite`, { method: "POST" });
-            if (invRes.ok) {
-              const inv = await invRes.json();
-              const code = inv.code || inv.inviteCode || "";
-              setInviteLink(`${base}/join/${code}`);
-              return;
-            }
+          // Server objects already carry inviteCode (GET /api/servers includes
+          // all scalar fields) — no separate /invite endpoint needed.
+          const code = servers[0]?.inviteCode;
+          if (code) {
+            setInviteLink(`${base}/join/${code}`);
+            return;
           }
         }
       }

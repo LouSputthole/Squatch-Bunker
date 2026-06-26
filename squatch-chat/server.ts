@@ -1,8 +1,9 @@
 /**
  * Campfire Unified Server
  * Runs Next.js + Socket.IO on a single port.
- * Usage: npx tsx server.ts
+ * Usage: npx tsx server.ts  (or `npm run host`)
  */
+import "dotenv/config"; // load .env before realtime/server.ts reads JWT_SECRET at import
 import { createServer } from "http";
 import { parse } from "url";
 import next from "next";

@@ -45,3 +45,13 @@ next-env.d.ts
 
 # temp files
 /tmp/
+
+# local SQLite database (self-host default)
+/data/
+*.db
+*.db-journal
+prisma/dev.db*
+
+# playwright / test artifacts
+/.playwright-mcp/
+/test-results/

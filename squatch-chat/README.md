@@ -1,36 +1,79 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 🏕️ Campfire
 
-## Getting Started
+A self-hostable, open-source voice & chat app — built around the feeling of
+**sitting around a campfire** rather than a corporate chat grid. Warm by
+default, calm motion, presence you can feel.
 
-First, run the development server:
+Think Discord-style servers, channels, and voice rooms — but yours to run,
+extend, and theme.
+
+## Features
+
+- **Voice rooms** — WebRTC peer-to-peer audio with mute/deafen, push-to-talk,
+  voice-activity detection, per-user volume, camera & screen share
+- **Text channels** — messages, replies, edits, reactions, pins, search,
+  threads, @mentions, slash commands, emoji & GIF pickers
+- **Servers** — create/join via invite link, roles (owner/admin/mod/member),
+  categories, channel topics & permissions, slow mode
+- **DMs & friends** — direct messages, friend requests, presence (online /
+  idle / DND / invisible)
+- **Moderation** — kick/ban, server mute/deafen, message purge, audit log,
+  auto-mod word filter
+- **8 built-in themes** incl. **Campfire** (warm ember), Forest Dark/Light,
+  Midnight, Ocean, Dracula, Nord, Solarized — plus a custom-theme creator
+- **Guest access** — jump in with just a username, no signup
+
+## Quick start (self-host)
+
+Requires **Node 18+**. No database server, no Docker — runs on SQLite out of
+the box.
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install      # installs deps + creates .env + sets up a local SQLite DB
+npm run host     # Next.js + realtime server on one port
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open **http://localhost:3000**. Share the printed **Network URL** to let people
+on your LAN join.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+That's it. State persists in `data/campfire.db`.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Database
 
-## Learn More
+Campfire auto-selects its database from `DATABASE_URL`:
 
-To learn more about Next.js, take a look at the following resources:
+| `DATABASE_URL`                              | Mode        | Use for            |
+|---------------------------------------------|-------------|--------------------|
+| unset / `file:./data/campfire.db`           | **SQLite**  | self-host, local   |
+| `postgresql://…`                            | **Postgres**| production / hosted |
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+To use Postgres, set `DATABASE_URL` in `.env`, then:
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```bash
+npm run db:push   # or: npm run db:migrate  (for migration history)
+npm run host
+```
 
-## Deploy on Vercel
+## Tech stack
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+| Layer      | Tech                                            |
+|------------|-------------------------------------------------|
+| Framework  | Next.js 16 (App Router)                          |
+| Database   | Prisma 7 — SQLite (`adapter-better-sqlite3`) or Postgres (`adapter-pg`) |
+| Realtime   | Socket.IO (attached to the same HTTP server)     |
+| Voice/Video| WebRTC (browser-native), Socket.IO signaling     |
+| Auth       | JWT in HttpOnly cookies; bcrypt password hashing |
+| Styling    | Tailwind CSS + CSS custom-property theming        |
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+For internet (not just LAN) voice, put the app behind HTTPS and add a TURN
+server (see `.env.example`). The WebRTC mesh works well up to ~6 people per
+room; larger rooms need an SFU.
+
+## License
+
+**AGPL-3.0** (see [LICENSE](./LICENSE)). You're free to self-host, modify, and
+redistribute. If you run a modified version as a network service, the AGPL
+requires you to make your source available to its users.
+
+A managed, hosted edition (zero-setup, backups, scaled voice) is offered
+separately — same codebase, you pay for the hosting and ops.

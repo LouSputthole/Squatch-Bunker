@@ -63,7 +63,7 @@ export async function POST(request: Request) {
   } catch (err) {
     console.error("[Campfire] Failed to create channel:", err);
     return NextResponse.json(
-      { error: "Database not available. Please check your PostgreSQL connection." },
+      { error: "Database unavailable. Check the server's database connection (DATABASE_URL)." },
       { status: 503 }
     );
   }

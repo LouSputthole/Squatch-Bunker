@@ -187,7 +187,7 @@ export async function POST(request: Request) {
   } catch (err) {
     console.error("[Campfire] Failed to save message:", err);
     return NextResponse.json(
-      { error: "Database not available. Messages require PostgreSQL." },
+      { error: "Database unavailable. Check the server's database connection (DATABASE_URL)." },
       { status: 503 }
     );
   }
