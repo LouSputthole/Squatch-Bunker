@@ -43,12 +43,22 @@ function SeatVideo({ stream, mirror }: { stream: MediaStream; mirror?: boolean }
   );
 }
 
-// Fire is centered (full-bleed, cover, centered) — seat everyone in an ellipse
-// around it. "You" take the front (bottom) seat. Robust to any panel size.
-const CENTER_X = 50;
-const CENTER_Y = 52;
-const RADIUS_X = 33; // % of width
-const RADIUS_Y = 30; // % of height
+// Fixed seat positions (% of the campfire art), each centered on a painted
+// stump/cushion. The art is rendered with backgroundSize 100% 100% (fill, no
+// crop) so these line up at any panel size. "You" take seat 0 (front).
+const SEATS: { x: number; y: number }[] = [
+  { x: 48, y: 79 }, // bottom-center (self)
+  { x: 30, y: 70 }, // bottom-left
+  { x: 17, y: 47 }, // left
+  { x: 33, y: 26 }, // top-left
+  { x: 48, y: 20 }, // top-center
+  { x: 68, y: 26 }, // top-right
+  { x: 81, y: 47 }, // right
+  { x: 68, y: 72 }, // bottom-right
+];
+const AVATAR_SIZE = 72;
+const VIDEO_W = 196;
+const VIDEO_H = 140;
 
 export default function CircleView({
   participants,
@@ -64,14 +74,13 @@ export default function CircleView({
     if (b.userId === currentUserId) return 1;
     return 0;
   });
-  const n = Math.max(ordered.length, 1);
 
   return (
     <div
       className="flex-1 relative overflow-hidden min-h-0"
       style={{
         backgroundImage: "url('/voice-campfire.png')",
-        backgroundSize: "cover",
+        backgroundSize: "100% 100%", // fill (no crop) so seats line up with the art
         backgroundPosition: "center",
       }}
     >
@@ -97,10 +106,10 @@ export default function CircleView({
         </div>
       )}
 
-      {ordered.map((p, i) => {
-        const angle = Math.PI / 2 + (2 * Math.PI * i) / n; // start at bottom, go around
-        const x = CENTER_X + RADIUS_X * Math.cos(angle);
-        const y = CENTER_Y + RADIUS_Y * Math.sin(angle);
+      {ordered.slice(0, SEATS.length).map((p, i) => {
+        const seat = SEATS[i];
+        const x = seat.x;
+        const y = seat.y;
         const isSelf = p.userId === currentUserId;
         const isSpeaking = p.speaking && !p.muted;
         const stream = isSelf
@@ -118,14 +127,14 @@ export default function CircleView({
             {isSpeaking && (
               <div
                 className="absolute border-2 border-amber-400/40 pointer-events-none"
-                style={{ width: hasVideo ? 132 : 78, height: hasVideo ? 96 : 78, left: "50%", top: hasVideo ? "42%" : "34%", transform: "translate(-50%, -50%)", animation: "speak-ripple-c 1.6s ease-out infinite", borderRadius: hasVideo ? 14 : 9999 }}
+                style={{ width: hasVideo ? VIDEO_W + 14 : AVATAR_SIZE + 16, height: hasVideo ? VIDEO_H + 14 : AVATAR_SIZE + 16, left: "50%", top: hasVideo ? "42%" : "34%", transform: "translate(-50%, -50%)", animation: "speak-ripple-c 1.6s ease-out infinite", borderRadius: hasVideo ? 16 : 9999 }}
               />
             )}
 
             {hasVideo ? (
               <div
                 className={`relative rounded-xl overflow-hidden border-2 bg-black ${isSpeaking ? "border-amber-400" : isSelf ? "border-amber-500/60" : "border-black/60"}`}
-                style={{ width: 118, height: 84, boxShadow: isSpeaking ? "0 0 18px rgba(251,191,36,0.55)" : "0 4px 14px rgba(0,0,0,0.6)" }}
+                style={{ width: VIDEO_W, height: VIDEO_H, boxShadow: isSpeaking ? "0 0 22px rgba(251,191,36,0.6)" : "0 6px 18px rgba(0,0,0,0.65)" }}
               >
                 <SeatVideo stream={stream!} mirror={isSelf} />
                 {p.muted && (
@@ -143,7 +152,7 @@ export default function CircleView({
                   <Avatar
                     username={p.username}
                     avatarUrl={p.avatar}
-                    size={56}
+                    size={AVATAR_SIZE}
                     className={`${isSelf ? "bg-amber-600/90 text-[var(--bg)]" : "bg-[#2a2a2e] text-white"} ${p.muted ? "opacity-60" : ""}`}
                   />
                 </div>
@@ -175,6 +184,12 @@ export default function CircleView({
           </div>
         );
       })}
+
+      {ordered.length > SEATS.length && (
+        <div className="absolute bottom-2 right-2 bg-black/60 text-amber-100 text-xs px-2 py-1 rounded-full">
+          +{ordered.length - SEATS.length} more around the fire
+        </div>
+      )}
     </div>
   );
 }
