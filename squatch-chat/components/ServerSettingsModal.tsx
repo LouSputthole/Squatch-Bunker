@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import RolesManager from "@/components/RolesManager";
 
 interface ServerSettingsModalProps {
   open: boolean;
@@ -27,7 +28,7 @@ export default function ServerSettingsModal({
   onClose,
   onUpdated,
 }: ServerSettingsModalProps) {
-  const [tab, setTab] = useState<"general" | "welcome" | "danger">("general");
+  const [tab, setTab] = useState<"general" | "welcome" | "roles" | "danger">("general");
   const [name, setName] = useState(serverName);
   const [description, setDescription] = useState(serverDescription ?? "");
   const [isPublic, setIsPublic] = useState(initialPublic ?? false);
@@ -132,6 +133,7 @@ export default function ServerSettingsModal({
   const TABS = [
     { id: "general" as const, label: "General" },
     { id: "welcome" as const, label: "Welcome" },
+    { id: "roles" as const, label: "Roles" },
     { id: "danger" as const, label: "Danger Zone" },
   ];
 
@@ -276,6 +278,8 @@ export default function ServerSettingsModal({
               </button>
             </>
           )}
+
+          {tab === "roles" && <RolesManager serverId={serverId} />}
 
           {tab === "danger" && (
             <div className="border border-red-500/30 rounded-lg p-4 space-y-3">
