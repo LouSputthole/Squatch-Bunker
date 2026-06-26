@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getSession } from "@/lib/auth";
 import { canAssignRole, canManageMembers, roleLevel } from "@/lib/permissions";
+import { memberHasPermission } from "@/lib/serverRoles";
 
 // PATCH: update member role
 export async function PATCH(
@@ -70,7 +71,9 @@ export async function PUT(
   const actor = await prisma.serverMember.findUnique({
     where: { serverId_userId: { serverId, userId: session.userId } },
   });
-  if (!actor || !canManageMembers(actor.role)) {
+  const actorTierManages = !!actor && canManageMembers(actor.role);
+  const actorCanBan = actorTierManages || (!!actor && await memberHasPermission(serverId, session.userId, "BAN_MEMBERS"));
+  if (!actor || !actorCanBan) {
     return NextResponse.json({ error: "No permission" }, { status: 403 });
   }
 
@@ -81,7 +84,8 @@ export async function PUT(
     return NextResponse.json({ error: "Member not found" }, { status: 404 });
   }
 
-  if (!canAssignRole(actor.role, target.role)) {
+  // Owner is always protected; tier-based actors also can't act on equal/higher tiers.
+  if (target.role === "owner" || (actorTierManages && !canAssignRole(actor.role, target.role))) {
     return NextResponse.json({ error: "Cannot ban this member" }, { status: 403 });
   }
 
@@ -108,7 +112,9 @@ export async function DELETE(
   const kicker = await prisma.serverMember.findUnique({
     where: { serverId_userId: { serverId, userId: session.userId } },
   });
-  if (!kicker || !canManageMembers(kicker.role)) {
+  const kickerTierManages = !!kicker && canManageMembers(kicker.role);
+  const kickerCanKick = kickerTierManages || (!!kicker && await memberHasPermission(serverId, session.userId, "KICK_MEMBERS"));
+  if (!kicker || !kickerCanKick) {
     return NextResponse.json({ error: "No permission" }, { status: 403 });
   }
 
@@ -119,7 +125,7 @@ export async function DELETE(
     return NextResponse.json({ error: "Member not found" }, { status: 404 });
   }
 
-  if (!canAssignRole(kicker.role, target.role)) {
+  if (target.role === "owner" || (kickerTierManages && !canAssignRole(kicker.role, target.role))) {
     return NextResponse.json({ error: "Cannot kick this member" }, { status: 403 });
   }
 
