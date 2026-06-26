@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { displayName } from "@/lib/utils";
 import Avatar from "@/components/Avatar";
-import CircleView from "@/components/CircleView";
+import CircleView, { DEFAULT_SEATS } from "@/components/CircleView";
 import EmberReactions from "@/components/EmberReactions";
 import ConnectionQualityIcon from "@/components/ConnectionQualityIcon";
 import AmbientSounds from "@/components/AmbientSounds";
@@ -292,6 +292,19 @@ const ROOM_THEMES: { id: string; name: string; icon: string; img: string }[] = [
   { id: "cave", name: "Cave", icon: "🪨", img: "/rooms/cave.png" },
 ];
 
+// Per-theme seat coordinates (% of the art). campfire/night/cave/ocean share the
+// default wide ring; forest and rain have their own tighter/shifted rings.
+const SEATS_BY_THEME: Record<string, { x: number; y: number }[]> = {
+  forest: [
+    { x: 51, y: 82 }, { x: 33, y: 80 }, { x: 19, y: 60 }, { x: 30, y: 39 },
+    { x: 49, y: 33 }, { x: 64, y: 38 }, { x: 80, y: 58 }, { x: 64, y: 82 },
+  ],
+  rain: [
+    { x: 45, y: 85 }, { x: 30, y: 82 }, { x: 18, y: 66 }, { x: 29, y: 44 },
+    { x: 46, y: 38 }, { x: 62, y: 42 }, { x: 75, y: 62 }, { x: 72, y: 82 },
+  ],
+};
+
 export default function VoiceRoom({
   channelId,
   channelName,
@@ -505,6 +518,7 @@ export default function VoiceRoom({
               participants={participants}
               currentUserId={currentUserId}
               image={roomTheme.img}
+              seats={SEATS_BY_THEME[roomThemeId] || DEFAULT_SEATS}
               cameraOn={cameraOn}
               localCameraStream={localCameraStream}
               remoteVideoStreams={remoteVideoStreams}

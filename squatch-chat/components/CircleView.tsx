@@ -21,6 +21,7 @@ interface CircleViewProps {
   participants: Participant[];
   currentUserId: string;
   image?: string; // room background (per theme)
+  seats?: { x: number; y: number }[]; // seat coords for this theme's art
   cameraOn?: boolean;
   localCameraStream?: MediaStream | null;
   remoteVideoStreams?: Map<string, MediaStream>;
@@ -47,7 +48,9 @@ function SeatVideo({ stream, mirror }: { stream: MediaStream; mirror?: boolean }
 // Fixed seat positions (% of the campfire art), each centered on a painted
 // stump/cushion. The art is rendered with backgroundSize 100% 100% (fill, no
 // crop) so these line up at any panel size. "You" take seat 0 (front).
-const SEATS: { x: number; y: number }[] = [
+// Default ring — fits campfire / night / cave / ocean art. Order: self (front)
+// first, then around. Per-theme overrides are passed in via the `seats` prop.
+export const DEFAULT_SEATS: { x: number; y: number }[] = [
   { x: 48, y: 79 }, // bottom-center (self)
   { x: 30, y: 70 }, // bottom-left
   { x: 17, y: 47 }, // left
@@ -65,6 +68,7 @@ export default function CircleView({
   participants,
   currentUserId,
   image = "/rooms/campfire.png",
+  seats = DEFAULT_SEATS,
   cameraOn,
   localCameraStream,
   remoteVideoStreams,
@@ -108,8 +112,8 @@ export default function CircleView({
         </div>
       )}
 
-      {ordered.slice(0, SEATS.length).map((p, i) => {
-        const seat = SEATS[i];
+      {ordered.slice(0, seats.length).map((p, i) => {
+        const seat = seats[i];
         const x = seat.x;
         const y = seat.y;
         const isSelf = p.userId === currentUserId;
@@ -187,9 +191,9 @@ export default function CircleView({
         );
       })}
 
-      {ordered.length > SEATS.length && (
+      {ordered.length > seats.length && (
         <div className="absolute bottom-2 right-2 bg-black/60 text-amber-100 text-xs px-2 py-1 rounded-full">
-          +{ordered.length - SEATS.length} more around the fire
+          +{ordered.length - seats.length} more around the fire
         </div>
       )}
     </div>
