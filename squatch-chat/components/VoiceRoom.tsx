@@ -279,6 +279,16 @@ interface Toast {
   type: "join" | "leave";
 }
 
+// Room backgrounds — one per ambient-sound theme.
+const ROOM_THEMES: { id: string; name: string; icon: string; img: string }[] = [
+  { id: "campfire", name: "Campfire", icon: "🔥", img: "/rooms/campfire.png" },
+  { id: "forest", name: "Forest", icon: "🌲", img: "/rooms/forest.png" },
+  { id: "rain", name: "Rainstorm", icon: "🌧️", img: "/rooms/rain.png" },
+  { id: "ocean", name: "Ocean", icon: "🌊", img: "/rooms/ocean.png" },
+  { id: "night", name: "Night Sky", icon: "🌙", img: "/rooms/night.png" },
+  { id: "cave", name: "Cave", icon: "🪨", img: "/rooms/cave.png" },
+];
+
 export default function VoiceRoom({
   channelId,
   channelName,
@@ -313,12 +323,28 @@ export default function VoiceRoom({
   const [modMenu, setModMenu] = useState<{ userId: string; username: string; x: number; y: number; muted: boolean; deafened?: boolean } | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [viewMode, setViewMode] = useState<"campfire" | "grid">("campfire");
+  const [roomThemeId, setRoomThemeId] = useState("campfire");
+  const [themePickerOpen, setThemePickerOpen] = useState(false);
   const prevParticipantsRef = useRef<VoiceParticipant[]>([]);
   const toastCounterRef = useRef(0);
   const isFirstRenderRef = useRef(true);
 
   const canMod = currentUserRole === "owner" || currentUserRole === "admin" || currentUserRole === "mod";
   const otherVoiceChannels = voiceChannels?.filter((c) => c.id !== channelId && c.type === "voice") || [];
+  const roomTheme = ROOM_THEMES.find((t) => t.id === roomThemeId) || ROOM_THEMES[0];
+
+  useEffect(() => {
+    try {
+      const t = localStorage.getItem("campfire:roomTheme");
+      if (t && ROOM_THEMES.some((r) => r.id === t)) setRoomThemeId(t);
+    } catch { /* ignore */ }
+  }, []);
+
+  function pickTheme(id: string) {
+    setRoomThemeId(id);
+    setThemePickerOpen(false);
+    try { localStorage.setItem("campfire:roomTheme", id); } catch { /* ignore */ }
+  }
 
   useEffect(() => {
     if (isFirstRenderRef.current) {
@@ -366,24 +392,57 @@ export default function VoiceRoom({
             {participants.length} {participants.length === 1 ? "person" : "people"} connected
           </span>
         )}
-        {/* View toggle: campfire circle <-> standard grid */}
-        <button
-          onClick={() => setViewMode((m) => (m === "campfire" ? "grid" : "campfire"))}
-          className="ml-auto flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-md bg-[var(--panel-2)] text-[var(--muted)] hover:text-amber-200 transition-colors"
-          title={viewMode === "campfire" ? "Switch to grid view (Discord-style)" : "Switch to campfire view"}
-        >
-          {viewMode === "campfire" ? (
-            <>
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></svg>
-              Grid
-            </>
-          ) : (
-            <>
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2s4 4 4 8a4 4 0 0 1-8 0c0-1.5.5-2.5 1-3.5" /><path d="M8 14a4 4 0 1 0 8 0c0-2-2-3-2-3" /></svg>
-              Campfire
-            </>
+        <div className="ml-auto flex items-center gap-2">
+          {/* Room theme picker (campfire view only) */}
+          {viewMode === "campfire" && (
+            <div className="relative">
+              <button
+                onClick={() => setThemePickerOpen((o) => !o)}
+                className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-md bg-[var(--panel-2)] text-[var(--muted)] hover:text-amber-200 transition-colors"
+                title="Change room theme"
+              >
+                <span>{roomTheme.icon}</span> {roomTheme.name}
+              </button>
+              {themePickerOpen && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setThemePickerOpen(false)} />
+                  <div className="absolute right-0 top-9 z-50 w-60 bg-[var(--panel)] border border-[var(--accent-2)]/30 rounded-xl shadow-2xl p-2 grid grid-cols-2 gap-1.5">
+                    {ROOM_THEMES.map((t) => (
+                      <button
+                        key={t.id}
+                        onClick={() => pickTheme(t.id)}
+                        className={`relative h-14 rounded-lg overflow-hidden border-2 ${t.id === roomThemeId ? "border-amber-400" : "border-transparent"} group`}
+                        style={{ backgroundImage: `url('${t.img}')`, backgroundSize: "cover", backgroundPosition: "center" }}
+                        title={t.name}
+                      >
+                        <span className="absolute inset-0 bg-black/30 group-hover:bg-black/10 transition-colors" />
+                        <span className="absolute bottom-1 left-1 text-[10px] text-white font-semibold drop-shadow">{t.icon} {t.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
           )}
-        </button>
+          {/* View toggle: campfire circle <-> standard grid */}
+          <button
+            onClick={() => setViewMode((m) => (m === "campfire" ? "grid" : "campfire"))}
+            className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-md bg-[var(--panel-2)] text-[var(--muted)] hover:text-amber-200 transition-colors"
+            title={viewMode === "campfire" ? "Switch to grid view (Discord-style)" : "Switch to campfire view"}
+          >
+            {viewMode === "campfire" ? (
+              <>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></svg>
+                Grid
+              </>
+            ) : (
+              <>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2s4 4 4 8a4 4 0 0 1-8 0c0-1.5.5-2.5 1-3.5" /><path d="M8 14a4 4 0 1 0 8 0c0-2-2-3-2-3" /></svg>
+                Campfire
+              </>
+            )}
+          </button>
+        </div>
       </div>
 
       {/* Reconnecting banner */}
@@ -440,6 +499,7 @@ export default function VoiceRoom({
             <CircleView
               participants={participants}
               currentUserId={currentUserId}
+              image={roomTheme.img}
               cameraOn={cameraOn}
               localCameraStream={localCameraStream}
               remoteVideoStreams={remoteVideoStreams}

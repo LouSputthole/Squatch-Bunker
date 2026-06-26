@@ -20,6 +20,7 @@ interface Participant {
 interface CircleViewProps {
   participants: Participant[];
   currentUserId: string;
+  image?: string; // room background (per theme)
   cameraOn?: boolean;
   localCameraStream?: MediaStream | null;
   remoteVideoStreams?: Map<string, MediaStream>;
@@ -63,6 +64,7 @@ const VIDEO_H = 140;
 export default function CircleView({
   participants,
   currentUserId,
+  image = "/rooms/campfire.png",
   cameraOn,
   localCameraStream,
   remoteVideoStreams,
@@ -79,7 +81,7 @@ export default function CircleView({
     <div
       className="flex-1 relative overflow-hidden min-h-0"
       style={{
-        backgroundImage: "url('/voice-campfire.png')",
+        backgroundImage: `url('${image}')`,
         backgroundSize: "100% 100%", // fill (no crop) so seats line up with the art
         backgroundPosition: "center",
       }}
