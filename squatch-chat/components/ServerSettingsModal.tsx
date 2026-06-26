@@ -114,7 +114,7 @@ export default function ServerSettingsModal({
     setSuccess("");
 
     const res = await fetch(`/api/servers/${serverId}/welcome`, {
-      method: "POST",
+      method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ welcomeMessage: welcomeMsg.trim() }),
     });

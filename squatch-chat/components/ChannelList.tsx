@@ -35,11 +35,12 @@ interface ChannelListProps {
   currentUserId?: string;
   currentUserRole?: string;
   activeVoiceChannelId?: string | null;
+  viewingVoiceRoom?: boolean;
   voiceParticipants?: Map<string, VoiceParticipant[]>;
   onChannelSelect: (channel: Channel) => void;
   onChannelCreated: (channel: Channel) => void;
   onVoiceJoin?: (channel: Channel) => void;
-  onVoiceLeave?: () => void;
+  onVoiceView?: (channel: Channel) => void;
   onServerRenamed?: (newName: string) => void;
   onServerDeleted?: () => void;
 }
@@ -98,11 +99,12 @@ export default function ChannelList({
   currentUserId,
   currentUserRole,
   activeVoiceChannelId,
+  viewingVoiceRoom,
   voiceParticipants,
   onChannelSelect,
   onChannelCreated,
   onVoiceJoin,
-  onVoiceLeave,
+  onVoiceView,
   onServerRenamed,
   onServerDeleted,
 }: ChannelListProps) {
@@ -324,7 +326,7 @@ export default function ChannelList({
       if (focused) {
         if (focused.type === "voice") {
           if (activeVoiceChannelId === focused.id) {
-            onVoiceLeave?.();
+            onVoiceView?.(focused);
           } else {
             onVoiceJoin?.(focused);
           }
@@ -630,22 +632,23 @@ export default function ChannelList({
         <ul role="list" aria-label="Voice channels">
           {voiceChannels.map((channel) => {
             const isActive = activeVoiceChannelId === channel.id;
+            const isViewing = isActive && !!viewingVoiceRoom;
             const participants = localVoiceParticipants.get(channel.id) || [];
             return (
               <li key={channel.id} role="listitem">
                 <button
                   onClick={() => {
                     if (isActive) {
-                      onVoiceLeave?.();
+                      onVoiceView?.(channel); // already connected — jump back into the room, don't leave
                     } else {
                       onVoiceJoin?.(channel);
                     }
                   }}
-                  aria-label={isActive ? `Leave ${channel.name} voice channel` : `Join ${channel.name} voice channel`}
+                  aria-label={isActive ? `Return to ${channel.name} voice room` : `Join ${channel.name} voice channel`}
                   aria-pressed={isActive}
                   className={`w-full text-left px-2 py-1 rounded text-sm flex items-center gap-1.5 ${
                     isActive
-                      ? "bg-green-600/20 text-green-400"
+                      ? `bg-green-600/20 text-green-400${isViewing ? " ring-1 ring-green-400/50" : ""}`
                       : "text-[var(--muted)] hover:bg-[var(--panel-2)]/50 hover:text-[var(--text)]"
                   }`}
                 >

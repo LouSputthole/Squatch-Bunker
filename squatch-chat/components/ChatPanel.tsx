@@ -814,8 +814,18 @@ export default function ChatPanel({
         </div>
       )}
 
-      {/* Main chat column */}
-      <div className="flex-1 flex flex-col min-w-0">
+      {/* Main chat column — campfire scene behind the conversation, with a
+          theme-tinted scrim so message text stays readable on any theme. */}
+      <div
+        className="flex-1 flex flex-col min-w-0"
+        style={{
+          backgroundImage:
+            "linear-gradient(color-mix(in srgb, var(--bg) 82%, transparent), color-mix(in srgb, var(--bg) 90%, transparent)), url('/chat-bg.png')",
+          backgroundSize: "cover",
+          backgroundPosition: "center",
+          backgroundRepeat: "no-repeat",
+        }}
+      >
       <div className="px-4 flex items-center border-b border-[var(--accent-2)]/30 bg-[var(--panel-2)] shrink-0 min-h-12 py-1 gap-2 flex-wrap justify-between">
         <div className="flex items-center gap-1 shrink-0">
           <span className="text-[var(--accent-2)]">#</span>

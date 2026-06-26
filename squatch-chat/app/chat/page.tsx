@@ -7,6 +7,7 @@ import ChatPanel from "@/components/ChatPanel";
 import MemberList from "@/components/MemberList";
 import VoicePanel from "@/components/VoicePanel";
 import VoiceRoom from "@/components/VoiceRoom";
+import VoiceStatusBar from "@/components/VoiceStatusBar";
 import SettingsModal from "@/components/SettingsModal";
 import KeyboardShortcutsPanel from "@/components/KeyboardShortcutsPanel";
 import { SettingsIcon } from "@/components/VoicePanel";
@@ -79,6 +80,10 @@ function ChatPageInner() {
   const [profileUserId, setProfileUserId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [mobileView, setMobileView] = useState<"channels" | "chat" | "members">("channels");
+  // Whether the main panel is showing the voice room. Decoupled from the voice
+  // CONNECTION (voice.activeVoiceChannel) so you can browse text channels while
+  // staying in the call. The connection persists; only the VIEW changes.
+  const [viewingVoiceRoom, setViewingVoiceRoom] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
   const [serverSettingsOpen, setServerSettingsOpen] = useState(false);
   const [emojiManagerOpen, setEmojiManagerOpen] = useState(false);
@@ -367,15 +372,17 @@ function ChatPageInner() {
             currentUserId={auth.user?.id}
             currentUserRole={presence.userRole}
             activeVoiceChannelId={voice.activeVoiceChannel?.id}
+            viewingVoiceRoom={viewingVoiceRoom}
             voiceParticipants={voice.voiceParticipants}
             onChannelSelect={(channel) => {
               ch.selectChannel(channel);
+              setViewingVoiceRoom(false); // browsing text — keep the call alive, just change the view
               setSidebarOpen(false);
               setMobileView("chat");
             }}
             onChannelCreated={handleChannelCreated}
-            onVoiceJoin={voice.joinVoice}
-            onVoiceLeave={voice.leaveVoice}
+            onVoiceJoin={(channel) => { voice.joinVoice(channel); setViewingVoiceRoom(true); }}
+            onVoiceView={() => { setViewingVoiceRoom(true); setMobileView("chat"); }}
             onServerRenamed={handleServerRenamed}
             onServerDeleted={handleServerDeleted}
           />
@@ -390,8 +397,9 @@ function ChatPageInner() {
         </div>
       )}
 
-      {/* Main panel */}
-      {voice.activeVoiceChannel && auth.user ? (
+      {/* Main panel — shows the voice room only when you're VIEWING it; the
+          call keeps running in the background (VoicePanel) while you browse text. */}
+      {viewingVoiceRoom && voice.activeVoiceChannel && auth.user ? (
         <VoiceRoom
           channelId={voice.activeVoiceChannel.id}
           channelName={voice.activeVoiceChannel.name}
@@ -479,6 +487,24 @@ function ChatPageInner() {
       </>
       )}
 
+      {/* Persistent "Voice Connected" bar — visible whenever you're in a call but
+          browsing a text channel. The call (VoicePanel) keeps running; this is how
+          you mute/deafen/hang up or jump back in. Mobile-visible (the user bar isn't). */}
+      {voice.activeVoiceChannel && !viewingVoiceRoom && auth.user && (
+        <div className="fixed inset-x-0 bottom-0 z-30 md:absolute md:inset-x-auto md:left-[72px] md:bottom-12 md:w-60">
+          <VoiceStatusBar
+            channelName={voice.activeVoiceChannel.name}
+            muted={voice.voiceState.muted}
+            deafened={voice.voiceState.deafened}
+            reconnecting={voice.voiceState.reconnecting}
+            onReturn={() => { setViewingVoiceRoom(true); setMobileView("chat"); }}
+            onToggleMute={voice.toggleMute}
+            onToggleDeafen={voice.toggleDeafen}
+            onDisconnect={() => { voice.disconnect(); setViewingVoiceRoom(false); }}
+          />
+        </div>
+      )}
+
       {/* Headless voice engine */}
       {voice.activeVoiceChannel && auth.user && (
         <VoicePanel
@@ -490,7 +516,7 @@ function ChatPageInner() {
           currentUsername={auth.user.username}
           currentUserAvatar={auth.user.avatar}
           onParticipantsChange={voice.handleParticipantsChange}
-          onDisconnect={voice.leaveVoice}
+          onDisconnect={() => { voice.leaveVoice(); setViewingVoiceRoom(false); }}
           onStateChange={voice.setVoiceState}
           onScreenShareChange={voice.handleScreenShareChange}
           onVideoStreamsChange={voice.handleVideoStreamsChange}
