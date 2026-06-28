@@ -129,13 +129,7 @@ class VoiceClient {
     if (this.peers.has(targetUserId)) return;
 
     const pc = this._createPeerConnection(targetUserId);
-
-    // Add local tracks
-    if (this.localStream) {
-      this.localStream.getTracks().forEach(track => {
-        pc.addTrack(track, this.localStream);
-      });
-    }
+    this._addLocalTracks(pc);
 
     try {
       const offer = await pc.createOffer();
@@ -159,14 +153,27 @@ class VoiceClient {
     let pc = this.peers.get(fromUserId);
     if (!pc) {
       pc = this._createPeerConnection(fromUserId);
-      if (this.localStream) {
-        this.localStream.getTracks().forEach(track => {
-          pc.addTrack(track, this.localStream);
-        });
-      }
+      this._addLocalTracks(pc);
+    }
+
+    // Perfect negotiation: resolve offer glare deterministically. The peer
+    // with the lexicographically smaller userId is "polite". If an offer
+    // arrives while we already have one in flight (collision), the impolite
+    // peer ignores it (its own offer wins); the polite peer rolls back and
+    // accepts. This mirrors the server-agnostic single-initiator tie-break
+    // and recovers cleanly from any stray/duplicate offer.
+    const polite = this.userId < fromUserId;
+    const collision = pc.signalingState !== 'stable';
+
+    if (collision && !polite) {
+      console.warn(`[VoiceClient] Ignoring colliding offer from ${fromUserId} (impolite peer)`);
+      return;
     }
 
     try {
+      if (collision && polite) {
+        await pc.setLocalDescription({ type: 'rollback' });
+      }
       await pc.setRemoteDescription(new RTCSessionDescription(sdp));
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
@@ -240,6 +247,17 @@ class VoiceClient {
   }
 
   // ── Private helpers ────────────────────────────────────────────────────────
+
+  /**
+   * Attach the current local audio tracks to a peer connection, if available.
+   * @param {RTCPeerConnection} pc
+   */
+  _addLocalTracks(pc) {
+    if (!this.localStream) return;
+    this.localStream.getTracks().forEach(track => {
+      pc.addTrack(track, this.localStream);
+    });
+  }
 
   /**
    * Create an RTCPeerConnection for a given peer, wiring up all event handlers.

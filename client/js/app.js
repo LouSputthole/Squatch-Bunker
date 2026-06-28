@@ -251,6 +251,34 @@ function connectSocket() {
     renderChannelList();
   });
 
+  // ── Room lifecycle / errors ──
+
+  // Join failed (channel not found or full): surface it and roll back the
+  // optimistic join UI so we don't sit in a room the server rejected.
+  socket.on('room:error', ({ message }) => {
+    showToast(message || 'Could not join channel', 'error');
+    handleLocalLeave(false);
+  });
+
+  // A channel was created elsewhere — add it to the list.
+  socket.on('room:created', ({ room }) => {
+    if (room && room.id) {
+      state.rooms.set(room.id, room);
+      renderChannelList();
+    }
+  });
+
+  // A channel was deleted — drop it; if we're in it, leave locally.
+  socket.on('room:deleted', ({ roomId }) => {
+    state.rooms.delete(roomId);
+    state.lobbyPresence.delete(roomId);
+    if (roomId === state.currentRoomId) {
+      showToast('This channel was deleted', 'error');
+      handleLocalLeave(false);
+    }
+    renderChannelList();
+  });
+
   // ── WebRTC signaling ──
 
   socket.on('signal:offer', ({ fromUserId, sdp }) => {
@@ -689,7 +717,8 @@ function escapeHtml(str) {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 // ── Chat ───────────────────────────────────────────────────────────────────

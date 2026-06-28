@@ -36,6 +36,12 @@ class ChatService {
   getHistory(roomId: string): ChatMessage[] {
     return this.messages.get(roomId) ?? [];
   }
+
+  // Drop all history for a room (e.g. when the room is deleted) so it doesn't
+  // linger in memory indefinitely.
+  clearRoom(roomId: string): void {
+    this.messages.delete(roomId);
+  }
 }
 
 export const chatService = new ChatService();

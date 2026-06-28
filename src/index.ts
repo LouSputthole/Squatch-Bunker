@@ -24,6 +24,8 @@ const io = new SocketServer(httpServer, {
 
 // Pass io to presence service so it can emit cleanup events
 presenceService.setIO(io);
+// Expose io to REST routes (e.g. so DELETE /api/rooms can notify clients)
+app.set('io', io);
 
 // Middleware
 app.use(cors());
@@ -36,12 +38,13 @@ app.use(express.static(path.join(__dirname, '..', 'client')));
 app.use('/api/rooms', roomsRouter);
 app.use('/api/users', usersRouter);
 
-// Fallback: serve index.html for any non-API route
-app.get('*', (req, res) => {
-  if (req.path.startsWith('/api')) {
-    res.status(404).json({ error: 'Not found' });
-    return;
-  }
+// Any unmatched API route → JSON 404 (covers all HTTP methods, not just GET)
+app.use('/api', (_req, res) => {
+  res.status(404).json({ error: 'Not found' });
+});
+
+// Fallback: serve the SPA for any other (non-API) GET route
+app.get('*', (_req, res) => {
   res.sendFile(path.join(__dirname, '..', 'client', 'index.html'));
 });
 

@@ -23,13 +23,28 @@ export function registerRoomHandlers(io: SocketServer, socket: Socket): void {
       // Verify room exists
       const room = roomService.getRoom(roomId);
       if (!room) {
-        socket.emit('error', { message: 'Room not found' });
+        socket.emit('room:error', { roomId, message: 'Channel not found' });
         return;
       }
 
-      // Check if user is already in a room — if so, auto-leave first
       const existingRoomId = presenceService.getUserRoom(userId);
-      if (existingRoomId && existingRoomId !== roomId) {
+
+      // Already in this room — just refresh state, no capacity/leave handling.
+      if (existingRoomId === roomId) {
+        const members = presenceService.getRoomPresence(roomId);
+        socket.emit('room:state', { roomId, members });
+        return;
+      }
+
+      // Enforce capacity (0 = unlimited) before leaving any current room, so a
+      // rejected join doesn't strand the user outside their existing channel.
+      if (room.capacity > 0 && presenceService.getRoomPresence(roomId).length >= room.capacity) {
+        socket.emit('room:error', { roomId, message: 'Channel is full' });
+        return;
+      }
+
+      // Leave the current room first if switching from another one.
+      if (existingRoomId) {
         presenceService.leaveRoom(existingRoomId, userId);
         socket.leave(`room:${existingRoomId}`);
         sessionRegistry.updateRoom(socket.id, null);
@@ -37,11 +52,8 @@ export function registerRoomHandlers(io: SocketServer, socket: Socket): void {
           userId,
           roomId: existingRoomId,
         });
-      } else if (existingRoomId === roomId) {
-        // Already in this room, just refresh state
-        const members = presenceService.getRoomPresence(roomId);
-        socket.emit('room:state', { roomId, members });
-        return;
+        const prevMembers = presenceService.getRoomPresence(existingRoomId);
+        io.to('lobby').emit('lobby:room-update', { roomId: existingRoomId, members: prevMembers });
       }
 
       const now = Date.now();
@@ -175,14 +187,23 @@ export function registerRoomHandlers(io: SocketServer, socket: Socket): void {
 
     const { userId, currentRoomId } = session;
     if (currentRoomId) {
-      presenceService.leaveRoom(currentRoomId, userId);
-      io.to(`room:${currentRoomId}`).emit('presence:member-left', {
-        userId,
-        roomId: currentRoomId,
-      });
-      // Broadcast updated member list to all clients for sidebar presence
-      const updatedMembers = presenceService.getRoomPresence(currentRoomId);
-      io.to('lobby').emit('lobby:room-update', { roomId: currentRoomId, members: updatedMembers });
+      // Only evict the presence member if it still belongs to THIS socket.
+      // Guards against a second connection for the same userId (whose join
+      // overwrote the presence entry) being kicked out when an older socket
+      // disconnects.
+      const current = presenceService
+        .getRoomPresence(currentRoomId)
+        .find(m => m.userId === userId);
+      if (current && current.socketId === socket.id) {
+        presenceService.leaveRoom(currentRoomId, userId);
+        io.to(`room:${currentRoomId}`).emit('presence:member-left', {
+          userId,
+          roomId: currentRoomId,
+        });
+        // Broadcast updated member list to all clients for sidebar presence
+        const updatedMembers = presenceService.getRoomPresence(currentRoomId);
+        io.to('lobby').emit('lobby:room-update', { roomId: currentRoomId, members: updatedMembers });
+      }
     }
   });
 }

@@ -73,6 +73,19 @@ class PresenceService {
     return Array.from(presence.members.values());
   }
 
+  // Remove an entire room's presence (e.g. when the room is deleted) and
+  // return the members that were in it so callers can notify/evict them.
+  removeRoom(roomId: string): MemberState[] {
+    const presence = this.rooms.get(roomId);
+    if (!presence) return [];
+    const members = Array.from(presence.members.values());
+    for (const member of members) {
+      this.socketToUser.delete(member.socketId);
+    }
+    this.rooms.delete(roomId);
+    return members;
+  }
+
   heartbeat(socketId: string): void {
     const info = this.socketToUser.get(socketId);
     if (!info) return;
