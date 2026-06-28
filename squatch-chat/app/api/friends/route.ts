@@ -75,43 +75,62 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Cannot friend yourself" }, { status: 400 });
     }
 
-    // Check existing friendship in either direction
+    // Normalize the pair so the existence check covers either direction.
     const [u1, u2] = [session.userId, target.id].sort();
-    const existing = await prisma.friendship.findFirst({
-      where: {
-        OR: [
-          { requesterId: u1, addresseeId: u2 },
-          { requesterId: u2, addresseeId: u1 },
-        ],
-      },
-    });
 
-    if (existing) {
-      if (existing.status === "accepted") {
-        return NextResponse.json({ error: "Already friends" }, { status: 409 });
-      }
-      if (existing.status === "pending") {
-        // If they sent us a request, auto-accept
-        if (existing.addresseeId === session.userId) {
-          const updated = await prisma.friendship.update({
-            where: { id: existing.id },
-            data: { status: "accepted" },
-          });
-          return NextResponse.json({ friendship: updated, autoAccepted: true });
+    // Run the existence check and the create/auto-accept atomically. On the
+    // single-connection SQLite default this fully serializes concurrent
+    // reciprocal requests, so they can't both pass the check and create two
+    // rows; the P2002 handler below converts any residual unique-constraint
+    // race into a graceful response. `requesterId`/`addresseeId` still record
+    // the real sender/recipient so incoming vs outgoing display is preserved.
+    const result = await prisma.$transaction(
+      async (tx): Promise<{ status: number; body: Record<string, unknown> }> => {
+        const existing = await tx.friendship.findFirst({
+          where: {
+            OR: [
+              { requesterId: u1, addresseeId: u2 },
+              { requesterId: u2, addresseeId: u1 },
+            ],
+          },
+        });
+
+        if (existing) {
+          if (existing.status === "accepted") {
+            return { status: 409, body: { error: "Already friends" } };
+          }
+          if (existing.status === "pending") {
+            // If they sent us a request, auto-accept
+            if (existing.addresseeId === session.userId) {
+              const updated = await tx.friendship.update({
+                where: { id: existing.id },
+                data: { status: "accepted" },
+              });
+              return { status: 200, body: { friendship: updated, autoAccepted: true } };
+            }
+            return { status: 409, body: { error: "Request already sent" } };
+          }
+          if (existing.status === "blocked") {
+            return { status: 403, body: { error: "Cannot send request" } };
+          }
         }
-        return NextResponse.json({ error: "Request already sent" }, { status: 409 });
-      }
-      if (existing.status === "blocked") {
-        return NextResponse.json({ error: "Cannot send request" }, { status: 403 });
-      }
-    }
 
-    const friendship = await prisma.friendship.create({
-      data: { requesterId: session.userId, addresseeId: target.id },
-    });
+        const friendship = await tx.friendship.create({
+          data: { requesterId: session.userId, addresseeId: target.id },
+        });
 
-    return NextResponse.json({ friendship });
+        return { status: 200, body: { friendship } };
+      },
+    );
+
+    return NextResponse.json(result.body, { status: result.status });
   } catch (err) {
+    const prismaErr = err as { code?: string };
+    if (prismaErr?.code === "P2002") {
+      // A concurrent request already created this friendship — treat the
+      // duplicate as a no-op rather than surfacing a 500.
+      return NextResponse.json({ error: "Request already sent" }, { status: 409 });
+    }
     console.error("[Campfire] Failed to send friend request:", err);
     return NextResponse.json({ error: "Database error" }, { status: 503 });
   }

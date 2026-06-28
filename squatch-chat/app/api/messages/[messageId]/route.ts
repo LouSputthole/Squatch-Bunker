@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
+import { requireChannelMembership } from "@/lib/membership";
 
 export async function GET(
   _request: Request,
@@ -23,6 +24,13 @@ export async function GET(
     });
 
     if (!message) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+
+    // Authorization: only members of the message's channel/server may read it.
+    // Returning 404 (not 403) avoids leaking the existence of the message.
+    const access = await requireChannelMembership(message.channelId, session.userId);
+    if (!access) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
 

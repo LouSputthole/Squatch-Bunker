@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
+import { assertFeature } from "@/lib/features";
 
 export async function PATCH(
   request: Request,
@@ -25,7 +26,13 @@ export async function PATCH(
     if (name && name.trim()) updates.name = name.trim();
     if (regenerateInvite) updates.inviteCode = crypto.randomUUID();
     if (typeof icon === "string") updates.icon = icon || null;
-    if ("banner" in body) updates.banner = banner || null;
+    if ("banner" in body) {
+      // Setting a (non-empty) banner is a premium feature; clearing is allowed for anyone.
+      if (banner && !(await assertFeature(session.userId, "server_banner"))) {
+        return NextResponse.json({ error: "Upgrade required" }, { status: 403 });
+      }
+      updates.banner = banner || null;
+    }
 
     if (Object.keys(updates).length === 0) {
       return NextResponse.json({ error: "Nothing to update" }, { status: 400 });
@@ -72,9 +79,18 @@ export async function DELETE(
         await tx.reaction.deleteMany({
           where: { message: { channelId: { in: channelIds } } },
         });
+        // ScheduledMessage and Webhook FK channels but have no onDelete cascade,
+        // so they must be removed before their channels.
+        await tx.scheduledMessage.deleteMany({ where: { channelId: { in: channelIds } } });
+        await tx.webhook.deleteMany({ where: { channelId: { in: channelIds } } });
         await tx.message.deleteMany({ where: { channelId: { in: channelIds } } });
         await tx.channel.deleteMany({ where: { serverId } });
       }
+
+      // Server-scoped records without an onDelete cascade: remove explicitly or
+      // they FK-block the server delete (Postgres) / orphan it (SQLite).
+      await tx.customEmoji.deleteMany({ where: { serverId } });
+      await tx.auditLog.deleteMany({ where: { serverId } });
 
       await tx.serverMember.deleteMany({ where: { serverId } });
       await tx.server.delete({ where: { id: serverId } });

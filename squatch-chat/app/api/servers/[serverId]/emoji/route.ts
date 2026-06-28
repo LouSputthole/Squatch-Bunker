@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { assertFeature } from "@/lib/features";
 
 // GET: list custom emoji for a server
 export async function GET(
@@ -47,6 +48,11 @@ export async function POST(
     return NextResponse.json({ error: "No permission" }, { status: 403 });
   }
 
+  // Premium feature gate
+  if (!(await assertFeature(session.userId, "custom_emoji"))) {
+    return NextResponse.json({ error: "Upgrade required" }, { status: 403 });
+  }
+
   // Check limit (50 per server)
   const count = await prisma.customEmoji.count({ where: { serverId } });
   if (count >= 50) {
@@ -82,6 +88,12 @@ export async function DELETE(
   });
   if (!member || !["owner", "admin", "mod"].includes(member.role)) {
     return NextResponse.json({ error: "No permission" }, { status: 403 });
+  }
+
+  // Cross-tenant IDOR guard: the emoji must belong to this server.
+  const emoji = await prisma.customEmoji.findUnique({ where: { id: emojiId } });
+  if (!emoji || emoji.serverId !== serverId) {
+    return NextResponse.json({ error: "Emoji not found" }, { status: 404 });
   }
 
   await prisma.customEmoji.delete({ where: { id: emojiId } });

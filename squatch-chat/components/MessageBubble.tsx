@@ -212,11 +212,11 @@ const EMOJI_DATA: { emoji: string; keywords: string }[] = [
 ];
 
 // Inline markdown + URL + mention combined regex
-// Groups: 1=`code`, 2=**bold**, 3=bold-inner, 4=__bold__, 5=bold-inner2,
-//         6=*italic*, 7=italic-inner, 8=_italic_, 9=italic-inner2,
-//         10=~~strike~~, 11=strike-inner, 12=URL, 13=@mention
+// Groups: 1=`code`, 2=**bold**, 3=__bold__, 4=*italic*, 5=_italic_,
+//         6=~~strike~~, 7=URL, 8=@mention, 9=||spoiler||,
+//         10=[link text], 11=link url  (from [text](url) markdown)
 const INLINE_RE =
-  /(`[^`\n]+`)|\*\*([^*\n]+)\*\*|__([^_\n]+)__|\*([^*\n]+)\*|_([^_\n]+)_|~~([^~\n]+)~~|(https?:\/\/[^\s<]+[^\s<.,;:!?'")\]])|(@\w+(?:#[a-f0-9]+)?)|(\|\|[^|\n]+\|\|)/g;
+  /(`[^`\n]+`)|\*\*([^*\n]+)\*\*|__([^_\n]+)__|\*([^*\n]+)\*|_([^_\n]+)_|~~([^~\n]+)~~|(https?:\/\/[^\s<]+[^\s<.,;:!?'")\]])|(@\w+(?:#[a-f0-9]+)?)|(\|\|[^|\n]+\|\|)|\[([^\]\n]+)\]\(([^)\s]+)\)/g;
 
 let _inlineKey = 0;
 function renderInline(text: string): React.ReactNode {
@@ -236,6 +236,15 @@ function renderInline(text: string): React.ReactNode {
     else if (m[7]) parts.push(<a key={k} href={m[7]} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline break-all">{m[7]}</a>);
     else if (m[8]) parts.push(<span key={k} className="bg-blue-500/20 text-blue-300 rounded px-1 font-medium">{m[8]}</span>);
     else if (m[9]) parts.push(<SpoilerText key={k}>{m[9].slice(2, -2)}</SpoilerText>);
+    else if (m[10]) {
+      // [text](url) markdown — only allow safe schemes; never render javascript: etc.
+      const href = m[11] ?? "";
+      if (/^(https?:|mailto:)/i.test(href)) {
+        parts.push(<a key={k} href={href} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline break-all">{m[10]}</a>);
+      } else {
+        parts.push(m[0]);
+      }
+    }
     last = m.index + m[0].length;
   }
   if (last < text.length) parts.push(text.slice(last));

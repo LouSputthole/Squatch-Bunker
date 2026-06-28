@@ -1,12 +1,26 @@
 import { NextResponse } from "next/server";
+import { getSession } from "@/lib/auth";
 
 const LIBRETRANSLATE_URL = process.env.LIBRETRANSLATE_URL ?? "https://libretranslate.com";
 const LIBRETRANSLATE_KEY = process.env.LIBRETRANSLATE_KEY ?? "";
 
 export async function POST(req: Request) {
-  const { text, target = "en" } = await req.json();
+  const session = await getSession();
+  if (!session) {
+    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  }
 
-  if (!text?.trim()) {
+  let body: { text?: unknown; target?: unknown };
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
+
+  const text = body?.text;
+  const target = typeof body?.target === "string" ? body.target : "en";
+
+  if (typeof text !== "string" || !text.trim()) {
     return NextResponse.json({ error: "text required" }, { status: 400 });
   }
 

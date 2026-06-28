@@ -23,15 +23,16 @@ export async function POST(request: Request) {
     if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
     if (!user.isGuest) return NextResponse.json({ error: "Account is not a guest" }, { status: 400 });
 
-    // Check for conflicts
+    // Check for conflicts — use a single generic message so we don't disclose
+    // whether the email or the username specifically is already registered.
     const emailTaken = await prisma.user.findUnique({ where: { email: email.trim() } });
     if (emailTaken && emailTaken.id !== user.id) {
-      return NextResponse.json({ error: "Email already in use" }, { status: 409 });
+      return NextResponse.json({ error: "Email or username already taken" }, { status: 409 });
     }
 
     const usernameTaken = await prisma.user.findUnique({ where: { username: username.trim() } });
     if (usernameTaken && usernameTaken.id !== user.id) {
-      return NextResponse.json({ error: "Username already taken" }, { status: 409 });
+      return NextResponse.json({ error: "Email or username already taken" }, { status: 409 });
     }
 
     const passwordHash = await hashPassword(password);
@@ -48,7 +49,7 @@ export async function POST(request: Request) {
     });
 
     // Issue new token with updated username
-    const token = createToken({ userId: updated.id, username: updated.username });
+    const token = createToken({ userId: updated.id, username: updated.username, tokenVersion: updated.tokenVersion });
     const response = NextResponse.json({
       user: { id: updated.id, username: updated.username, email: updated.email, isGuest: false },
     });

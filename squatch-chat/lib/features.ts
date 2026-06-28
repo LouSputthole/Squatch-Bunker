@@ -2,6 +2,8 @@
 // Self-hosted: all features unlocked
 // Managed service: free vs premium tiers
 
+import { prisma } from "@/lib/db";
+
 export type Tier = "free" | "premium" | "self-hosted";
 
 interface FeatureDefinition {
@@ -74,6 +76,20 @@ export function getTier(user?: { tier?: string; tierExpiresAt?: Date | string | 
   }
 
   return "free";
+}
+
+/**
+ * Server-side feature gate: load the user, compute their effective tier, and
+ * return true iff that tier has the given feature. Use in premium API routes:
+ *   if (!(await assertFeature(session.userId, 'custom_emoji')))
+ *     return NextResponse.json({ error: 'Upgrade required' }, { status: 403 });
+ */
+export async function assertFeature(userId: string, feature: string): Promise<boolean> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { tier: true, tierExpiresAt: true },
+  });
+  return hasFeature(getTier(user), feature);
 }
 
 /** Get the display name and price for each tier */

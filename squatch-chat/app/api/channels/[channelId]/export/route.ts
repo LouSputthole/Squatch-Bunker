@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
+import { assertFeature } from "@/lib/features";
 
 export async function GET(
   _req: NextRequest,
@@ -26,6 +27,11 @@ export async function GET(
 
     if (channel.server.ownerId !== session.userId) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    // Premium feature gate (export/backup)
+    if (!(await assertFeature(session.userId, "backup_restore"))) {
+      return NextResponse.json({ error: "Upgrade required" }, { status: 403 });
     }
 
     const messages = await prisma.message.findMany({

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getSession } from "@/lib/auth";
+import { requireChannelMembership } from "@/lib/membership";
 
 export async function POST(
   req: NextRequest,
@@ -19,6 +20,21 @@ export async function POST(
   }
 
   try {
+    // Authorization: caller must be able to access the message (i.e. be an
+    // active, non-banned member of its channel's server) before reacting or
+    // seeing the reactor identities returned below.
+    const message = await prisma.message.findUnique({
+      where: { id: messageId },
+      select: { channelId: true },
+    });
+    if (!message) {
+      return NextResponse.json({ error: "Message not found" }, { status: 404 });
+    }
+    const access = await requireChannelMembership(message.channelId, session.userId);
+    if (!access) {
+      return NextResponse.json({ error: "Not authorized" }, { status: 403 });
+    }
+
     // Check if reaction already exists — toggle it off
     const existing = await prisma.reaction.findUnique({
       where: {

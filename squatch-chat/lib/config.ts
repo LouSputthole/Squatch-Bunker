@@ -1,6 +1,37 @@
 // Centralized configuration — all env vars and shared constants in one place.
 // Nothing is hardcoded. Every value comes from env vars with dev-only fallbacks.
 
+// Known insecure placeholder secrets that must never be used to sign JWTs.
+const JWT_SECRET_PLACEHOLDERS = new Set([
+  "campfire-secret-change-me",
+  "campfire-secret-change-me-in-production",
+]);
+
+/**
+ * Resolve and validate JWT_SECRET at startup. Fails fast (throws) when the
+ * secret is missing, too short to be safe, or left at a known placeholder — so
+ * a deploy can never silently fall back to a guessable signing key.
+ */
+function resolveJwtSecret(): string {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    throw new Error(
+      "JWT_SECRET is not set. Set a strong, random JWT_SECRET (at least 32 characters) before starting the server."
+    );
+  }
+  if (secret.length < 32) {
+    throw new Error(
+      "JWT_SECRET is too short. Use at least 32 characters of random data."
+    );
+  }
+  if (JWT_SECRET_PLACEHOLDERS.has(secret)) {
+    throw new Error(
+      "JWT_SECRET is set to a known placeholder value. Replace it with a strong, random secret."
+    );
+  }
+  return secret;
+}
+
 export const config = {
   // Server URLs
   appUrl: process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
@@ -8,8 +39,8 @@ export const config = {
   socketPort: parseInt(process.env.SOCKET_PORT || "3001", 10),
   socketPath: process.env.SOCKET_PATH || "/api/socketio",
 
-  // Auth
-  jwtSecret: process.env.JWT_SECRET || "campfire-secret-change-me",
+  // Auth — validated at startup; never falls back to a hardcoded secret.
+  jwtSecret: resolveJwtSecret(),
   cookieName: process.env.COOKIE_NAME || "squatch-token",
 
   // Database
@@ -18,13 +49,17 @@ export const config = {
   // Environment
   isProduction: process.env.NODE_ENV === "production",
 
-  // Cookie settings — use Lax by default (works for same-origin on HTTP LAN).
-  // SameSite=None requires Secure (HTTPS). Only opt in via COOKIE_SECURE=1
-  // when running behind HTTPS with cross-origin needs.
+  // Cookie settings — Secure is on automatically for production (HTTPS) or when
+  // explicitly opted in via COOKIE_SECURE=1, so an HTTPS prod deploy is Secure
+  // by default. SameSite stays Lax (CSRF-safe, same-origin); COOKIE_SECURE=1
+  // signals a cross-origin HTTPS deploy, which needs SameSite=None (and None
+  // requires Secure). Local http dev stays non-Secure / Lax so cookies work
+  // without TLS.
   get cookieFlags(): string {
-    const forceSecure = process.env.COOKIE_SECURE === "1";
-    const secure = forceSecure ? " Secure;" : "";
-    const sameSite = forceSecure ? "None" : "Lax";
+    const crossOrigin = process.env.COOKIE_SECURE === "1";
+    const secureEnabled = this.isProduction || crossOrigin;
+    const secure = secureEnabled ? " Secure;" : "";
+    const sameSite = crossOrigin ? "None" : "Lax";
     return `Path=/; HttpOnly; SameSite=${sameSite};${secure} Max-Age=${60 * 60 * 24 * 7}`;
   },
 

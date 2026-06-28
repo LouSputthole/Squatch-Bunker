@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
+import { requireChannelMembership } from "@/lib/membership";
 
 export async function GET() {
   const session = await getSession();
@@ -15,7 +16,20 @@ export async function GET() {
       },
       orderBy: { createdAt: "desc" },
     });
-    return NextResponse.json({ bookmarks });
+
+    // Only return bookmarks whose message the caller can still access (active,
+    // non-banned member of the message's channel/server). This prevents leaking
+    // message content for servers the user has left or been banned from.
+    const accessible: typeof bookmarks = [];
+    for (const bookmark of bookmarks) {
+      if (
+        bookmark.message &&
+        (await requireChannelMembership(bookmark.message.channelId, session.userId))
+      ) {
+        accessible.push(bookmark);
+      }
+    }
+    return NextResponse.json({ bookmarks: accessible });
   } catch (err) {
     console.error("[Campfire] GET bookmarks:", err);
     return NextResponse.json({ error: "Server error" }, { status: 500 });
@@ -27,7 +41,25 @@ export async function POST(req: NextRequest) {
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   try {
     const { messageId } = await req.json();
+    if (!messageId || typeof messageId !== "string") {
+      return NextResponse.json({ error: "messageId is required" }, { status: 400 });
+    }
     const { prisma } = await import("@/lib/db");
+
+    // Authorization: only bookmark a message the caller can actually access
+    // (active, non-banned member of its channel's server).
+    const message = await prisma.message.findUnique({
+      where: { id: messageId },
+      select: { channelId: true },
+    });
+    if (!message) {
+      return NextResponse.json({ error: "Message not found" }, { status: 404 });
+    }
+    const access = await requireChannelMembership(message.channelId, session.userId);
+    if (!access) {
+      return NextResponse.json({ error: "Not authorized" }, { status: 403 });
+    }
+
     const bookmark = await prisma.bookmark.upsert({
       where: { userId_messageId: { userId: session.userId, messageId } },
       create: { userId: session.userId, messageId },

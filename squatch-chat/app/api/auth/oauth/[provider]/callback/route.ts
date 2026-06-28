@@ -136,7 +136,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ prov
     }
 
     // Create session token and set auth cookie
-    const token = createToken({ userId: user.id, username: user.username });
+    const token = createToken({ userId: user.id, username: user.username, tokenVersion: user.tokenVersion });
     const response = NextResponse.redirect(`${APP_URL}/chat`);
     setTokenCookie(response, token);
 

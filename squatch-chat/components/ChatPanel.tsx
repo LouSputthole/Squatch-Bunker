@@ -505,93 +505,119 @@ export default function ChatPanel({
     setMessages((prev) => [...prev, optimisticMsg]);
     setTimeout(scrollToBottom, 50);
 
-    const res = await fetch("/api/messages", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ channelId, content, ...(replyTarget ? { replyToId: replyTarget.id } : {}) }),
-    });
+    try {
+      const res = await fetch("/api/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channelId, content, ...(replyTarget ? { replyToId: replyTarget.id } : {}) }),
+      });
 
-    if (res.ok) {
-      const { message } = await res.json();
-      // Replace optimistic with real message
-      setMessages((prev) =>
-        prev.map((m) => (m.id === tempId ? message : m))
-      );
-      socket.emit("message:send", { channelId, message });
-      sounds.messageSent();
+      if (res.ok) {
+        const { message } = await res.json();
+        // Replace optimistic with real message
+        setMessages((prev) =>
+          prev.map((m) => (m.id === tempId ? message : m))
+        );
+        socket.emit("message:send", { channelId, message });
+        sounds.messageSent();
 
-      // Start slow mode countdown
-      if (channelSlowMode > 0) {
-        if (cooldownRef.current) clearInterval(cooldownRef.current);
-        setSlowRemaining(channelSlowMode);
-        cooldownRef.current = setInterval(() => {
-          setSlowRemaining((prev) => {
-            if (prev <= 1) {
-              clearInterval(cooldownRef.current!);
-              cooldownRef.current = null;
-              return 0;
-            }
-            return prev - 1;
-          });
-        }, 1000);
+        // Start slow mode countdown
+        if (channelSlowMode > 0) {
+          if (cooldownRef.current) clearInterval(cooldownRef.current);
+          setSlowRemaining(channelSlowMode);
+          cooldownRef.current = setInterval(() => {
+            setSlowRemaining((prev) => {
+              if (prev <= 1) {
+                clearInterval(cooldownRef.current!);
+                cooldownRef.current = null;
+                return 0;
+              }
+              return prev - 1;
+            });
+          }, 1000);
+        }
+      } else {
+        // Remove failed optimistic message and surface the error
+        setMessages((prev) => prev.filter((m) => m.id !== tempId));
+        setNewMessage((cur) => (cur.trim() ? cur : content));
+        alert("Failed to send message. Please try again.");
       }
-    } else {
-      // Remove failed optimistic message
+    } catch {
+      // Network failure — revert the optimistic message so it isn't stuck pending
       setMessages((prev) => prev.filter((m) => m.id !== tempId));
+      setNewMessage((cur) => (cur.trim() ? cur : content));
+      alert("Failed to send message. Please try again.");
     }
   }
 
   async function handleEdit(messageId: string, newContent: string) {
-    const res = await fetch(`/api/messages/${messageId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content: newContent }),
-    });
-
-    if (res.ok) {
-      const { message } = await res.json();
-      setMessages((prev) =>
-        prev.map((m) => (m.id === messageId ? message : m))
-      );
-      // Broadcast edit
-      const socket = getSocket();
-      socket.emit("message:edit", {
-        channelId,
-        messageId,
-        content: newContent,
-        updatedAt: message.updatedAt,
+    try {
+      const res = await fetch(`/api/messages/${messageId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: newContent }),
       });
+
+      if (res.ok) {
+        const { message } = await res.json();
+        setMessages((prev) =>
+          prev.map((m) => (m.id === messageId ? message : m))
+        );
+        // Broadcast edit
+        const socket = getSocket();
+        socket.emit("message:edit", {
+          channelId,
+          messageId,
+          content: newContent,
+          updatedAt: message.updatedAt,
+        });
+      } else {
+        alert("Failed to edit message. Please try again.");
+      }
+    } catch {
+      alert("Failed to edit message. Please try again.");
     }
   }
 
   async function handleReact(messageId: string, emoji: string) {
-    const res = await fetch(`/api/messages/${messageId}/reactions`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ emoji }),
-    });
+    try {
+      const res = await fetch(`/api/messages/${messageId}/reactions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ emoji }),
+      });
 
-    if (res.ok) {
-      const { reactions } = await res.json();
-      setMessages((prev) =>
-        prev.map((m) => (m.id === messageId ? { ...m, reactions } : m))
-      );
-      // Broadcast reaction update
-      const socket = getSocket();
-      socket.emit("message:react", { channelId, messageId, reactions });
+      if (res.ok) {
+        const { reactions } = await res.json();
+        setMessages((prev) =>
+          prev.map((m) => (m.id === messageId ? { ...m, reactions } : m))
+        );
+        // Broadcast reaction update
+        const socket = getSocket();
+        socket.emit("message:react", { channelId, messageId, reactions });
+      }
+    } catch {
+      // Network failure — reaction not applied; nothing optimistic to revert
+      alert("Failed to add reaction. Please try again.");
     }
   }
 
   async function handleDelete(messageId: string) {
-    const res = await fetch(`/api/messages/${messageId}`, {
-      method: "DELETE",
-    });
+    try {
+      const res = await fetch(`/api/messages/${messageId}`, {
+        method: "DELETE",
+      });
 
-    if (res.ok) {
-      setMessages((prev) => prev.filter((m) => m.id !== messageId));
-      // Broadcast delete
-      const socket = getSocket();
-      socket.emit("message:delete", { channelId, messageId });
+      if (res.ok) {
+        setMessages((prev) => prev.filter((m) => m.id !== messageId));
+        // Broadcast delete
+        const socket = getSocket();
+        socket.emit("message:delete", { channelId, messageId });
+      } else {
+        alert("Failed to delete message. Please try again.");
+      }
+    } catch {
+      alert("Failed to delete message. Please try again.");
     }
   }
 
@@ -610,13 +636,19 @@ export default function ChatPanel({
 
   async function openThread(messageId: string, author: { id: string; username: string }) {
     setThreadParent({ id: messageId, author });
+    setThreadMessages([]);
     setThreadLoading(true);
-    const res = await fetch(`/api/messages?channelId=${channelId}&parentId=${messageId}`);
-    if (res.ok) {
-      const { messages: replies } = await res.json();
-      setThreadMessages(replies || []);
+    try {
+      const res = await fetch(`/api/messages?channelId=${channelId}&parentId=${messageId}`);
+      if (res.ok) {
+        const { messages: replies } = await res.json();
+        setThreadMessages(replies || []);
+      }
+    } catch {
+      // Network failure — leave the thread empty rather than stuck loading
+    } finally {
+      setThreadLoading(false);
     }
-    setThreadLoading(false);
   }
 
   async function sendThreadMessage(e: React.FormEvent) {
@@ -624,19 +656,29 @@ export default function ChatPanel({
     if (!threadInput.trim() || !threadParent) return;
     const content = threadInput.trim();
     setThreadInput("");
-    const res = await fetch("/api/messages", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ channelId, content, parentMessageId: threadParent.id }),
-    });
-    if (res.ok) {
-      const { message } = await res.json();
-      setThreadMessages((prev) => [...prev, message]);
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === threadParent.id ? { ...m, replyCount: (m.replyCount ?? 0) + 1 } : m
-        )
-      );
+    const parentId = threadParent.id;
+    try {
+      const res = await fetch("/api/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channelId, content, parentMessageId: parentId }),
+      });
+      if (res.ok) {
+        const { message } = await res.json();
+        setThreadMessages((prev) => [...prev, message]);
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === parentId ? { ...m, replyCount: (m.replyCount ?? 0) + 1 } : m
+          )
+        );
+      } else {
+        // Restore the unsent reply so it isn't silently lost
+        setThreadInput((cur) => (cur.trim() ? cur : content));
+        alert("Failed to send reply. Please try again.");
+      }
+    } catch {
+      setThreadInput((cur) => (cur.trim() ? cur : content));
+      alert("Failed to send reply. Please try again.");
     }
   }
 
@@ -746,15 +788,22 @@ export default function ChatPanel({
 
   async function saveTopic() {
     const trimmed = topicDraft.trim();
-    const res = await fetch(`/api/channels/${channelId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ topic: trimmed }),
-    });
-    if (res.ok) {
-      setTopic(trimmed);
+    try {
+      const res = await fetch(`/api/channels/${channelId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ topic: trimmed }),
+      });
+      if (res.ok) {
+        setTopic(trimmed);
+      } else {
+        alert("Failed to save topic. Please try again.");
+      }
+    } catch {
+      alert("Failed to save topic. Please try again.");
+    } finally {
+      setEditingTopic(false);
     }
-    setEditingTopic(false);
   }
 
   const typingNames = Array.from(typingUsers.values()).map((name) => truncateName(name));

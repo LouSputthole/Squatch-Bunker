@@ -20,6 +20,7 @@ model User {
   guestExpiresAt DateTime?
   tier           String    @default("free")
   tierExpiresAt  DateTime?
+  tokenVersion   Int       @default(0)
   stripeCustomerId     String?
   stripeSubscriptionId String?
   subscriptionStatus   String?
@@ -178,6 +179,8 @@ model Message {
   bookmarks Bookmark[]
   parent    Message?   @relation("thread", fields: [parentMessageId], references: [id])
   children  Message[]  @relation("thread")
+
+  @@index([channelId])
 }
 
 model Reaction {
@@ -232,6 +235,8 @@ model DirectMessage {
   conversation Conversation            @relation(fields: [conversationId], references: [id])
   author       User                    @relation(fields: [authorId], references: [id])
   reactions    DirectMessageReaction[]
+
+  @@index([conversationId])
 }
 
 model DirectMessageReaction {
@@ -323,6 +328,8 @@ model ScheduledMessage {
 
   channel Channel @relation(fields: [channelId], references: [id])
   author  User    @relation(fields: [authorId], references: [id])
+
+  @@index([channelId, sendAt])
 }
 
 model NotificationPreference {

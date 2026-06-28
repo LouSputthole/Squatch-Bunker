@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { checkRateLimit } from "@/lib/rateLimit";
+import { requireMembership, requireChannelMembership } from "@/lib/membership";
+
+const MAX_MESSAGE_LENGTH = 4000;
 
 export async function GET(request: Request) {
   const session = await getSession();
@@ -25,22 +28,11 @@ export async function GET(request: Request) {
   try {
     const { prisma } = await import("@/lib/db");
 
-    const channel = await prisma.channel.findUnique({
-      where: { id: channelId },
-      select: { serverId: true },
-    });
-
-    if (!channel) {
-      return NextResponse.json({ error: "Channel not found" }, { status: 404 });
-    }
-
-    const membership = await prisma.serverMember.findUnique({
-      where: {
-        serverId_userId: { serverId: channel.serverId, userId: session.userId },
-      },
-    });
-
-    if (!membership) {
+    // Authorization: caller must be an active (non-banned) member of the
+    // channel's server. requireChannelMembership returns null if the channel
+    // is missing or the user is not a member / is banned.
+    const access = await requireChannelMembership(channelId, session.userId);
+    if (!access) {
       return NextResponse.json({ error: "Not a server member" }, { status: 403 });
     }
 
@@ -120,6 +112,14 @@ export async function POST(request: Request) {
     );
   }
 
+  // Bound content length to avoid unbounded TEXT writes.
+  if (typeof content === "string" && content.length > MAX_MESSAGE_LENGTH) {
+    return NextResponse.json(
+      { error: `Message too long (max ${MAX_MESSAGE_LENGTH} characters)` },
+      { status: 400 }
+    );
+  }
+
   try {
     const { prisma } = await import("@/lib/db");
 
@@ -132,11 +132,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Channel not found" }, { status: 404 });
     }
 
-    const membership = await prisma.serverMember.findUnique({
-      where: {
-        serverId_userId: { serverId: channel.serverId, userId: session.userId },
-      },
-    });
+    // Authorization: caller must be an active (non-banned) member of the
+    // channel's server. requireMembership excludes banned members.
+    const membership = await requireMembership(channel.serverId, session.userId);
 
     if (!membership) {
       return NextResponse.json({ error: "Not a server member" }, { status: 403 });

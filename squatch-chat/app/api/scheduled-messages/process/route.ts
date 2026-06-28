@@ -18,21 +18,37 @@ export async function POST(req: Request) {
   let sent = 0;
   for (const scheduled of pending) {
     try {
-      await prisma.$transaction([
-        prisma.message.create({
-          data: {
-            channelId: scheduled.channelId,
-            authorId: scheduled.authorId,
-            content: scheduled.content,
-          },
-        }),
-        prisma.scheduledMessage.update({
-          where: { id: scheduled.id },
-          data: { sent: true },
-        }),
-      ]);
+      // Compare-and-set claim: only the worker that flips sent:false -> true
+      // proceeds, so overlapping runs can't double-send the same row.
+      const claim = await prisma.scheduledMessage.updateMany({
+        where: { id: scheduled.id, sent: false },
+        data: { sent: true },
+      });
+      if (claim.count === 0) continue; // already claimed/sent by another run
+
+      // Re-validate the channel still exists; if it was deleted the message
+      // can never be delivered, so drop the scheduled row instead of getting
+      // permanently stuck retrying a failing insert.
+      const channel = await prisma.channel.findUnique({
+        where: { id: scheduled.channelId },
+        select: { id: true },
+      });
+      if (!channel) {
+        await prisma.scheduledMessage.delete({ where: { id: scheduled.id } });
+        continue;
+      }
+
+      await prisma.message.create({
+        data: {
+          channelId: scheduled.channelId,
+          authorId: scheduled.authorId,
+          content: scheduled.content,
+        },
+      });
       sent++;
-    } catch { /* continue */ }
+    } catch (err) {
+      console.error("[Campfire] Failed to process scheduled message:", scheduled.id, err);
+    }
   }
 
   return NextResponse.json({ processed: sent });

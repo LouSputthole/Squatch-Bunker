@@ -1,11 +1,35 @@
 import { NextResponse } from "next/server";
 import jwt from "jsonwebtoken";
 import { config } from "@/lib/config";
+import { checkRateLimit } from "@/lib/rateLimit";
 
 const JWT_SECRET = config.jwtSecret;
 const COOKIE_NAME = config.cookieName;
 
+function clientIp(request: Request): string {
+  return (
+    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+    request.headers.get("x-real-ip") ||
+    "unknown"
+  );
+}
+
 export async function POST(request: Request) {
+  const rl = checkRateLimit(`guest:${clientIp(request)}`);
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: "Too many attempts. Please try again later." },
+      {
+        status: 429,
+        headers: {
+          "X-RateLimit-Remaining": String(rl.remaining),
+          "X-RateLimit-Reset": String(Math.ceil(rl.resetAt / 1000)),
+          "Retry-After": String(Math.ceil((rl.resetAt - Date.now()) / 1000)),
+        },
+      }
+    );
+  }
+
   try {
     const { username } = await request.json();
 
