@@ -222,19 +222,19 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
 
     pc.onicecandidate = (event) => {
       if (event.candidate) {
-        socket.emit("screen:ice-candidate", { to: remoteSocketId, candidate: event.candidate.toJSON() });
+        socket.emit("screen:ice-candidate", { to: remoteSocketId, channelId, candidate: event.candidate.toJSON() });
       }
     };
 
     if (initiator) {
       pc.createOffer()
         .then((offer) => pc.setLocalDescription(offer))
-        .then(() => { socket.emit("screen:offer", { to: remoteSocketId, offer: pc.localDescription! }); });
+        .then(() => { socket.emit("screen:offer", { to: remoteSocketId, channelId, offer: pc.localDescription! }); });
     }
 
     screenPeersRef.current.set(remoteSocketId, pc);
     return pc;
-  }, [participants]);
+  }, [participants, channelId]);
 
   const startScreenShare = useCallback(async () => {
     try {
@@ -291,7 +291,7 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
           // Renegotiate
           pc.createOffer()
             .then((offer) => pc.setLocalDescription(offer))
-            .then(() => { socket.emit("voice:offer", { to: socketId, offer: pc.localDescription! }); })
+            .then(() => { socket.emit("voice:offer", { to: socketId, channelId, offer: pc.localDescription! }); })
             .catch(() => {});
         }
       }
@@ -314,7 +314,7 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
           // Renegotiate
           pc.createOffer()
             .then((offer) => pc.setLocalDescription(offer))
-            .then(() => { socket.emit("voice:offer", { to: socketId, offer: pc.localDescription! }); })
+            .then(() => { socket.emit("voice:offer", { to: socketId, channelId, offer: pc.localDescription! }); })
             .catch(() => {});
         }
 
@@ -362,7 +362,7 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
       pc.setRemoteDescription(new RTCSessionDescription(data.offer))
         .then(() => pc.createAnswer())
         .then((answer) => pc.setLocalDescription(answer))
-        .then(() => { socket.emit("screen:answer", { to: data.from, answer: pc.localDescription! }); });
+        .then(() => { socket.emit("screen:answer", { to: data.from, channelId, answer: pc.localDescription! }); });
     }
 
     function handleScreenAnswer(data: { from: string; answer: RTCSessionDescriptionInit }) {
@@ -388,7 +388,7 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
       socket.off("screen:answer", handleScreenAnswer);
       socket.off("screen:ice-candidate", handleScreenIce);
     };
-  }, [joined, currentUserId, createScreenPeer]);
+  }, [joined, currentUserId, createScreenPeer, channelId]);
 
   // Report screen shares to parent
   useEffect(() => {
@@ -506,7 +506,7 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
 
       pc.onicecandidate = (event) => {
         if (event.candidate) {
-          socket.emit("voice:ice-candidate", { to: remoteSocketId, candidate: event.candidate.toJSON() });
+          socket.emit("voice:ice-candidate", { to: remoteSocketId, channelId, candidate: event.candidate.toJSON() });
         }
       };
 
@@ -565,7 +565,7 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
       if (initiator) {
         pc.createOffer()
           .then((offer) => pc.setLocalDescription(offer))
-          .then(() => { socket.emit("voice:offer", { to: remoteSocketId, offer: pc.localDescription! }); });
+          .then(() => { socket.emit("voice:offer", { to: remoteSocketId, channelId, offer: pc.localDescription! }); });
       }
 
       peersRef.current.set(remoteSocketId, pc);
@@ -801,7 +801,7 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
       pc.setRemoteDescription(new RTCSessionDescription(data.offer))
         .then(() => pc.createAnswer())
         .then((answer) => pc.setLocalDescription(answer))
-        .then(() => { socket.emit("voice:answer", { to: data.from, answer: pc.localDescription! }); });
+        .then(() => { socket.emit("voice:answer", { to: data.from, channelId, answer: pc.localDescription! }); });
     }
 
     function handleAnswer(data: { from: string; answer: RTCSessionDescriptionInit }) {
@@ -871,7 +871,7 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
             .then((offer) => pc.setLocalDescription(offer))
             .then(() => {
               const socket = getSocket();
-              socket.emit("voice:offer", { to: socketId, offer: pc.localDescription! });
+              socket.emit("voice:offer", { to: socketId, channelId, offer: pc.localDescription! });
             })
             .catch((err) => console.error("[Voice] ICE restart failed:", err));
         }
@@ -879,7 +879,7 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
     }, 5000);
 
     return () => clearInterval(interval);
-  }, [joined]);
+  }, [joined, channelId]);
 
   // WebRTC stats polling — updates connection quality with real RTT and packet loss data every 5s
   useEffect(() => {

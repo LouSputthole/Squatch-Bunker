@@ -48,11 +48,19 @@ export function verifyToken(token: string): TokenPayload | null {
   }
 }
 
-export async function getSession(): Promise<TokenPayload | null> {
-  const cookieStore = await cookies();
-  const token = cookieStore.get(COOKIE_NAME)?.value;
-  if (!token) return null;
-
+/**
+ * Validate a raw session token the same way an authenticated request is
+ * validated: pinned-HS256 signature check, then stateful checks against the DB
+ * (user still exists, tokenVersion not bumped, guest session not expired).
+ * Returns the token payload when the session is still valid, or null otherwise.
+ *
+ * This is the single source of truth for "is this token good right now" so the
+ * HTTP session (getSession) and the realtime socket handshake can share it and
+ * never drift apart. Fails closed if the user is gone or the DB errors.
+ */
+export async function validateSessionToken(
+  token: string
+): Promise<TokenPayload | null> {
   const payload = verifyToken(token);
   if (!payload) return null;
 
@@ -83,6 +91,13 @@ export async function getSession(): Promise<TokenPayload | null> {
   }
 
   return payload;
+}
+
+export async function getSession(): Promise<TokenPayload | null> {
+  const cookieStore = await cookies();
+  const token = cookieStore.get(COOKIE_NAME)?.value;
+  if (!token) return null;
+  return validateSessionToken(token);
 }
 
 export function setTokenCookie(response: Response, token: string): void {

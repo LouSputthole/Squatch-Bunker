@@ -1,16 +1,32 @@
 import { createServer, Server as HttpServer } from "http";
 import { pathToFileURL } from "url";
 import { Server } from "socket.io";
-import jwt from "jsonwebtoken";
 import { parse } from "cookie";
 import { config } from "@/lib/config";
 import { prisma } from "@/lib/db";
+import { validateSessionToken } from "@/lib/auth";
 import { requireMembership, requireChannelMembership } from "@/lib/membership";
 import { canManageMessages } from "@/lib/permissions";
 import { checkRateLimit } from "@/lib/rateLimit";
 
 const COOKIE_NAME = process.env.COOKIE_NAME || "squatch-token";
 const SOCKET_PATH = process.env.SOCKET_PATH || "/api/socketio";
+
+// ─── Payload guards ───
+// Socket payloads arrive untrusted from the client. These keep validation
+// boring and consistent: every handler asserts the shape of the fields it
+// actually reads before using them.
+function isStr(v: unknown): v is string {
+  return typeof v === "string";
+}
+function isObj(v: unknown): boolean {
+  return typeof v === "object" && v !== null;
+}
+// WebRTC SDP / ICE payloads are relayed opaquely and never inspected, so we
+// only assert they are present and roughly shaped (object or string).
+function isBlob(v: unknown): boolean {
+  return (typeof v === "object" && v !== null) || typeof v === "string";
+}
 
 // CORS — never reflect arbitrary origins (that allows cross-site WebSocket
 // hijacking when credentials are sent). Same-origin connections (the unified
@@ -92,8 +108,6 @@ function safeHandler<A extends unknown[]>(fn: (...args: A) => void | Promise<voi
   };
 }
 
-interface TokenPayload { userId: string; username: string; }
-
 /**
  * Attach Socket.IO to any HTTP server. Works for:
  * - Unified server (single port with Next.js)
@@ -108,21 +122,24 @@ export function attachSocketIO(httpServer: HttpServer): Server {
     path: SOCKET_PATH,
   });
 
-  // Auth middleware
-  io.use((socket, next) => {
+  // Auth middleware — run the SAME validation the HTTP session uses so a socket
+  // can't be authorized by a token the HTTP layer would reject.
+  // validateSessionToken pins HS256, loads the user, and enforces tokenVersion
+  // revocation and guest expiry (previously the socket path did none of this).
+  // ponytail: this check runs only at connect time. A live socket is not
+  // re-validated until it reconnects, so a token revoked mid-session keeps its
+  // already-open sockets until they drop.
+  io.use(async (socket, next) => {
     const rawCookie = socket.handshake.headers.cookie;
     if (!rawCookie) return next(new Error("Unauthorized"));
     const parsed = parse(rawCookie);
     const token = parsed[COOKIE_NAME];
     if (!token) return next(new Error("Unauthorized"));
-    try {
-      const payload = jwt.verify(token, config.jwtSecret) as TokenPayload;
-      socket.data.userId = payload.userId;
-      socket.data.username = payload.username;
-      next();
-    } catch {
-      next(new Error("Unauthorized"));
-    }
+    const payload = await validateSessionToken(token);
+    if (!payload) return next(new Error("Unauthorized"));
+    socket.data.userId = payload.userId;
+    socket.data.username = payload.username;
+    next();
   });
 
   // Heartbeat cleanup
@@ -158,23 +175,34 @@ export function attachSocketIO(httpServer: HttpServer): Server {
       return !checkRateLimit(`${socket.id}:${event}`).allowed;
     }
 
+    // Relay a WebRTC signaling packet only when BOTH the sender and the named
+    // target socket are members of the same voice room. Without this a client
+    // could address any socket id and have the server forward attacker-chosen
+    // SDP/ICE to it.
+    function sameVoiceRoom(targetSocketId: string, channelId: string): boolean {
+      const room = `voice:${channelId}`;
+      if (!socket.rooms.has(room)) return false;
+      const target = io.sockets.sockets.get(targetSocketId);
+      return !!target && target.rooms.has(room);
+    }
+
     // ─── Channel Rooms ───
     socket.on("channel:join", safeHandler(async (channelId: string) => {
-      if (typeof channelId !== "string") return;
+      if (!isStr(channelId)) return;
       // Only members of the channel's server may subscribe to its messages.
       const ctx = await requireChannelMembership(channelId, currentUserId);
       if (!ctx) return;
       socket.join(`channel:${channelId}`);
     }));
     socket.on("channel:leave", safeHandler((channelId: string) => {
-      if (typeof channelId !== "string") return;
+      if (!isStr(channelId)) return;
       socket.leave(`channel:${channelId}`);
     }));
 
     // ─── Server Presence ───
     socket.on("server:join", safeHandler(async (data: string | { serverId: string }) => {
       const serverId = typeof data === "string" ? data : data?.serverId;
-      if (typeof serverId !== "string") return;
+      if (!isStr(serverId)) return;
       // Authoritative role comes from the DB — never trust a client-supplied
       // role. Non-members (or banned users) get no presence and no role.
       const membership = await requireMembership(serverId, currentUserId);
@@ -188,14 +216,14 @@ export function attachSocketIO(httpServer: HttpServer): Server {
     }));
 
     socket.on("server:leave", safeHandler((serverId: string) => {
-      if (typeof serverId !== "string") return;
+      if (!isStr(serverId)) return;
       socket.leave(`server:${serverId}`);
       removeFromPresence(serverId, currentUserId);
     }));
 
     // ─── Messages ───
     socket.on("message:send", safeHandler(async (data: { channelId: string; message: { id: string; content: string; createdAt: string; author: { id: string; username: string } } }) => {
-      if (!data || typeof data.channelId !== "string" || !data.message) return;
+      if (!isObj(data) || !isStr(data.channelId) || !isObj(data.message)) return;
       const ctx = await requireChannelMembership(data.channelId, currentUserId);
       if (!ctx) return;
       // Never trust the client's claimed identity — stamp the real author.
@@ -207,7 +235,7 @@ export function attachSocketIO(httpServer: HttpServer): Server {
     }));
 
     socket.on("message:edit", safeHandler(async (data: { channelId: string; messageId: string; content: string; updatedAt: string }) => {
-      if (!data || typeof data.channelId !== "string" || typeof data.messageId !== "string") return;
+      if (!isObj(data) || !isStr(data.channelId) || !isStr(data.messageId) || !isStr(data.content) || !isStr(data.updatedAt)) return;
       const ctx = await requireChannelMembership(data.channelId, currentUserId);
       if (!ctx) return;
       const msg = await prisma.message.findUnique({ where: { id: data.messageId }, select: { authorId: true, channelId: true } });
@@ -217,7 +245,7 @@ export function attachSocketIO(httpServer: HttpServer): Server {
     }));
 
     socket.on("message:delete", safeHandler(async (data: { channelId: string; messageId: string }) => {
-      if (!data || typeof data.channelId !== "string" || typeof data.messageId !== "string") return;
+      if (!isObj(data) || !isStr(data.channelId) || !isStr(data.messageId)) return;
       const ctx = await requireChannelMembership(data.channelId, currentUserId);
       if (!ctx) return;
       // The REST DELETE (already authorized) usually removed the row before this
@@ -232,7 +260,7 @@ export function attachSocketIO(httpServer: HttpServer): Server {
     }));
 
     socket.on("message:react", safeHandler(async (data: { channelId: string; messageId: string; reactions: Record<string, { count: number; users: string[]; userIds: string[] }> }) => {
-      if (!data || typeof data.channelId !== "string" || typeof data.messageId !== "string") return;
+      if (!isObj(data) || !isStr(data.channelId) || !isStr(data.messageId) || !isObj(data.reactions)) return;
       const ctx = await requireChannelMembership(data.channelId, currentUserId);
       if (!ctx) return;
       socket.to(`channel:${data.channelId}`).emit(`message:reacted:${data.channelId}`, { messageId: data.messageId, reactions: data.reactions });
@@ -240,7 +268,7 @@ export function attachSocketIO(httpServer: HttpServer): Server {
 
     // ─── Presence Status ───
     socket.on("presence:status", safeHandler((status: string) => {
-      if (typeof status !== "string" || !["online", "idle", "dnd", "invisible"].includes(status)) return;
+      if (!isStr(status) || !["online", "idle", "dnd", "invisible"].includes(status)) return;
       userStatus.set(currentUserId, status as PresenceStatus);
       for (const [serverId, members] of onlineUsers) {
         if (members.has(currentUserId)) broadcastPresence(serverId);
@@ -248,12 +276,18 @@ export function attachSocketIO(httpServer: HttpServer): Server {
     }));
 
     // ─── Typing ───
-    socket.on("typing:start", safeHandler((channelId: string) => {
-      if (typeof channelId !== "string") return;
+    // Typing fires often, but it still leaks presence into a channel — enforce
+    // the same channel membership message:send requires before broadcasting.
+    socket.on("typing:start", safeHandler(async (channelId: string) => {
+      if (!isStr(channelId)) return;
+      const ctx = await requireChannelMembership(channelId, currentUserId);
+      if (!ctx) return;
       socket.to(`channel:${channelId}`).emit("typing:update", { channelId, userId: currentUserId, username: currentUsername, isTyping: true });
     }));
-    socket.on("typing:stop", safeHandler((channelId: string) => {
-      if (typeof channelId !== "string") return;
+    socket.on("typing:stop", safeHandler(async (channelId: string) => {
+      if (!isStr(channelId)) return;
+      const ctx = await requireChannelMembership(channelId, currentUserId);
+      if (!ctx) return;
       socket.to(`channel:${channelId}`).emit("typing:update", { channelId, userId: currentUserId, username: currentUsername, isTyping: false });
     }));
 
@@ -261,7 +295,7 @@ export function attachSocketIO(httpServer: HttpServer): Server {
     socket.on("voice:join", safeHandler(async (data: string | { channelId: string; serverId?: string; avatar?: string | null }) => {
       const channelId = typeof data === "string" ? data : data?.channelId;
       const avatar = typeof data === "string" ? undefined : data?.avatar;
-      if (typeof channelId !== "string") return;
+      if (!isStr(channelId)) return;
 
       // Must be a member of the channel's server to join its voice room.
       const ctx = await requireChannelMembership(channelId, currentUserId);
@@ -292,18 +326,18 @@ export function attachSocketIO(httpServer: HttpServer): Server {
     }));
 
     socket.on("voice:leave", safeHandler((channelId: string) => {
-      if (typeof channelId !== "string") return;
+      if (!isStr(channelId)) return;
       leaveVoiceChannel(channelId);
     }));
 
     socket.on("voice:mute", safeHandler((data: { channelId: string; muted: boolean }) => {
-      if (!data || typeof data.channelId !== "string") return;
+      if (!isObj(data) || !isStr(data.channelId)) return;
       const room = voiceRooms.get(data.channelId);
       if (room?.has(currentUserId)) { room.get(currentUserId)!.muted = data.muted; broadcastVoiceParticipants(data.channelId); }
     }));
 
     socket.on("voice:deafen", safeHandler((data: { channelId: string; deafened: boolean }) => {
-      if (!data || typeof data.channelId !== "string") return;
+      if (!isObj(data) || !isStr(data.channelId)) return;
       const room = voiceRooms.get(data.channelId);
       if (room?.has(currentUserId)) {
         room.get(currentUserId)!.deafened = data.deafened;
@@ -313,13 +347,13 @@ export function attachSocketIO(httpServer: HttpServer): Server {
     }));
 
     socket.on("voice:camera", safeHandler((data: { channelId: string; camera: boolean }) => {
-      if (!data || typeof data.channelId !== "string") return;
+      if (!isObj(data) || !isStr(data.channelId)) return;
       const room = voiceRooms.get(data.channelId);
       if (room?.has(currentUserId)) { room.get(currentUserId)!.camera = data.camera; broadcastVoiceParticipants(data.channelId); }
     }));
 
     socket.on("voice:speaking", safeHandler((data: { channelId: string; speaking: boolean }) => {
-      if (!data || typeof data.channelId !== "string") return;
+      if (!isObj(data) || !isStr(data.channelId)) return;
       if (overLimit("voice:speaking")) return;
       if (!voiceRooms.get(data.channelId)?.has(currentUserId)) return;
       socket.to(`voice:${data.channelId}`).emit("voice:speaking", { userId: currentUserId, speaking: data.speaking });
@@ -328,7 +362,7 @@ export function attachSocketIO(httpServer: HttpServer): Server {
     // Soundboard — relay a one-shot sound to everyone else in the voice channel.
     // The clicker plays it locally; this broadcasts to the rest of the room.
     socket.on("soundboard:play", safeHandler((data: { channelId: string; src: string; name?: string }) => {
-      if (!data?.channelId || typeof data.src !== "string") return;
+      if (!isObj(data) || !isStr(data.channelId) || !isStr(data.src)) return;
       if (overLimit("soundboard:play")) return;
       // Must actually be in that voice channel.
       if (!voiceRooms.get(data.channelId)?.has(currentUserId)) return;
@@ -341,7 +375,7 @@ export function attachSocketIO(httpServer: HttpServer): Server {
 
     // ─── Ember Reactions ───
     socket.on("ember:react", safeHandler((data: { channelId: string; emoji: string }) => {
-      if (!data || typeof data.channelId !== "string" || typeof data.emoji !== "string") return;
+      if (!isObj(data) || !isStr(data.channelId) || !isStr(data.emoji)) return;
       const ALLOWED = ["laugh", "applause", "agree", "wow", "skull", "clink", "nod"];
       if (!ALLOWED.includes(data.emoji)) return;
       if (!voiceRooms.get(data.channelId)?.has(currentUserId)) return;
@@ -350,27 +384,32 @@ export function attachSocketIO(httpServer: HttpServer): Server {
 
     // ─── Screen Share ───
     socket.on("screen:start", safeHandler((data: { channelId: string }) => {
-      if (!data || typeof data.channelId !== "string") return;
+      if (!isObj(data) || !isStr(data.channelId)) return;
       if (overLimit("screen:start")) return;
       if (!voiceRooms.get(data.channelId)?.has(currentUserId)) return;
       socket.to(`voice:${data.channelId}`).emit("screen:started", { userId: currentUserId, username: currentUsername, socketId: socket.id });
     }));
     socket.on("screen:stop", safeHandler((data: { channelId: string }) => {
-      if (!data || typeof data.channelId !== "string") return;
+      if (!isObj(data) || !isStr(data.channelId)) return;
       if (overLimit("screen:stop")) return;
       if (!voiceRooms.get(data.channelId)?.has(currentUserId)) return;
       socket.to(`voice:${data.channelId}`).emit("screen:stopped", { userId: currentUserId });
     }));
-    socket.on("screen:offer", safeHandler((data: { to: string; offer: RTCSessionDescriptionInit }) => {
-      if (!data || typeof data.to !== "string") return;
+    // Only relay signaling between two sockets that share the target voice room
+    // (both sender and `data.to` must be members of `voice:${channelId}`).
+    socket.on("screen:offer", safeHandler((data: { to: string; channelId: string; offer: RTCSessionDescriptionInit }) => {
+      if (!isObj(data) || !isStr(data.to) || !isStr(data.channelId) || !isBlob(data.offer)) return;
+      if (!sameVoiceRoom(data.to, data.channelId)) return;
       io.to(data.to).emit("screen:offer", { from: socket.id, fromUserId: currentUserId, fromUsername: currentUsername, offer: data.offer });
     }));
-    socket.on("screen:answer", safeHandler((data: { to: string; answer: RTCSessionDescriptionInit }) => {
-      if (!data || typeof data.to !== "string") return;
+    socket.on("screen:answer", safeHandler((data: { to: string; channelId: string; answer: RTCSessionDescriptionInit }) => {
+      if (!isObj(data) || !isStr(data.to) || !isStr(data.channelId) || !isBlob(data.answer)) return;
+      if (!sameVoiceRoom(data.to, data.channelId)) return;
       io.to(data.to).emit("screen:answer", { from: socket.id, answer: data.answer });
     }));
-    socket.on("screen:ice-candidate", safeHandler((data: { to: string; candidate: RTCIceCandidateInit }) => {
-      if (!data || typeof data.to !== "string") return;
+    socket.on("screen:ice-candidate", safeHandler((data: { to: string; channelId: string; candidate: RTCIceCandidateInit }) => {
+      if (!isObj(data) || !isStr(data.to) || !isStr(data.channelId) || !isBlob(data.candidate)) return;
+      if (!sameVoiceRoom(data.to, data.channelId)) return;
       io.to(data.to).emit("screen:ice-candidate", { from: socket.id, candidate: data.candidate });
     }));
 
@@ -385,7 +424,7 @@ export function attachSocketIO(httpServer: HttpServer): Server {
     }
 
     socket.on("mod:server-mute", safeHandler((data: { channelId: string; targetUserId: string; muted: boolean }) => {
-      if (!data || typeof data.channelId !== "string" || typeof data.targetUserId !== "string") return;
+      if (!isObj(data) || !isStr(data.channelId) || !isStr(data.targetUserId)) return;
       const ctx = getModRole(data.channelId);
       if (!ctx || ctx.callerRole < 2 || ctx.callerRole <= getTargetRole(ctx.serverId, data.targetUserId)) return;
       const key = `${ctx.serverId}:${data.targetUserId}`;
@@ -397,7 +436,7 @@ export function attachSocketIO(httpServer: HttpServer): Server {
     }));
 
     socket.on("mod:server-deafen", safeHandler((data: { channelId: string; targetUserId: string; deafened: boolean }) => {
-      if (!data || typeof data.channelId !== "string" || typeof data.targetUserId !== "string") return;
+      if (!isObj(data) || !isStr(data.channelId) || !isStr(data.targetUserId)) return;
       const ctx = getModRole(data.channelId);
       if (!ctx || ctx.callerRole < 2 || ctx.callerRole <= getTargetRole(ctx.serverId, data.targetUserId)) return;
       const key = `${ctx.serverId}:${data.targetUserId}`;
@@ -413,7 +452,7 @@ export function attachSocketIO(httpServer: HttpServer): Server {
     }));
 
     socket.on("mod:kick-voice", safeHandler((data: { channelId: string; targetUserId: string }) => {
-      if (!data || typeof data.channelId !== "string" || typeof data.targetUserId !== "string") return;
+      if (!isObj(data) || !isStr(data.channelId) || !isStr(data.targetUserId)) return;
       const ctx = getModRole(data.channelId);
       if (!ctx || ctx.callerRole < 2 || ctx.callerRole <= getTargetRole(ctx.serverId, data.targetUserId)) return;
       const room = voiceRooms.get(data.channelId);
@@ -430,7 +469,7 @@ export function attachSocketIO(httpServer: HttpServer): Server {
     }));
 
     socket.on("mod:move-user", safeHandler((data: { fromChannelId: string; toChannelId: string; targetUserId: string }) => {
-      if (!data || typeof data.fromChannelId !== "string" || typeof data.toChannelId !== "string" || typeof data.targetUserId !== "string") return;
+      if (!isObj(data) || !isStr(data.fromChannelId) || !isStr(data.toChannelId) || !isStr(data.targetUserId)) return;
       const ctx = getModRole(data.fromChannelId);
       if (!ctx || ctx.callerRole < 2 || ctx.callerRole <= getTargetRole(ctx.serverId, data.targetUserId)) return;
       const room = voiceRooms.get(data.fromChannelId);
@@ -452,16 +491,21 @@ export function attachSocketIO(httpServer: HttpServer): Server {
     }));
 
     // ─── WebRTC Signaling ───
-    socket.on("voice:offer", safeHandler((data: { to: string; offer: RTCSessionDescriptionInit }) => {
-      if (!data || typeof data.to !== "string") return;
+    // Only relay signaling between two sockets that share the target voice room
+    // (both sender and `data.to` must be members of `voice:${channelId}`).
+    socket.on("voice:offer", safeHandler((data: { to: string; channelId: string; offer: RTCSessionDescriptionInit }) => {
+      if (!isObj(data) || !isStr(data.to) || !isStr(data.channelId) || !isBlob(data.offer)) return;
+      if (!sameVoiceRoom(data.to, data.channelId)) return;
       io.to(data.to).emit("voice:offer", { from: socket.id, fromUserId: currentUserId, fromUsername: currentUsername, offer: data.offer });
     }));
-    socket.on("voice:answer", safeHandler((data: { to: string; answer: RTCSessionDescriptionInit }) => {
-      if (!data || typeof data.to !== "string") return;
+    socket.on("voice:answer", safeHandler((data: { to: string; channelId: string; answer: RTCSessionDescriptionInit }) => {
+      if (!isObj(data) || !isStr(data.to) || !isStr(data.channelId) || !isBlob(data.answer)) return;
+      if (!sameVoiceRoom(data.to, data.channelId)) return;
       io.to(data.to).emit("voice:answer", { from: socket.id, answer: data.answer });
     }));
-    socket.on("voice:ice-candidate", safeHandler((data: { to: string; candidate: RTCIceCandidateInit }) => {
-      if (!data || typeof data.to !== "string") return;
+    socket.on("voice:ice-candidate", safeHandler((data: { to: string; channelId: string; candidate: RTCIceCandidateInit }) => {
+      if (!isObj(data) || !isStr(data.to) || !isStr(data.channelId) || !isBlob(data.candidate)) return;
+      if (!sameVoiceRoom(data.to, data.channelId)) return;
       io.to(data.to).emit("voice:ice-candidate", { from: socket.id, candidate: data.candidate });
     }));
 
@@ -496,14 +540,14 @@ export function attachSocketIO(httpServer: HttpServer): Server {
     // is then relayed there. The sender is taken from the socket session, never
     // from the client payload.
     socket.on("dm:join", safeHandler(async (conversationId: string) => {
-      if (typeof conversationId !== "string") return;
+      if (!isStr(conversationId)) return;
       const conv = await prisma.conversation.findUnique({ where: { id: conversationId }, select: { user1Id: true, user2Id: true } });
       if (!conv || (conv.user1Id !== currentUserId && conv.user2Id !== currentUserId)) return;
       socket.join(`conv:${conversationId}`);
     }));
 
     socket.on("dm:typing", safeHandler(async (data: { conversationId: string }) => {
-      if (!data || typeof data.conversationId !== "string") return;
+      if (!isObj(data) || !isStr(data.conversationId)) return;
       const conv = await prisma.conversation.findUnique({ where: { id: data.conversationId }, select: { user1Id: true, user2Id: true } });
       if (!conv || (conv.user1Id !== currentUserId && conv.user2Id !== currentUserId)) return;
       socket.to(`conv:${data.conversationId}`).emit("dm:typing", { conversationId: data.conversationId, userId: currentUserId, username: currentUsername });
