@@ -375,6 +375,17 @@ function ChatPageInner() {
               setMobileView("chat");
             }}
             onChannelCreated={handleChannelCreated}
+            onChannelsUpdated={srv.updateChannels}
+            onChannelDeleted={(channelId) => {
+              if (voice.activeVoiceChannel?.id === channelId) { voice.disconnect(); setViewingVoiceRoom(false); }
+              srv.removeChannel(channelId);
+              if (ch.activeChannel?.id === channelId) {
+                const remaining = srv.activeServer?.channels.filter(
+                  (c) => c.id !== channelId && (!c.type || c.type === "text")
+                ) || [];
+                ch.setActiveChannel(remaining[0] || null);
+              }
+            }}
             onVoiceJoin={(channel) => { voice.joinVoice(channel); setViewingVoiceRoom(true); }}
             onVoiceView={() => { setViewingVoiceRoom(true); setMobileView("chat"); }}
             selfSpeaking={voice.voiceState.participants.some((p) => p.userId === auth.user?.id && p.speaking)}
