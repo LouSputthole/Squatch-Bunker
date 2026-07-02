@@ -3,6 +3,7 @@
  * Runs Next.js + Socket.IO on a single port.
  * Usage: npx tsx server.ts  (or `npm run host`)
  */
+import "./lib/als-polyfill"; // must precede `next` — see file comment
 import "dotenv/config"; // load .env before realtime/server.ts reads JWT_SECRET at import
 import { createServer } from "http";
 import { parse } from "url";
