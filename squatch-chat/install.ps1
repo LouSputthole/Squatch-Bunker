@@ -39,15 +39,15 @@ if (Test-CommandExists "node") {
     $nodeVersion = node -v
     Write-Info "Node.js found: $nodeVersion"
     $nodeMajor = [int]($nodeVersion -replace 'v','').Split('.')[0]
-    if ($nodeMajor -lt 18) {
-        Write-Err "Node.js 18+ required (found $nodeVersion)"
+    if ($nodeMajor -lt 20) {
+        Write-Err "Node.js 20.9+ required, Node 22 LTS recommended (found $nodeVersion)"
         Write-Host "    Install from: https://nodejs.org/"
         exit 1
     }
 } else {
     Write-Err "Node.js not found"
     Write-Host ""
-    Write-Host "  Install Node.js 18+ from:"
+    Write-Host "  Install Node.js 22 LTS from:"
     Write-Host "    * https://nodejs.org/ (official installer)"
     Write-Host "    * winget: winget install OpenJS.NodeJS.LTS"
     Write-Host "    * choco:  choco install nodejs-lts"

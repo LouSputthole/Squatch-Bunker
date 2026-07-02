@@ -49,17 +49,17 @@ echo -e "${BOLD}Checking prerequisites...${NC}\n"
 if check_command node; then
   NODE_VERSION=$(node -v)
   log_info "Node.js found: $NODE_VERSION"
-  # Check minimum version (18+)
+  # Check minimum version (20.9+, Node 22 LTS recommended)
   NODE_MAJOR=$(echo "$NODE_VERSION" | sed 's/v//' | cut -d. -f1)
-  if [ "$NODE_MAJOR" -lt 18 ]; then
-    log_error "Node.js 18+ required (found $NODE_VERSION)"
+  if [ "$NODE_MAJOR" -lt 20 ]; then
+    log_error "Node.js 20.9+ required, Node 22 LTS recommended (found $NODE_VERSION)"
     echo "    Install from: https://nodejs.org/"
     exit 1
   fi
 else
   log_error "Node.js not found"
   echo ""
-  echo "  Install Node.js 18+ from one of:"
+  echo "  Install Node.js 22 LTS from one of:"
   echo "    • https://nodejs.org/ (official installer)"
   echo "    • nvm: curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.0/install.sh | bash"
   echo "    • Linux: sudo apt install nodejs npm  /  sudo dnf install nodejs npm"

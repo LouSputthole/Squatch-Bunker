@@ -25,8 +25,8 @@ extend, and theme.
 
 ## Quick start (self-host)
 
-Requires **Node 18+**. No database server, no Docker — runs on SQLite out of
-the box.
+Requires **Node 22 LTS** (minimum 20.9). No database server, no Docker — runs
+on SQLite out of the box.
 
 ```bash
 npm install      # installs deps + creates .env + sets up a local SQLite DB

@@ -29,11 +29,11 @@ fi
 
 # 3. Start database
 echo "  [..] Starting database..."
-bash scripts/db-up.sh
+node scripts/db-up.mjs
 
 # 4. Wait for database
 echo "  [..] Waiting for database..."
-bash scripts/db-wait.sh
+node scripts/db-wait.mjs
 
 # 5. Generate Prisma client
 echo "  [..] Generating Prisma client..."

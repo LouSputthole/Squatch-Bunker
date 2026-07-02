@@ -52,6 +52,9 @@ next-env.d.ts
 *.db-journal
 prisma/dev.db*
 
+# stray backups from schema provider swaps
+*.bak
+
 # playwright / test artifacts
 /.playwright-mcp/
 /test-results/
