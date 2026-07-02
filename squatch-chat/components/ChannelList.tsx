@@ -20,6 +20,7 @@ interface VoiceParticipant {
   username: string;
   muted: boolean;
   deafened?: boolean;
+  speaking?: boolean;
 }
 
 interface ChannelListProps {
@@ -37,12 +38,12 @@ interface ChannelListProps {
   activeVoiceChannelId?: string | null;
   viewingVoiceRoom?: boolean;
   voiceParticipants?: Map<string, VoiceParticipant[]>;
+  selfSpeaking?: boolean;
   onChannelSelect: (channel: Channel) => void;
   onChannelCreated: (channel: Channel) => void;
   onVoiceJoin?: (channel: Channel) => void;
   onVoiceView?: (channel: Channel) => void;
-  onServerRenamed?: (newName: string) => void;
-  onServerDeleted?: () => void;
+  onOpenServerSettings?: () => void;
 }
 
 // SVG Icons
@@ -101,20 +102,17 @@ export default function ChannelList({
   activeVoiceChannelId,
   viewingVoiceRoom,
   voiceParticipants,
+  selfSpeaking,
   onChannelSelect,
   onChannelCreated,
   onVoiceJoin,
   onVoiceView,
-  onServerRenamed,
-  onServerDeleted,
+  onOpenServerSettings,
 }: ChannelListProps) {
   const [creating, setCreating] = useState<"text" | "voice" | null>(null);
+  const [createLoading, setCreateLoading] = useState(false);
   const [newName, setNewName] = useState("");
-  const [showServerSettings, setShowServerSettings] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
-  const [renameValue, setRenameValue] = useState(serverName);
-  const [settingsError, setSettingsError] = useState("");
-  const [settingsLoading, setSettingsLoading] = useState(false);
   const [newCategory, setNewCategory] = useState("");
   const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(() => {
     if (typeof window === "undefined") return new Set<string>();
@@ -167,71 +165,43 @@ export default function ChannelList({
     return () => { socket.off("voice:participants-update", handleVoiceUpdate); };
   }, [channels]);
 
+  // Speaking indicators for the sidebar rows (only broadcast to members of the voice room)
+  const [speakingIds, setSpeakingIds] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    const socket = getSocket();
+    function handleSpeaking(data: { userId: string; speaking: boolean }) {
+      setSpeakingIds((prev) => {
+        const next = new Set(prev);
+        if (data.speaking) next.add(data.userId);
+        else next.delete(data.userId);
+        return next;
+      });
+    }
+    socket.on("voice:speaking", handleSpeaking);
+    return () => { socket.off("voice:speaking", handleSpeaking); };
+  }, []);
+
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
-    if (!newName.trim() || !creating) return;
+    if (!newName.trim() || !creating || createLoading) return;
+    setCreateLoading(true);
 
-    const res = await fetch("/api/channels", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ serverId, name: newName.trim(), type: creating, category: newCategory.trim() || undefined }),
-    });
+    try {
+      const res = await fetch("/api/channels", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ serverId, name: newName.trim(), type: creating, category: newCategory.trim() || undefined }),
+      });
 
-    if (res.ok) {
-      const { channel } = await res.json();
-      onChannelCreated(channel);
-      setNewName("");
-      setNewCategory("");
-      setCreating(null);
-    }
-  }
-
-  async function handleRename(e: React.FormEvent) {
-    e.preventDefault();
-    if (!renameValue.trim() || renameValue.trim() === serverName || settingsLoading) return;
-    setSettingsLoading(true);
-    setSettingsError("");
-    const res = await fetch(`/api/servers/${serverId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: renameValue.trim() }),
-    });
-    setSettingsLoading(false);
-    if (res.ok) {
-      onServerRenamed?.(renameValue.trim());
-      setShowServerSettings(false);
-    } else {
-      const data = await res.json();
-      setSettingsError(data.error || "Failed to rename");
-    }
-  }
-
-  async function handleRegenerateInvite() {
-    if (settingsLoading) return;
-    setSettingsLoading(true);
-    setSettingsError("");
-    const res = await fetch(`/api/servers/${serverId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ regenerateInvite: true }),
-    });
-    setSettingsLoading(false);
-    if (!res.ok) {
-      const data = await res.json();
-      setSettingsError(data.error || "Failed");
-    }
-  }
-
-  async function handleDeleteServer() {
-    if (!confirm(`Delete "${serverName}" permanently? This cannot be undone.`)) return;
-    setSettingsLoading(true);
-    const res = await fetch(`/api/servers/${serverId}`, { method: "DELETE" });
-    setSettingsLoading(false);
-    if (res.ok) {
-      onServerDeleted?.();
-    } else {
-      const data = await res.json();
-      setSettingsError(data.error || "Failed to delete");
+      if (res.ok) {
+        const { channel } = await res.json();
+        onChannelCreated(channel);
+        setNewName("");
+        setNewCategory("");
+        setCreating(null);
+      }
+    } finally {
+      setCreateLoading(false);
     }
   }
 
@@ -386,13 +356,12 @@ export default function ChannelList({
             </svg>
           </button>
         )}
-        {currentUserRole === "owner" && (
+        {isAdminOrOwner && (
           <button
-            onClick={() => { setShowServerSettings((v) => !v); setRenameValue(serverName); setSettingsError(""); }}
+            onClick={() => onOpenServerSettings?.()}
             className="text-[var(--muted)] hover:text-[var(--text)] opacity-0 group-hover/header:opacity-100 transition-opacity shrink-0 ml-1"
             title="Server Settings"
             aria-label="Server settings"
-            aria-expanded={showServerSettings}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <circle cx="12" cy="12" r="3" />
@@ -401,49 +370,6 @@ export default function ChannelList({
           </button>
         )}
       </div>
-
-      {/* Server settings panel */}
-      {showServerSettings && currentUserRole === "owner" && (
-        <div className="border-b border-[var(--accent-2)]/30 p-3 space-y-3 bg-[var(--panel-2)]/50">
-          {settingsError && (
-            <p className="text-xs text-[var(--danger)]">{settingsError}</p>
-          )}
-          <form onSubmit={handleRename} className="space-y-1">
-            <label htmlFor="rename-server-input" className="text-xs font-semibold text-[var(--muted)] uppercase">Rename Server</label>
-            <div className="flex gap-1">
-              <input
-                id="rename-server-input"
-                type="text"
-                value={renameValue}
-                onChange={(e) => setRenameValue(e.target.value)}
-                className="flex-1 text-xs px-2 py-1.5 bg-[var(--panel)] text-[var(--text)] border border-[var(--accent-2)]/50 rounded focus:outline-none"
-                maxLength={50}
-              />
-              <button
-                type="submit"
-                disabled={settingsLoading || !renameValue.trim() || renameValue.trim() === serverName}
-                className="text-xs px-2 py-1.5 bg-[var(--accent-2)] text-[var(--text)] rounded hover:bg-[var(--accent)] transition-colors disabled:opacity-40"
-              >
-                Save
-              </button>
-            </div>
-          </form>
-          <button
-            onClick={handleRegenerateInvite}
-            disabled={settingsLoading}
-            className="w-full text-xs px-2 py-1.5 bg-[var(--panel)] text-[var(--muted)] border border-[var(--accent-2)]/30 rounded hover:text-[var(--text)] hover:border-[var(--accent-2)] transition-colors disabled:opacity-40"
-          >
-            Regenerate Invite Code
-          </button>
-          <button
-            onClick={handleDeleteServer}
-            disabled={settingsLoading}
-            className="w-full text-xs px-2 py-1.5 bg-red-600/10 text-red-400 border border-red-600/20 rounded hover:bg-red-600/20 transition-colors disabled:opacity-40"
-          >
-            Delete Server
-          </button>
-        </div>
-      )}
 
       <div className="flex-1 overflow-y-auto py-2">
         {/* Text Channels grouped by category */}
@@ -582,7 +508,7 @@ export default function ChannelList({
               onKeyDown={(e) => { if (e.key === "Escape") setCreating(null); }}
             />
             <div className="flex gap-1">
-              <button type="submit" disabled={!newName.trim()} className="flex-1 text-xs py-1 bg-amber-600/30 text-amber-300 rounded hover:bg-amber-600/40 disabled:opacity-30 transition-colors">Create</button>
+              <button type="submit" disabled={!newName.trim() || createLoading} className="flex-1 text-xs py-1 bg-amber-600/30 text-amber-300 rounded hover:bg-amber-600/40 disabled:opacity-30 transition-colors">Create</button>
               <button type="button" onClick={() => setCreating(null)} className="text-xs py-1 px-2 text-[var(--muted)] hover:text-[var(--text)]">Cancel</button>
             </div>
           </form>
@@ -617,7 +543,7 @@ export default function ChannelList({
               onKeyDown={(e) => { if (e.key === "Escape") setCreating(null); }}
             />
             <div className="flex gap-1">
-              <button type="submit" disabled={!newName.trim()} className="flex-1 text-xs py-1 bg-amber-600/30 text-amber-300 rounded hover:bg-amber-600/40 disabled:opacity-30 transition-colors">Create</button>
+              <button type="submit" disabled={!newName.trim() || createLoading} className="flex-1 text-xs py-1 bg-amber-600/30 text-amber-300 rounded hover:bg-amber-600/40 disabled:opacity-30 transition-colors">Create</button>
               <button type="button" onClick={() => setCreating(null)} className="text-xs py-1 px-2 text-[var(--muted)] hover:text-[var(--text)]">Cancel</button>
             </div>
           </form>
@@ -662,22 +588,31 @@ export default function ChannelList({
                 {/* Show participants in voice channel */}
                 {participants.length > 0 && (
                   <ul role="list" aria-label={`Participants in ${channel.name}`} className="pl-7 pr-2">
-                    {participants.map((p) => (
-                      <li
-                        key={p.userId}
-                        role="listitem"
-                        className={`flex items-center gap-1.5 py-0.5 text-xs ${
-                          p.userId === currentUserId ? "text-[var(--accent)]" : "text-[var(--text)]"
-                        }`}
-                      >
-                        <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                          p.muted ? "bg-red-400" : "bg-green-500"
-                        }`} aria-hidden="true" />
-                        <span className="truncate">{displayName(p.username)}</span>
-                        {p.muted && <MicOffIcon />}
-                        {p.deafened && <HeadphonesOffIcon />}
-                      </li>
-                    ))}
+                    {participants.map((p) => {
+                      const isSpeaking = !p.muted && (
+                        speakingIds.has(p.userId) || (p.userId === currentUserId && !!selfSpeaking)
+                      );
+                      return (
+                        <li
+                          key={p.userId}
+                          role="listitem"
+                          className={`flex items-center gap-1.5 py-0.5 text-xs ${
+                            isSpeaking ? "text-amber-300" : p.userId === currentUserId ? "text-[var(--accent)]" : "text-[var(--text)]"
+                          }`}
+                        >
+                          <div
+                            className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                              p.muted ? "bg-red-400" : isSpeaking ? "bg-amber-400" : "bg-green-500"
+                            }`}
+                            style={isSpeaking ? { boxShadow: "0 0 6px rgba(251,191,36,0.9)" } : undefined}
+                            aria-hidden="true"
+                          />
+                          <span className="truncate">{displayName(p.username)}</span>
+                          {p.muted && <MicOffIcon />}
+                          {p.deafened && <HeadphonesOffIcon />}
+                        </li>
+                      );
+                    })}
                   </ul>
                 )}
               </li>

@@ -157,7 +157,7 @@ function CameraIcon({ on }: { on: boolean }) {
   );
 }
 
-function VideoTile({ stream, label, isSelf }: { stream: MediaStream; label: string; isSelf?: boolean }) {
+function VideoTile({ stream, label, isSelf, speaking }: { stream: MediaStream; label: string; isSelf?: boolean; speaking?: boolean }) {
   const videoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
@@ -167,7 +167,10 @@ function VideoTile({ stream, label, isSelf }: { stream: MediaStream; label: stri
   }, [stream]);
 
   return (
-    <div className={`relative rounded-xl overflow-hidden border ${isSelf ? "border-[var(--accent)]/30" : "border-[var(--accent-2)]/20"} bg-black`}>
+    <div
+      className={`relative rounded-xl overflow-hidden border-2 ${speaking ? "border-amber-400" : isSelf ? "border-[var(--accent)]/30" : "border-[var(--accent-2)]/20"} bg-black transition-colors`}
+      style={{ boxShadow: speaking ? "0 0 22px rgba(251,191,36,0.6)" : undefined }}
+    >
       <video
         ref={videoRef}
         autoPlay
@@ -542,7 +545,7 @@ export default function VoiceRoom({
                     className="aspect-video"
                   >
                     {stream ? (
-                      <VideoTile stream={stream} label={isSelf ? "You" : displayName(p.username)} isSelf={isSelf} />
+                      <VideoTile stream={stream} label={isSelf ? "You" : displayName(p.username)} isSelf={isSelf} speaking={isSpeaking} />
                     ) : (
                       <div className={`w-full h-full rounded-xl border-2 flex flex-col items-center justify-center gap-2 bg-[#202024] ${isSpeaking ? "border-amber-400" : "border-transparent"}`}>
                         <Avatar username={p.username} avatarUrl={p.avatar} size={56}

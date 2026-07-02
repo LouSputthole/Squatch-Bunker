@@ -38,6 +38,7 @@ export function useServers() {
   const addChannel = useCallback((channel: Channel) => {
     setActiveServer((prev) => {
       if (!prev) return prev;
+      if (prev.channels.some((c) => c.id === channel.id)) return prev; // dedupe (double-submit, category refresh)
       const updated = { ...prev, channels: [...prev.channels, channel] };
       setServers((servers) =>
         servers.map((s) => (s.id === updated.id ? updated : s))
