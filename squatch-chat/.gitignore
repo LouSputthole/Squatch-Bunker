@@ -58,3 +58,6 @@ prisma/dev.db*
 # playwright / test artifacts
 /.playwright-mcp/
 /test-results/
+
+# vitest throwaway SQLite database
+/tests/.tmp/

@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        # The app lives in squatch-chat/; every step runs from there.
+        working-directory: squatch-chat
+
+    env:
+      # Harmless CI values. Tests force their own throwaway SQLite file, but
+      # lib/config validates JWT_SECRET at import and the build/postinstall need
+      # a database URL — SQLite keeps CI dependency-free (no Postgres service).
+      JWT_SECRET: ci-jwt-secret-not-a-real-secret-0123456789-abcdef
+      DATABASE_URL: file:./data/campfire.db
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: squatch-chat/package-lock.json
+
+      # postinstall generates the Prisma client (SQLite) via `prisma db push`.
+      - name: Install dependencies
+        run: npm ci
+
+      # Explicit generate so the client is guaranteed present before typecheck
+      # and tests, independent of postinstall's push succeeding.
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      # Lint is non-blocking: the repo has pre-existing lint errors unrelated to
+      # CI wiring (e.g. react-hooks rules in hooks/useVoice.ts). Kept visible so
+      # the report is honest without failing the gate on legacy issues.
+      - name: Lint
+        run: npm run lint
+        continue-on-error: true
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build

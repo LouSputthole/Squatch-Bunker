@@ -15,6 +15,7 @@
     "start": "next start",
     "host": "npx tsx server.ts",
     "lint": "eslint",
+    "test": "vitest run",
     "setup": "node scripts/postinstall.mjs",
     "db:up": "node scripts/db-up.mjs",
     "db:down": "node scripts/db-down.mjs",
@@ -62,6 +63,7 @@
     "prisma": "^7.6.0",
     "tailwindcss": "^4",
     "tsx": "^4.21.0",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.9"
   }
 }
