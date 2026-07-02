@@ -266,6 +266,50 @@ export function attachSocketIO(httpServer: HttpServer): Server {
       socket.to(`channel:${data.channelId}`).emit(`message:reacted:${data.channelId}`, { messageId: data.messageId, reactions: data.reactions });
     }));
 
+    // ─── Channel Lifecycle ───
+    // The REST routes (already authorized) perform the actual mutation; these
+    // events notify the rest of the server so channel lists update without a
+    // refresh. Payload content is never trusted — the broadcast is re-read
+    // from the DB, so a member can only trigger truthful updates.
+    const CHANNEL_BROADCAST_SELECT = {
+      id: true, serverId: true, name: true, type: true, category: true,
+      description: true, topic: true, position: true, createdAt: true,
+    } as const;
+
+    async function relayChannelSnapshot(event: "channel:created" | "channels:updated", data: { serverId: string; channelIds: string[] }) {
+      if (!isObj(data) || !isStr(data.serverId) || !Array.isArray(data.channelIds)) return;
+      const ids = data.channelIds.filter(isStr).slice(0, 100);
+      if (ids.length === 0) return;
+      if (!(await requireMembership(data.serverId, currentUserId))) return;
+      // Only channels that really exist in THIS server are broadcast.
+      const channels = await prisma.channel.findMany({
+        where: { id: { in: ids }, serverId: data.serverId },
+        select: CHANNEL_BROADCAST_SELECT,
+      });
+      if (channels.length === 0) return;
+      socket.to(`server:${data.serverId}`).emit(event, { serverId: data.serverId, channels });
+    }
+
+    socket.on("channel:created", safeHandler(async (data: { serverId: string; channelId: string }) => {
+      if (!isObj(data) || !isStr(data.channelId)) return;
+      await relayChannelSnapshot("channel:created", { serverId: data.serverId, channelIds: [data.channelId] });
+    }));
+
+    socket.on("channels:updated", safeHandler(async (data: { serverId: string; channelIds: string[] }) => {
+      await relayChannelSnapshot("channels:updated", data);
+    }));
+
+    socket.on("channel:deleted", safeHandler(async (data: { serverId: string; channelId: string }) => {
+      if (!isObj(data) || !isStr(data.serverId) || !isStr(data.channelId)) return;
+      if (!(await requireMembership(data.serverId, currentUserId))) return;
+      // Normal case: the REST DELETE (already authorized) removed the row
+      // before this notification fires. If the row still exists the deletion
+      // didn't happen — don't broadcast a lie.
+      const channel = await prisma.channel.findUnique({ where: { id: data.channelId }, select: { id: true } });
+      if (channel) return;
+      socket.to(`server:${data.serverId}`).emit("channel:deleted", { serverId: data.serverId, channelId: data.channelId });
+    }));
+
     // ─── Presence Status ───
     socket.on("presence:status", safeHandler((status: string) => {
       if (!isStr(status) || !["online", "idle", "dnd", "invisible"].includes(status)) return;

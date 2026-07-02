@@ -197,6 +197,70 @@ describe("channel membership gates", () => {
   });
 });
 
+// server:join confirms to the joiner (and the room) via "presence:update".
+async function joinServer(socket: ClientSocket, sid: string) {
+  const confirmed = waitFor(socket, "presence:update");
+  socket.emit("server:join", sid);
+  await confirmed;
+}
+
+describe("channel lifecycle broadcasts", () => {
+  it("broadcasts a created channel to server members with the DB row, and drops a non-member's emit", async () => {
+    const a = await connect(tokenA);
+    const b = await connect(tokenB);
+    const x = await connect(tokenX);
+    await joinServer(a, serverId);
+    await joinServer(b, serverId);
+
+    // Non-member X: no broadcast, even for a channel that exists.
+    const noCreate = expectNoEvent(b, "channel:created", 300);
+    x.emit("channel:created", { serverId, channelId: channelC });
+    await expect(noCreate).resolves.toBeUndefined();
+
+    // Member A announces a channel the REST route just created: B receives the
+    // DB-authoritative row (name comes from the DB, not the payload).
+    const created = await prisma.channel.create({ data: { serverId, name: "announcements", type: "text" } });
+    const incoming = waitFor<{ serverId: string; channels: { id: string; name: string }[] }>(b, "channel:created");
+    a.emit("channel:created", { serverId, channelId: created.id });
+    const evt = await incoming;
+    expect(evt.serverId).toBe(serverId);
+    expect(evt.channels).toHaveLength(1);
+    expect(evt.channels[0]).toMatchObject({ id: created.id, name: "announcements" });
+  });
+
+  it("does not broadcast a channel that does not exist in that server", async () => {
+    const a = await connect(tokenA);
+    const b = await connect(tokenB);
+    await joinServer(a, serverId);
+    await joinServer(b, serverId);
+
+    const noCreate = expectNoEvent(b, "channel:created", 300);
+    a.emit("channel:created", { serverId, channelId: "00000000-0000-0000-0000-000000000000" });
+    await expect(noCreate).resolves.toBeUndefined();
+  });
+
+  it("broadcasts channel:deleted only after the row is really gone", async () => {
+    const a = await connect(tokenA);
+    const b = await connect(tokenB);
+    await joinServer(a, serverId);
+    await joinServer(b, serverId);
+
+    const doomed = await prisma.channel.create({ data: { serverId, name: "doomed", type: "text" } });
+
+    // Row still exists — the "deletion" is a lie, nothing is broadcast.
+    const noDelete = expectNoEvent(b, "channel:deleted", 300);
+    a.emit("channel:deleted", { serverId, channelId: doomed.id });
+    await expect(noDelete).resolves.toBeUndefined();
+
+    // After the REST route really deleted it, the notification relays.
+    await prisma.channel.delete({ where: { id: doomed.id } });
+    const incoming = waitFor<{ serverId: string; channelId: string }>(b, "channel:deleted");
+    a.emit("channel:deleted", { serverId, channelId: doomed.id });
+    const evt = await incoming;
+    expect(evt).toMatchObject({ serverId, channelId: doomed.id });
+  });
+});
+
 describe("voice signaling gates", () => {
   it("relays a voice:offer between two members of the same voice room", async () => {
     const a = await connect(tokenA);

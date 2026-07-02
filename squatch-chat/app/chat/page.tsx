@@ -214,7 +214,52 @@ function ChatPageInner() {
     if (!channel.type || channel.type === "text") {
       ch.setActiveChannel(channel);
     }
+    if (srv.activeServer) {
+      getSocket().emit("channel:created", { serverId: srv.activeServer.id, channelId: channel.id });
+    }
   }, [srv, ch]);
+
+  // Live channel lifecycle from other members — create/rename/reorder/delete
+  // without a refresh. The realtime server re-reads each channel from the DB,
+  // so payloads here are authoritative.
+  useEffect(() => {
+    const socket = getSocket();
+    const activeServerId = srv.activeServer?.id;
+    if (!activeServerId) return;
+
+    function onChannelCreatedEvt(data: { serverId: string; channels: Channel[] }) {
+      if (data.serverId !== activeServerId) return;
+      data.channels.forEach((c) => srv.addChannel(c));
+    }
+    function onChannelsUpdatedEvt(data: { serverId: string; channels: Channel[] }) {
+      if (data.serverId !== activeServerId) return;
+      srv.updateChannels(data.channels);
+      const updatedActive = data.channels.find((c) => c.id === ch.activeChannel?.id);
+      if (updatedActive && ch.activeChannel) {
+        ch.setActiveChannel({ ...ch.activeChannel, ...updatedActive });
+      }
+    }
+    function onChannelDeletedEvt(data: { serverId: string; channelId: string }) {
+      if (data.serverId !== activeServerId) return;
+      if (voice.activeVoiceChannel?.id === data.channelId) { voice.disconnect(); setViewingVoiceRoom(false); }
+      srv.removeChannel(data.channelId);
+      if (ch.activeChannel?.id === data.channelId) {
+        const remaining = srv.activeServer?.channels.filter(
+          (c) => c.id !== data.channelId && (!c.type || c.type === "text")
+        ) || [];
+        ch.setActiveChannel(remaining[0] || null);
+      }
+    }
+
+    socket.on("channel:created", onChannelCreatedEvt);
+    socket.on("channels:updated", onChannelsUpdatedEvt);
+    socket.on("channel:deleted", onChannelDeletedEvt);
+    return () => {
+      socket.off("channel:created", onChannelCreatedEvt);
+      socket.off("channels:updated", onChannelsUpdatedEvt);
+      socket.off("channel:deleted", onChannelDeletedEvt);
+    };
+  }, [srv, ch, voice]);
 
   if (auth.loading) {
     return (
@@ -375,7 +420,12 @@ function ChatPageInner() {
               setMobileView("chat");
             }}
             onChannelCreated={handleChannelCreated}
-            onChannelsUpdated={srv.updateChannels}
+            onChannelsUpdated={(updated) => {
+              srv.updateChannels(updated);
+              if (srv.activeServer) {
+                getSocket().emit("channels:updated", { serverId: srv.activeServer.id, channelIds: updated.map((c) => c.id) });
+              }
+            }}
             onChannelDeleted={(channelId) => {
               if (voice.activeVoiceChannel?.id === channelId) { voice.disconnect(); setViewingVoiceRoom(false); }
               srv.removeChannel(channelId);
@@ -384,6 +434,9 @@ function ChatPageInner() {
                   (c) => c.id !== channelId && (!c.type || c.type === "text")
                 ) || [];
                 ch.setActiveChannel(remaining[0] || null);
+              }
+              if (srv.activeServer) {
+                getSocket().emit("channel:deleted", { serverId: srv.activeServer.id, channelId });
               }
             }}
             onVoiceJoin={(channel) => { voice.joinVoice(channel); setViewingVoiceRoom(true); }}
