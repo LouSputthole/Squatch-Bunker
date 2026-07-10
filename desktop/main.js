@@ -6,7 +6,7 @@
  * portable build runs with NO system Node install. The renderer just loads the
  * local server over a dynamically-chosen port (single-port mode).
  */
-const { app, BrowserWindow, Tray, Menu, shell, dialog, nativeImage } = require("electron");
+const { app, BrowserWindow, Tray, Menu, shell, dialog, nativeImage, screen } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const net = require("net");
@@ -42,6 +42,8 @@ let logFile = "";
 const logRing = []; // last N server log lines for crash/startup dialogs
 let settings = {};
 let saveBoundsTimer = null;
+let dataDirMode = "installed"; // "portable" | "installed" | "portable-fallback"
+let bootComplete = false;
 
 app.isQuitting = false;
 
@@ -59,9 +61,12 @@ function resolveDataDir() {
     try {
       fs.mkdirSync(dd, { recursive: true });
       fs.accessSync(dd, fs.constants.W_OK);
+      dataDirMode = "portable";
       return dd;
     } catch {
       // exe dir not writable (e.g. read-only media) — fall through to userData.
+      // Logged in boot(): the user's data will NOT travel with the folder.
+      dataDirMode = "portable-fallback";
     }
   }
   const dd = app.getPath("userData");
@@ -76,8 +81,13 @@ function getOrCreateSecret() {
   try {
     const s = fs.readFileSync(p, "utf8").trim();
     if (s.length >= 32) return s;
-  } catch {
-    /* not created yet */
+    logLine(`[main] secret file is truncated (${s.length} chars) — regenerating; all sessions will be logged out`);
+  } catch (err) {
+    // ENOENT is the normal first-run case; anything else (permissions, I/O)
+    // must be visible — regenerating silently logs every user out.
+    if (err.code !== "ENOENT") {
+      logLine(`[main] could not read secret file (${err.message}) — regenerating; all sessions will be logged out`);
+    }
   }
   const s = crypto.randomBytes(32).toString("hex");
   fs.writeFileSync(p, s, { mode: 0o600 });
@@ -85,9 +95,20 @@ function getOrCreateSecret() {
 }
 
 function loadSettings() {
+  const p = path.join(dataDir, "settings.json");
   try {
-    return JSON.parse(fs.readFileSync(path.join(dataDir, "settings.json"), "utf8"));
-  } catch {
+    return JSON.parse(fs.readFileSync(p, "utf8"));
+  } catch (err) {
+    if (err.code !== "ENOENT") {
+      // Corrupt/unreadable — keep the evidence, because boot() saves defaults
+      // right over this file.
+      try {
+        fs.copyFileSync(p, p + ".corrupt");
+      } catch {
+        /* nothing to back up */
+      }
+      logLine(`[main] settings.json unreadable (${err.message}) — backed up to settings.json.corrupt, using defaults`);
+    }
     return { closeToTray: true };
   }
 }
@@ -95,8 +116,8 @@ function loadSettings() {
 function saveSettings() {
   try {
     fs.writeFileSync(path.join(dataDir, "settings.json"), JSON.stringify(settings, null, 2));
-  } catch {
-    /* best effort */
+  } catch (err) {
+    logLine(`[main] failed to save settings.json: ${err.message}`);
   }
 }
 
@@ -144,7 +165,7 @@ function writeRuntimeJson(status) {
     fs.writeFileSync(
       path.join(dataDir, "runtime.json"),
       JSON.stringify(
-        { status, port: serverPort, url: serverUrl, pid: serverProcess ? serverProcess.pid : null, dataDir, updatedAt: new Date().toISOString() },
+        { status, port: serverPort, url: serverUrl, pid: serverProcess ? serverProcess.pid : null, dataDir, dataDirMode, updatedAt: new Date().toISOString() },
         null,
         2,
       ),
@@ -185,7 +206,9 @@ function startServer() {
     logLine(`[main] server exited (code=${code}, signal=${signal})`);
     const crashed = !app.isQuitting;
     serverProcess = null;
-    if (crashed) handleServerCrash(code);
+    // During boot, waitForHttp's timeout owns error reporting — two competing
+    // dialogs (crash + startup) would race and double-restart the server.
+    if (crashed && bootComplete) handleServerCrash(code);
   });
 
   writeRuntimeJson("starting");
@@ -330,7 +353,18 @@ function openExternalSafe(url) {
 }
 
 function createMainWindow() {
-  const b = settings.bounds || {};
+  let b = settings.bounds || {};
+  // Saved position may be on a monitor that's gone (undocked laptop). Electron
+  // restores it verbatim → invisible window with no recovery UI. Drop x/y and
+  // let Electron center if the saved rect doesn't intersect any display.
+  const onScreen =
+    b.width &&
+    b.height &&
+    screen.getAllDisplays().some((d) => {
+      const wa = d.workArea;
+      return b.x < wa.x + wa.width && b.x + b.width > wa.x && b.y < wa.y + wa.height && b.y + b.height > wa.y;
+    });
+  if (!onScreen) b = { width: b.width, height: b.height };
   mainWindow = new BrowserWindow({
     width: b.width || 1280,
     height: b.height || 800,
@@ -408,8 +442,12 @@ function createTray() {
   try {
     const img = nativeImage.createFromPath(path.join(__dirname, "icons", "tray-icon.png"));
     tray = new Tray(img.isEmpty() ? iconPath() : img);
-  } catch {
-    return; // tray unavailable — app still works, close will just quit
+  } catch (err) {
+    // No tray = no way to unhide or quit a hidden window. Make close actually
+    // quit for this session (don't persist — the user's preference stands).
+    logLine(`[main] tray unavailable (${err.message}) — close button will quit`);
+    settings.closeToTray = false;
+    return;
   }
   tray.setToolTip("Campfire");
   refreshTrayMenu();
@@ -459,18 +497,26 @@ function showMainWindow() {
 async function boot() {
   Menu.setApplicationMenu(null);
   dataDir = resolveDataDir();
+  openLog(); // first, so everything after has a log to land in
+  logLine(`[main] data dir: ${dataDir} (${dataDirMode})`);
+  if (dataDirMode === "portable-fallback") {
+    logLine("[main] WARNING: portable.txt is present but the app folder is not writable — data is stored per-user and will NOT move with the folder");
+  }
   jwtSecret = getOrCreateSecret();
   settings = loadSettings();
   if (typeof settings.closeToTray !== "boolean") settings.closeToTray = true;
   saveSettings(); // persist resolved defaults on first run; bounds are added later
-  openLog();
 
   createSplash();
 
   try {
     serverPort = await findFreePort();
-  } catch {
-    serverPort = 3000;
+  } catch (err) {
+    // listen(0) basically never fails; a hardcoded fallback port could belong
+    // to a foreign server the window would then happily load. Fail visibly.
+    logLine(`[main] could not allocate a local port: ${err.message}`);
+    showStartupError();
+    return;
   }
   serverUrl = `http://127.0.0.1:${serverPort}`;
   writeRuntimeJson("starting");
@@ -484,9 +530,29 @@ async function boot() {
     return;
   }
 
+  bootComplete = true;
   writeRuntimeJson("ready");
   createTray();
   createMainWindow();
+}
+
+function bootFailed(err) {
+  // Pre-splash failures would otherwise be an app that "just doesn't launch".
+  try {
+    logLine(`[main] boot failed: ${err.stack || err.message}`);
+  } catch {
+    /* logging may itself be what failed */
+  }
+  dialog.showMessageBoxSync({
+    type: "error",
+    title: "Campfire",
+    message: "Campfire could not start.",
+    detail: `${err.message}\n\n${logFile ? `Log file:\n${logFile}` : "No log file could be created."}`,
+    buttons: ["Quit"],
+    noLink: true,
+  });
+  app.isQuitting = true;
+  app.quit();
 }
 
 const gotLock = app.requestSingleInstanceLock();
@@ -495,7 +561,7 @@ if (!gotLock) {
 } else {
   app.on("second-instance", showMainWindow);
 
-  app.whenReady().then(boot);
+  app.whenReady().then(() => boot().catch(bootFailed));
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createMainWindow();

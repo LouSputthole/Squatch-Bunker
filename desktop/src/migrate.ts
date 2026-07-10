@@ -50,7 +50,12 @@ export function runMigrations(dbPath: string, migrationsDir: string): void {
     for (const name of dirs) {
       if (applied.has(name)) continue;
       const sqlPath = join(migrationsDir, name, "migration.sql");
-      if (!existsSync(sqlPath)) continue;
+      if (!existsSync(sqlPath)) {
+        // A packaging bug dropped the SQL but kept the folder. Running with a
+        // knowingly-incomplete schema surfaces later as opaque 503s — refuse
+        // to start instead (main.js turns this into a visible error dialog).
+        throw new Error(`Migration ${name} has no migration.sql — bundle is incomplete`);
+      }
       const sql = readFileSync(sqlPath, "utf8");
       // Each migration is applied atomically: either the whole SQL file lands and
       // the migration is recorded, or nothing is (transaction rolls back on throw).

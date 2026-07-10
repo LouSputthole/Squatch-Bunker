@@ -178,6 +178,12 @@ function findFiles(dir, name, out = []) {
 // dlopen every better_sqlite3.node copy under Electron — an ABI mismatch throws.
 function verifyNativeUnderElectron(electronVersion, copies) {
   step(`Verifying ${copies.length} better-sqlite3 binary(ies) load under Electron`);
+  // This function is the safety net for the ABI-mismatch bug class (NOTES §4).
+  // Zero copies means the tracing layout changed and we verified NOTHING —
+  // shipping would 503 on every DB write.
+  if (copies.length === 0) {
+    throw new Error(`No better_sqlite3.node found under ${STANDALONE} — nothing to verify, refusing to ship`);
+  }
   const electron = require("electron"); // path to electron.exe
   for (const nodePath of copies) {
     execFileSync(
@@ -234,9 +240,22 @@ function assemblePortable() {
   const zip = join(DIST, `Campfire-Portable-Windows-${ARCH}.zip`);
   if (existsSync(zip)) rmSync(zip);
   step("Zipping the portable folder");
+  // Compress-Archive can surface per-file failures as non-terminating errors
+  // with exit code 0, so count the archive's entries against the folder's
+  // files in the same invocation and fail loudly on a short archive.
   execFileSync(
     "powershell",
-    ["-NoProfile", "-Command", `Compress-Archive -Path '${folder}\\*' -DestinationPath '${zip}' -CompressionLevel Optimal`],
+    [
+      "-NoProfile",
+      "-Command",
+      `$ErrorActionPreference='Stop'; Compress-Archive -Path '${folder}\\*' -DestinationPath '${zip}' -CompressionLevel Optimal; ` +
+        `Add-Type -AssemblyName System.IO.Compression.FileSystem; ` +
+        `$expected = (Get-ChildItem -LiteralPath '${folder}' -Recurse -File).Count; ` +
+        `$z = [System.IO.Compression.ZipFile]::OpenRead('${zip}'); ` +
+        `$actual = ($z.Entries | Where-Object { $_.Name -ne '' }).Count; $z.Dispose(); ` +
+        `if ($actual -ne $expected) { throw \"zip has $actual file entries, folder has $expected — archive is incomplete\" }; ` +
+        `Write-Host \"  zip verified: $actual files\"`,
+    ],
     { stdio: "inherit" },
   );
   return { folder, zip };
@@ -304,15 +323,19 @@ async function main() {
     artifacts.push(folder, zip);
   }
   if (doInstaller) {
-    const installer = join(DIST, `Campfire-Setup-${version}-${ARCH}.exe`);
-    if (existsSync(installer)) artifacts.push(installer);
+    // Push unconditionally — a silently-skipped nsis target must show as
+    // MISSING and fail the build, not vanish from the report.
+    artifacts.push(join(DIST, `Campfire-Setup-${version}-${ARCH}.exe`));
   }
 
   step("Done");
+  let missing = 0;
   for (const a of artifacts) {
     const size = existsSync(a) ? (statSync(a).isFile() ? `${(statSync(a).size / 1e6).toFixed(1)} MB` : "folder") : "MISSING";
+    if (size === "MISSING") missing++;
     console.log(`  ${a}  (${size})`);
   }
+  if (missing) throw new Error(`${missing} expected artifact(s) missing`);
 }
 
 main().catch((err) => {

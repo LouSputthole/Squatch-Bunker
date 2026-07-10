@@ -57,8 +57,22 @@ export function makeStaticHandler(baseDir: string) {
 
     res.statusCode = 200;
     res.setHeader("Content-Type", MIME[extname(full).toLowerCase()] || "application/octet-stream");
-    res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
-    createReadStream(full).pipe(res);
+    // Uploads are content-addressed (random filename per upload) → immutable.
+    // Avatars reuse a STABLE filename per user (`<userId>.<ext>`), so immutable
+    // would pin the old image in Chromium's cache for a year after a change.
+    res.setHeader(
+      "Cache-Control",
+      prefix === "/uploads/" ? "public, max-age=31536000, immutable" : "no-cache",
+    );
+    const stream = createReadStream(full);
+    // Without a listener a stream 'error' (file deleted/locked between stat and
+    // open) is an uncaught exception that kills the whole server process.
+    stream.on("error", (err) => {
+      console.error(`[Campfire] static read failed for ${full}:`, err.message);
+      if (!res.headersSent) res.statusCode = 500;
+      res.end();
+    });
+    stream.pipe(res);
     return true;
   };
 }

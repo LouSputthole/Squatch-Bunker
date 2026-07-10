@@ -100,7 +100,9 @@ signing key), `settings.json` (window bounds + tray preference), `runtime.json`
 (current port/pid — handy for debugging), `uploads/`, `avatars/`, and `logs/`.
 
 If the exe folder is read-only (e.g. a locked USB), the portable build falls
-back to `%APPDATA%\Campfire\`.
+back to `%APPDATA%\Campfire\`. When that happens it's logged as a WARNING in
+`logs\server.log` and `runtime.json` reports `"dataDirMode": "portable-fallback"`
+— the data will NOT travel with the folder until the write issue is fixed.
 
 ## Updating
 
