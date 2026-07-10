@@ -38,7 +38,24 @@ function loadNextConfig(): Record<string, unknown> {
   return rsf.config;
 }
 
+// Self-terminate if the Electron main process dies (crash / force-kill) so the
+// server is never orphaned. Normal quit is handled by main.js killing us; this
+// covers the cases where before-quit never runs.
+function watchParent() {
+  const parentPid = parseInt(process.env.CAMPFIRE_PARENT_PID || "0", 10);
+  if (!parentPid) return;
+  setInterval(() => {
+    try {
+      process.kill(parentPid, 0); // signal 0 = existence check
+    } catch {
+      process.exit(0);
+    }
+  }, 3000).unref();
+}
+
 async function main() {
+  watchParent();
+
   // 1. Apply pending SQLite migrations BEFORE anything touches Prisma.
   const dbUrl = process.env.DATABASE_URL || "";
   const migrationsDir = process.env.CAMPFIRE_MIGRATIONS_DIR;

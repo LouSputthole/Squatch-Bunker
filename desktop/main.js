@@ -160,6 +160,7 @@ function startServer() {
     ...process.env,
     ELECTRON_RUN_AS_NODE: "1",
     NODE_ENV: "production",
+    CAMPFIRE_PARENT_PID: String(process.pid),
     PORT: String(serverPort),
     DATABASE_URL: `file:${dbPath}`,
     JWT_SECRET: jwtSecret,
@@ -461,6 +462,7 @@ async function boot() {
   jwtSecret = getOrCreateSecret();
   settings = loadSettings();
   if (typeof settings.closeToTray !== "boolean") settings.closeToTray = true;
+  saveSettings(); // persist resolved defaults on first run; bounds are added later
   openLog();
 
   createSplash();

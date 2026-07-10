@@ -6,3 +6,4 @@ out/
 *.AppImage
 *.deb
 *.snap
+*.log

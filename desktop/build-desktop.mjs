@@ -22,8 +22,13 @@ import {
   renameSync,
   mkdirSync,
   statSync,
+  readdirSync,
+  copyFileSync,
+  lstatSync,
+  realpathSync,
+  cpSync,
 } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
@@ -82,7 +87,10 @@ async function bundleServer() {
     format: "cjs",
     outfile,
     absWorkingDir: SQUATCH,
-    alias: { "@": SQUATCH },
+    // next/headers → local stub: it's only reached via lib/auth's getSession,
+    // which the realtime layer never calls, and it doesn't resolve through the
+    // standalone require-hook under Electron.
+    alias: { "@": SQUATCH, "next/headers": join(DESKTOP, "src", "shims", "next-headers.ts") },
     // Resolve from the standalone node_modules at runtime; everything else
     // (socket.io, jsonwebtoken, the generated prisma client, the sqlite adapter)
     // is bundled in.
@@ -112,22 +120,88 @@ async function rebuildNative() {
     const { rebuild } = require("@electron/rebuild");
     await rebuild({ buildPath: STANDALONE, electronVersion, arch: ARCH, onlyModules: ["better-sqlite3"], force: true });
   }
-  verifyNativeUnderElectron(electronVersion);
+
+  materializeBundledModules(moduleDir);
+
+  // Next copies better-sqlite3 into .next/node_modules/better-sqlite3-<hash>/ and
+  // the compiled server actually loads THAT copy — so every better_sqlite3.node
+  // in the tree must be the Electron-ABI binary, not just the top-level module.
+  const good = join(moduleDir, "build", "Release", "better_sqlite3.node");
+  const copies = findFiles(STANDALONE, "better_sqlite3.node");
+  for (const c of copies) {
+    if (c !== good) {
+      copyFileSync(good, c);
+      console.log(`  patched ${relative(STANDALONE, c)}`);
+    }
+  }
+  verifyNativeUnderElectron(electronVersion, copies);
 }
 
-function verifyNativeUnderElectron(electronVersion) {
-  step("Verifying better-sqlite3 loads under Electron's Node");
+// Next symlinks/junctions .next/node_modules/<pkg>-<hash> to the SOURCE
+// node_modules (which holds the Node-ABI better-sqlite3 and won't survive
+// packaging). Replace each junction with a real copy — better-sqlite3 from our
+// Electron-ABI module, everything else (prisma client, pg — all JS/wasm) from
+// the junction's own target.
+function materializeBundledModules(electronSqliteDir) {
+  const bundledDir = join(STANDALONE, ".next", "node_modules");
+  if (!existsSync(bundledDir)) return;
+  step("Materializing Next's bundled node_modules (dereferencing junctions)");
+
+  const materialize = (linkPath) => {
+    if (!lstatSync(linkPath).isSymbolicLink()) return;
+    const isSqlite = /better-sqlite3/.test(linkPath);
+    const src = isSqlite ? electronSqliteDir : realpathSync(linkPath);
+    rmSync(linkPath, { recursive: true, force: true }); // removes only the junction
+    cpSync(src, linkPath, { recursive: true, dereference: true });
+    console.log(`  materialized ${relative(STANDALONE, linkPath)}${isSqlite ? " (Electron ABI)" : ""}`);
+  };
+
+  for (const name of readdirSync(bundledDir)) {
+    const p = join(bundledDir, name);
+    if (name.startsWith("@")) {
+      for (const sub of readdirSync(p)) materialize(join(p, sub));
+    } else {
+      materialize(p);
+    }
+  }
+}
+
+function findFiles(dir, name, out = []) {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const p = join(dir, entry.name);
+    if (entry.isDirectory()) findFiles(p, name, out);
+    else if (entry.name === name) out.push(p);
+  }
+  return out;
+}
+
+// dlopen every better_sqlite3.node copy under Electron — an ABI mismatch throws.
+function verifyNativeUnderElectron(electronVersion, copies) {
+  step(`Verifying ${copies.length} better-sqlite3 binary(ies) load under Electron`);
   const electron = require("electron"); // path to electron.exe
-  const script =
-    'const D=require("better-sqlite3");const db=new D(":memory:");' +
-    'db.exec("CREATE TABLE t(x)");db.prepare("INSERT INTO t VALUES (1)").run();' +
-    'console.log("NATIVE_OK", db.prepare("SELECT count(*) c FROM t").get().c);';
-  execFileSync(electron, ["-e", script], {
-    stdio: "inherit",
-    env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
-    cwd: STANDALONE,
-  });
+  for (const nodePath of copies) {
+    execFileSync(
+      electron,
+      ["-e", `const m={exports:{}};process.dlopen(m,${JSON.stringify(nodePath)});console.log("DLOPEN_OK");`],
+      { stdio: "inherit", env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" } },
+    );
+    console.log(`  ok ${relative(STANDALONE, nodePath)}`);
+  }
   console.log(`  better-sqlite3 verified for Electron ${electronVersion}`);
+}
+
+// ─── 3b. Strip dev-only files Next copied into the standalone tree ───
+// (electron-builder ships the standalone dir verbatim, incl. node_modules, so we
+// remove what must never ship rather than relying on copy filters.)
+function cleanStandalone() {
+  step("Cleaning dev-only files from the standalone tree");
+  for (const rel of [".env", ".env.local", ".env.production", "data"]) {
+    const p = join(STANDALONE, rel);
+    if (existsSync(p)) {
+      rmSync(p, { recursive: true, force: true });
+      console.log(`  removed ${rel}`);
+    }
+  }
 }
 
 // ─── 4. electron-builder ───
@@ -154,7 +228,8 @@ function assemblePortable() {
   // portable.txt marks the folder as portable → data lives in .\data next to the
   // exe. (The nsis installer must NOT contain this file; it uses userData.)
   writeFileSync(join(folder, "portable.txt"), PORTABLE_MARKER);
-  writeFileSync(join(folder, "README.txt"), README_TXT);
+  // BOM so pre-1903 Notepad and non-UTF8-locale editors render the em-dashes.
+  writeFileSync(join(folder, "README.txt"), "﻿" + README_TXT);
 
   const zip = join(DIST, `Campfire-Portable-Windows-${ARCH}.zip`);
   if (existsSync(zip)) rmSync(zip);
@@ -220,6 +295,7 @@ async function main() {
   webBuild();
   await bundleServer();
   await rebuildNative();
+  cleanStandalone();
   packageApp();
 
   const artifacts = [];

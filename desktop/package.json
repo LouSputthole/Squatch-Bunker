@@ -36,22 +36,16 @@
       "icons/tray-icon.png"
     ],
     "extraResources": [
-      {
-        "from": "../squatch-chat/.next/standalone",
-        "to": "server",
-        "filter": ["**/*", "!.env", "!.env.*", "!**/*.db", "!**/*.db-*", "!data${/*}"]
-      },
+      { "from": "../squatch-chat/.next/standalone", "to": "server" },
+      { "from": "../squatch-chat/.next/standalone/node_modules", "to": "server/node_modules" },
+      { "from": "../squatch-chat/.next/standalone/.next/node_modules", "to": "server/.next/node_modules" },
       { "from": "../squatch-chat/.next/static", "to": "server/.next/static" },
       { "from": "../squatch-chat/public", "to": "server/public" },
       { "from": "db-migrations", "to": "db-migrations" }
     ],
     "win": {
-      "target": [
-        { "target": "dir" },
-        { "target": "nsis" }
-      ],
-      "icon": "icons/icon.ico",
-      "publisherName": "Squatch Bunker"
+      "target": ["dir", "nsis"],
+      "icon": "icons/icon.ico"
     },
     "nsis": {
       "oneClick": false,
