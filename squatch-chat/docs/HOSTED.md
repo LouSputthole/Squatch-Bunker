@@ -60,12 +60,13 @@ Mesh voice is fine at friends scale and stays the self-host default forever
 
 Gate every box before taking money:
 
-- [ ] **Regenerate Prisma migrations against Postgres** — the committed
-      migration history is Postgres-drifted; a fresh hosted DB must
-      `prisma migrate deploy` cleanly (known issue, tracked since the
-      2026-06-28 security pass)
-- [ ] Webhook idempotency moved from in-memory to a DB table (multi-node +
-      restart safety); friendship dup-race re-checked on Postgres
+- [x] **Regenerate Prisma migrations against Postgres** — history squashed
+      into one init migration; verified on a fresh Postgres: deploys clean,
+      `migrate diff` reports no drift (2026-07-11)
+- [x] Webhook idempotency moved from in-memory to a DB table
+      (`WebhookEvent` claim protocol, race-safe takeover, route +
+      protocol tests; 2026-07-11) — friendship dup-race on Postgres still
+      to re-check
 - [ ] Deploy: docs/DEPLOY.md recipe on real infra + managed Postgres,
       nightly `pg_dump` + uploads snapshot, restore drill performed once
 - [ ] Stripe live keys, live webhook signing secret, portal configured

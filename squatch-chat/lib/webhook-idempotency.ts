@@ -33,11 +33,14 @@ export async function claimEvent(eventId: string): Promise<ClaimResult> {
   if (existing.status === "done") return "duplicate";
   if (Date.now() - existing.updatedAt.getTime() < STALE_CLAIM_MS) return "in-flight";
 
-  // Stale "processing" claim — the worker died mid-handler. Take it over.
-  // ponytail: two takeovers can race here; worst case the handler runs twice,
-  // which is the pre-existing cross-restart exposure, now bounded to 5 min.
-  await prisma.webhookEvent.update({ where: { id: eventId }, data: { updatedAt: new Date() } });
-  return "claimed";
+  // Stale "processing" claim — the worker died mid-handler. Take it over,
+  // gated on the exact stale row we just observed so two concurrent takeovers
+  // can't both win.
+  const takeover = await prisma.webhookEvent.updateMany({
+    where: { id: eventId, status: "processing", updatedAt: existing.updatedAt },
+    data: { updatedAt: new Date() },
+  });
+  return takeover.count === 1 ? "claimed" : "in-flight";
 }
 
 export async function completeEvent(eventId: string): Promise<void> {
