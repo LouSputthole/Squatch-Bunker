@@ -1,0 +1,20 @@
+# Campfire — PostgreSQL via Docker
+# Run: docker compose up -d
+# This only starts the database. The app itself runs natively.
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: campfire-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: campfire
+    ports:
+      - "5432:5432"
+    volumes:
+      - campfire-data:/var/lib/postgresql/data
+
+volumes:
+  campfire-data:

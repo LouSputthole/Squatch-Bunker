@@ -1,0 +1,360 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model User {
+  id             String    @id @default(uuid())
+  email          String    @unique
+  username       String    @unique
+  passwordHash   String
+  avatar         String?
+  banner         String?
+  bio            String?
+  statusMessage  String?
+  isGuest        Boolean   @default(false)
+  guestExpiresAt DateTime?
+  tier           String    @default("free")
+  tierExpiresAt  DateTime?
+  tokenVersion   Int       @default(0)
+  stripeCustomerId     String?
+  stripeSubscriptionId String?
+  subscriptionStatus   String?
+  resetToken     String?
+  resetExpiry    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  memberships    ServerMember[]
+  messages       Message[]
+  reactions      Reaction[]
+  bookmarks      Bookmark[]
+  ownedServers   Server[]
+  conversations1 Conversation[]          @relation("ConvUser1")
+  conversations2 Conversation[]          @relation("ConvUser2")
+  directMessages DirectMessage[]
+  sentRequests   Friendship[]   @relation("FriendRequester")
+  recvRequests   Friendship[]   @relation("FriendAddressee")
+  dmReactions             DirectMessageReaction[]
+  oauthAccounts           OAuthAccount[]
+  scheduledMessages       ScheduledMessage[]
+  notificationPreferences NotificationPreference[]
+  authoredNotes           UserNote[] @relation("NoteAuthor")
+  targetedNotes           UserNote[] @relation("NoteTarget")
+}
+
+model OAuthAccount {
+  id                String   @id @default(uuid())
+  userId            String
+  provider          String
+  providerAccountId String
+  createdAt         DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([provider, providerAccountId])
+}
+
+model Server {
+  id          String   @id @default(uuid())
+  name        String
+  icon        String?
+  banner      String?
+  ownerId     String
+  createdAt   DateTime @default(now())
+  inviteCode  String   @unique @default(uuid())
+  isPublic          Boolean  @default(false)
+  description       String?
+  welcomeMessage    String?
+  welcomeChannelIds String?
+
+  owner        User           @relation(fields: [ownerId], references: [id])
+  members      ServerMember[]
+  channels     Channel[]
+  webhooks     Webhook[]
+  customEmojis CustomEmoji[]
+  auditLogs    AuditLog[]
+  roles        Role[]
+  sounds       Sound[]
+
+  soundscape   String?
+}
+
+model Sound {
+  id        String   @id @default(uuid())
+  serverId  String
+  name      String
+  emoji     String   @default("🔊")
+  dataUrl   String   // base64 data URL of the uploaded clip (<= 8s)
+  createdBy String
+  createdAt DateTime @default(now())
+
+  server Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
+}
+
+model Role {
+  id          String   @id @default(uuid())
+  serverId    String
+  name        String
+  color       String   @default("#99aab5")
+  permissions String   @default("[]") // JSON array of permission keys
+  position    Int      @default(0)     // higher = more senior
+  isDefault   Boolean  @default(false) // the base @everyone-style role
+  createdAt   DateTime @default(now())
+
+  server  Server             @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  members ServerMemberRole[]
+}
+
+model ServerMemberRole {
+  id       String @id @default(uuid())
+  memberId String
+  roleId   String
+
+  member ServerMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  role   Role         @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([memberId, roleId])
+}
+
+model ServerMember {
+  id        String    @id @default(uuid())
+  serverId  String
+  userId    String
+  role      String    @default("member")
+  banned    Boolean   @default(false)
+  bannedAt  DateTime?
+  createdAt DateTime  @default(now())
+
+  server      Server             @relation(fields: [serverId], references: [id])
+  user        User               @relation(fields: [userId], references: [id])
+  memberRoles ServerMemberRole[]
+
+  @@unique([serverId, userId])
+}
+
+model Channel {
+  id              String   @id @default(uuid())
+  serverId        String
+  name            String
+  type            String   @default("text")
+  category        String?
+  description     String?
+  topic           String?
+  slowModeSeconds Int      @default(0)
+  position        Int      @default(0)
+  createdAt       DateTime @default(now())
+
+  server            Server              @relation(fields: [serverId], references: [id])
+  messages          Message[]
+  permissions       ChannelPermission[]
+  webhooks          Webhook[]
+  scheduledMessages ScheduledMessage[]
+}
+
+model Message {
+  id              String    @id @default(uuid())
+  channelId       String
+  authorId        String
+  content         String
+  attachmentUrl   String?
+  attachmentName  String?
+  replyToId       String?
+  pinned          Boolean   @default(false)
+  parentMessageId String?
+  isSystem        Boolean   @default(false)
+  editedAt        DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  channel   Channel    @relation(fields: [channelId], references: [id])
+  author    User       @relation(fields: [authorId], references: [id])
+  replyTo   Message?   @relation("MessageReplies", fields: [replyToId], references: [id])
+  replies   Message[]  @relation("MessageReplies")
+  reactions Reaction[]
+  bookmarks Bookmark[]
+  parent    Message?   @relation("thread", fields: [parentMessageId], references: [id])
+  children  Message[]  @relation("thread")
+
+  @@index([channelId])
+}
+
+model Reaction {
+  id        String   @id @default(uuid())
+  messageId String
+  userId    String
+  emoji     String
+  createdAt DateTime @default(now())
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id])
+
+  @@unique([messageId, userId, emoji])
+}
+
+model Bookmark {
+  id        String   @id @default(uuid())
+  userId    String
+  messageId String
+  createdAt DateTime @default(now())
+
+  user    User    @relation(fields: [userId], references: [id])
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, messageId])
+}
+
+model Conversation {
+  id        String   @id @default(uuid())
+  user1Id   String
+  user2Id   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user1    User            @relation("ConvUser1", fields: [user1Id], references: [id])
+  user2    User            @relation("ConvUser2", fields: [user2Id], references: [id])
+  messages DirectMessage[]
+
+  @@unique([user1Id, user2Id])
+}
+
+model DirectMessage {
+  id             String    @id @default(uuid())
+  conversationId String
+  authorId       String
+  content        String
+  attachmentUrl  String?
+  attachmentName String?
+  readAt         DateTime?
+  createdAt      DateTime  @default(now())
+
+  conversation Conversation            @relation(fields: [conversationId], references: [id])
+  author       User                    @relation(fields: [authorId], references: [id])
+  reactions    DirectMessageReaction[]
+
+  @@index([conversationId])
+}
+
+model DirectMessageReaction {
+  id              String   @id @default(uuid())
+  directMessageId String
+  userId          String
+  emoji           String
+  createdAt       DateTime @default(now())
+
+  directMessage DirectMessage @relation(fields: [directMessageId], references: [id], onDelete: Cascade)
+  user          User          @relation(fields: [userId], references: [id])
+
+  @@unique([directMessageId, userId, emoji])
+}
+
+model Webhook {
+  id        String   @id @default(uuid())
+  channelId String
+  serverId  String
+  name      String
+  token     String   @unique @default(uuid())
+  createdBy String
+  createdAt DateTime @default(now())
+
+  channel Channel @relation(fields: [channelId], references: [id])
+  server  Server  @relation(fields: [serverId], references: [id])
+}
+
+model CustomEmoji {
+  id        String   @id @default(uuid())
+  serverId  String
+  name      String
+  url       String
+  createdBy String
+  createdAt DateTime @default(now())
+
+  server Server @relation(fields: [serverId], references: [id])
+
+  @@unique([serverId, name])
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  serverId  String
+  actorId   String
+  targetId  String?
+  action    String
+  detail    String?
+  createdAt DateTime @default(now())
+
+  server Server @relation(fields: [serverId], references: [id])
+}
+
+model ChannelPermission {
+  id        String   @id @default(uuid())
+  channelId String
+  role      String
+  canView   Boolean  @default(true)
+  canSend   Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  channel Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  @@unique([channelId, role])
+}
+
+model Friendship {
+  id          String   @id @default(uuid())
+  requesterId String
+  addresseeId String
+  status      String   @default("pending") // pending, accepted, blocked
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  requester User @relation("FriendRequester", fields: [requesterId], references: [id])
+  addressee User @relation("FriendAddressee", fields: [addresseeId], references: [id])
+
+  @@unique([requesterId, addresseeId])
+}
+
+model ScheduledMessage {
+  id        String   @id @default(uuid())
+  channelId String
+  authorId  String
+  content   String
+  sendAt    DateTime
+  sent      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  channel Channel @relation(fields: [channelId], references: [id])
+  author  User    @relation(fields: [authorId], references: [id])
+
+  @@index([channelId, sendAt])
+}
+
+model NotificationPreference {
+  id        String   @id @default(uuid())
+  userId    String
+  serverId  String?
+  channelId String?
+  level     String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([userId, serverId, channelId])
+}
+
+model UserNote {
+  id           String   @id @default(uuid())
+  authorId     String
+  targetUserId String
+  content      String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  author     User @relation("NoteAuthor", fields: [authorId], references: [id])
+  targetUser User @relation("NoteTarget", fields: [targetUserId], references: [id])
+
+  @@unique([authorId, targetUserId])
+}

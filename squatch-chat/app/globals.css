@@ -1,0 +1,128 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #0b1210;
+  --panel: #121b18;
+  --panel-2: #1a2521;
+  --text: #e7ecea;
+  --muted: #94a39d;
+  --accent: #b7bcc9;
+  --accent-2: #5f7a70;
+  --danger: #7a2f2f;
+}
+
+/* Light theme — applied via data-theme="light" on <html> */
+[data-theme="light"] {
+  --bg: #f0ece4;
+  --panel: #e6e1d8;
+  --panel-2: #d9d3c8;
+  --text: #1a2220;
+  --muted: #5a6a63;
+  --accent: #3a5a50;
+  --accent-2: #4a7a6a;
+  --danger: #a83232;
+}
+
+@theme inline {
+  --color-background: var(--bg);
+  --color-foreground: var(--text);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+/* Scrollbar styling for the forest */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--accent-2);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
+}
+
+
+/* Screen-reader only utility */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+@keyframes search-highlight {
+  0% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.5); background-color: rgba(245, 158, 11, 0.15); }
+  50% { box-shadow: 0 0 12px 4px rgba(245, 158, 11, 0.3); background-color: rgba(245, 158, 11, 0.1); }
+  100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); background-color: transparent; }
+}
+.animate-search-highlight {
+  animation: search-highlight 2s ease-out forwards;
+  border-radius: 4px;
+}
+
+/* Voice toast slide-in */
+@keyframes toast-in {
+  0% { opacity: 0; transform: translateX(20px); }
+  100% { opacity: 1; transform: translateX(0); }
+}
+.animate-pulse-once {
+  animation: toast-in 0.3s ease-out forwards;
+}
+
+/* Connection status bar */
+@keyframes slide-down {
+  0% { transform: translateY(-100%); opacity: 0; }
+  100% { transform: translateY(0); opacity: 1; }
+}
+.animate-slide-down {
+  animation: slide-down 0.3s ease-out forwards;
+}
+
+/* Mobile safe area padding for devices with notches/home indicators */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+
+/* Keyboard focus rings */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Skip-to-content link */
+.skip-link {
+  position: absolute;
+  top: -100%;
+  left: 8px;
+  z-index: 9999;
+  padding: 8px 16px;
+  background: var(--accent);
+  color: var(--bg);
+  border-radius: 0 0 4px 4px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: top 0.1s;
+}
+.skip-link:focus {
+  top: 0;
+}

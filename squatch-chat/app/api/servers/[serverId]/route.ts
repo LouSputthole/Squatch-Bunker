@@ -1,0 +1,104 @@
+import { NextResponse } from "next/server";
+import { getSession } from "@/lib/auth";
+import { assertFeature } from "@/lib/features";
+
+export async function PATCH(
+  request: Request,
+  { params }: { params: Promise<{ serverId: string }> }
+) {
+  const session = await getSession();
+  if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+
+  const { serverId } = await params;
+  const body = await request.json();
+  const { name, regenerateInvite, icon, banner } = body;
+
+  try {
+    const { prisma } = await import("@/lib/db");
+
+    const server = await prisma.server.findUnique({ where: { id: serverId } });
+    if (!server) return NextResponse.json({ error: "Server not found" }, { status: 404 });
+    if (server.ownerId !== session.userId) {
+      return NextResponse.json({ error: "Only the server owner can do this" }, { status: 403 });
+    }
+
+    const updates: { name?: string; inviteCode?: string; icon?: string | null; banner?: string | null } = {};
+    if (name && name.trim()) updates.name = name.trim();
+    if (regenerateInvite) updates.inviteCode = crypto.randomUUID();
+    if (typeof icon === "string") updates.icon = icon || null;
+    if ("banner" in body) {
+      // Setting a (non-empty) banner is a premium feature; clearing is allowed for anyone.
+      if (banner && !(await assertFeature(session.userId, "server_banner"))) {
+        return NextResponse.json({ error: "Upgrade required" }, { status: 403 });
+      }
+      updates.banner = banner || null;
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return NextResponse.json({ error: "Nothing to update" }, { status: 400 });
+    }
+
+    const updated = await prisma.server.update({
+      where: { id: serverId },
+      data: updates,
+      include: { channels: true, _count: { select: { members: true } } },
+    });
+    return NextResponse.json({ server: updated });
+  } catch (err) {
+    console.error("[Campfire] Failed to update server:", err);
+    return NextResponse.json({ error: "Database error" }, { status: 503 });
+  }
+}
+
+export async function DELETE(
+  _request: Request,
+  { params }: { params: Promise<{ serverId: string }> }
+) {
+  const session = await getSession();
+  if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+
+  const { serverId } = await params;
+
+  try {
+    const { prisma } = await import("@/lib/db");
+
+    const server = await prisma.server.findUnique({ where: { id: serverId } });
+    if (!server) return NextResponse.json({ error: "Server not found" }, { status: 404 });
+    if (server.ownerId !== session.userId) {
+      return NextResponse.json({ error: "Only the server owner can do this" }, { status: 403 });
+    }
+
+    await prisma.$transaction(async (tx) => {
+      const channels = await tx.channel.findMany({
+        where: { serverId },
+        select: { id: true },
+      });
+      const channelIds = channels.map((c) => c.id);
+
+      if (channelIds.length > 0) {
+        await tx.reaction.deleteMany({
+          where: { message: { channelId: { in: channelIds } } },
+        });
+        // ScheduledMessage and Webhook FK channels but have no onDelete cascade,
+        // so they must be removed before their channels.
+        await tx.scheduledMessage.deleteMany({ where: { channelId: { in: channelIds } } });
+        await tx.webhook.deleteMany({ where: { channelId: { in: channelIds } } });
+        await tx.message.deleteMany({ where: { channelId: { in: channelIds } } });
+        await tx.channel.deleteMany({ where: { serverId } });
+      }
+
+      // Server-scoped records without an onDelete cascade: remove explicitly or
+      // they FK-block the server delete (Postgres) / orphan it (SQLite).
+      await tx.customEmoji.deleteMany({ where: { serverId } });
+      await tx.auditLog.deleteMany({ where: { serverId } });
+
+      await tx.serverMember.deleteMany({ where: { serverId } });
+      await tx.server.delete({ where: { id: serverId } });
+    });
+
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    console.error("[Campfire] Failed to delete server:", err);
+    return NextResponse.json({ error: "Database error" }, { status: 503 });
+  }
+}

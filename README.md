@@ -1,124 +1,55 @@
-# Squatch-Bunker
+# Campfire (repo: Squatch-Bunker)
 
-A Discord-inspired voice chat application built with Node.js, TypeScript, Express, Socket.io, and WebRTC.
+A self-hostable, open-source Discord-style voice, text & video chat app —
+built around the feeling of **sitting around a campfire** rather than a
+corporate chat grid. Servers, channels, and voice rooms, with:
 
-## Features
+- **Voice rooms** — WebRTC peer-to-peer audio, mute/deafen, push-to-talk,
+  voice-activity detection, per-user volume, camera & screen share
+- **Text channels** — messages, replies, edits, reactions, pins, search,
+  threads, @mentions, slash commands, emoji & GIF pickers
+- **Servers** — create/join via invite link, roles (owner/admin/mod/member),
+  categories, channel topics & permissions, slow mode
+- **DMs & friends** — direct messages, friend requests, presence (online /
+  idle / DND / invisible)
+- **Moderation** — kick/ban, server mute/deafen, message purge, audit log,
+  auto-mod word filter
+- **8 built-in themes** incl. Campfire (warm ember), Forest Dark/Light,
+  Midnight, Ocean, Dracula, Nord, Solarized — plus a custom-theme creator
+- **Guest access** — jump in with just a username, no signup
 
-- Real-time voice chat via WebRTC (peer-to-peer audio)
-- Multiple voice channels (General, Gaming, Music out of the box)
-- Live presence: see who is in each channel, with mute/deafen/speaking indicators
-- WebRTC signaling relay (offer/answer/ICE candidates) over Socket.io
-- Voice activity detection — speaking state broadcast to room members
-- In-memory store (no database required)
+## Where the app lives
 
-## Stack
+The app itself is in [`squatch-chat/`](./squatch-chat) — a Next.js 16 +
+Prisma 7 + Socket.IO project. That's where you `cd` to install, run, and
+develop.
 
-| Layer       | Technology               |
-|-------------|--------------------------|
-| Server      | Node.js + TypeScript     |
-| HTTP API    | Express                  |
-| Real-time   | Socket.io                |
-| Audio/Video | WebRTC (browser-native)  |
-| Client      | Vanilla HTML/CSS/JS      |
+## Quick start (self-host)
 
-## Setup
-
-### Prerequisites
-
-- Node.js 18+
-- npm 9+
-
-### Install
-
-```bash
-npm install
-```
-
-### Development (auto-restart on changes)
+Requires **Node 22 LTS** (minimum 20.9). No database server, no Docker —
+runs on SQLite out of the box.
 
 ```bash
-npm run dev
+cd squatch-chat
+npm install      # installs deps + creates .env + sets up a local SQLite DB
+npm run host     # Next.js + realtime server on one port
 ```
 
-### Production build
+Open **http://localhost:3000**. Share the printed **Network URL** to let
+people on your LAN join. State persists in `squatch-chat/data/campfire.db`.
 
-```bash
-npm run build
-npm start
-```
+For Postgres, migrations, Docker, and the full tech stack, see
+**[squatch-chat/README.md](./squatch-chat/README.md)**.
 
-The server listens on **http://localhost:3000** by default.  
-Set the `PORT` environment variable to override.
+## Desktop app
 
-## Project Structure
+[`desktop/`](./desktop) is an Electron wrapper that packages the web app as
+a native desktop installer (Windows/macOS/Linux). It bundles the same
+`squatch-chat` server internally — see [desktop/README.md](./desktop/README.md).
 
-```
-src/
-  index.ts                 # Express + Socket.io server entry point
-  models/
-    Room.ts                # Room type definitions
-    User.ts                # User type definitions
-    Session.ts             # Session type definitions
-  services/
-    RoomService.ts         # CRUD for rooms, default room seeding
-    PresenceService.ts     # Who is in what room, speaking state, heartbeat cleanup
-    SessionRegistry.ts     # Maps socket IDs to user+room sessions
-    UserService.ts         # In-memory user registration
-  routes/
-    rooms.ts               # REST: list, get, create, delete rooms
-    users.ts               # REST: register (stub auth), get user
-  sockets/
-    roomHandlers.ts        # join-room, leave-room, heartbeat, mute/deafen/speaking events
-    signalingHandlers.ts   # WebRTC offer/answer/ice-candidate relay
-client/
-  index.html               # Single-page app
-  css/style.css            # Discord-inspired dark theme
-  js/app.js                # Auth stub, room list, socket events, UI
-  js/voiceClient.js        # WebRTC peer connection management + VAD
-```
+## License
 
-## REST API
-
-| Method | Path                        | Description                       |
-|--------|-----------------------------|-----------------------------------|
-| POST   | /api/users/register         | Register a username, get userId   |
-| GET    | /api/users/:id              | Get user by ID                    |
-| GET    | /api/rooms?serverId=default | List rooms with occupancy counts  |
-| GET    | /api/rooms/:id              | Room detail + current members     |
-| POST   | /api/rooms                  | Create a new voice room           |
-| DELETE | /api/rooms/:id              | Delete a room                     |
-
-## Socket Events
-
-### Client → Server
-
-| Event            | Payload                                      | Description                          |
-|------------------|----------------------------------------------|--------------------------------------|
-| `identify`       | `{ userId, username }`                       | Associate socket with user identity  |
-| `join-room`      | `{ roomId, userId, username }`               | Join a voice channel                 |
-| `leave-room`     | `{ roomId }`                                 | Leave a voice channel                |
-| `heartbeat`      | `{ roomId }`                                 | Keep presence alive                  |
-| `mute-toggle`    | `{ roomId, muted }`                          | Toggle mic mute                      |
-| `deafen-toggle`  | `{ roomId, deafened }`                       | Toggle deafen                        |
-| `speaking`       | `{ roomId, speaking }`                       | Voice activity update                |
-| `signal:offer`   | `{ targetUserId, sdp, roomId }`              | WebRTC offer relay                   |
-| `signal:answer`  | `{ targetUserId, sdp, roomId }`              | WebRTC answer relay                  |
-| `signal:ice-candidate` | `{ targetUserId, candidate, roomId }` | ICE candidate relay                  |
-
-### Server → Client
-
-| Event                    | Payload                          | Description                        |
-|--------------------------|----------------------------------|------------------------------------|
-| `room:state`             | `{ roomId, members[] }`          | Full room state on join            |
-| `presence:member-joined` | `{ roomId, member }`             | Someone joined the room            |
-| `presence:member-left`   | `{ userId, roomId }`             | Someone left the room              |
-| `presence:state-update`  | `{ roomId, userId, ...patch }`   | Mute/deafen/speaking state changed |
-| `signal:offer`           | `{ fromUserId, sdp }`            | Incoming WebRTC offer              |
-| `signal:answer`          | `{ fromUserId, sdp }`            | Incoming WebRTC answer             |
-| `signal:ice-candidate`   | `{ fromUserId, candidate }`      | Incoming ICE candidate             |
-
-## Notes
-
-- All data is stored in-memory; restarting the server resets all state.
-- WebRTC works best on `localhost` or HTTPS. For LAN/remote use, deploy behind HTTPS and consider a TURN server.
-- The microphone permission prompt appears when you join a voice channel.
+**AGPL-3.0** (see [squatch-chat/LICENSE](./squatch-chat/LICENSE)). You're
+free to self-host, modify, and redistribute. If you run a modified version
+as a network service, the AGPL requires you to make your source available
+to its users.
