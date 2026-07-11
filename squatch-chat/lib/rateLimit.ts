@@ -11,6 +11,13 @@ interface Bucket {
 
 const buckets = new Map<string, Bucket>();
 
+interface WeightedBucket {
+  used: number;
+  resetAt: number;
+}
+
+const weightedBuckets = new Map<string, WeightedBucket>();
+
 // Clean up stale buckets periodically
 if (typeof setInterval !== "undefined") {
   setInterval(() => {
@@ -18,7 +25,34 @@ if (typeof setInterval !== "undefined") {
     buckets.forEach((bucket, key) => {
       if (bucket.resetAt < now) buckets.delete(key);
     });
-  }, WINDOW_MS);
+    weightedBuckets.forEach((bucket, key) => {
+      if (bucket.resetAt < now) weightedBuckets.delete(key);
+    });
+  }, WINDOW_MS).unref?.();
+}
+
+/**
+ * Fixed-window limiter with per-call weight (e.g. upload bytes) and per-key
+ * window/max instead of the module-global config. Consumes only when allowed,
+ * so a rejected call doesn't burn budget.
+ * ponytail: in-memory like the bucket above — per-node on multi-node deploys;
+ * move both to a shared store if hosted ever runs >1 instance.
+ */
+export function checkWeightedLimit(
+  key: string,
+  weight: number,
+  max: number,
+  windowMs: number,
+): { allowed: boolean; resetAt: number } {
+  const now = Date.now();
+  let bucket = weightedBuckets.get(key);
+  if (!bucket || bucket.resetAt < now) {
+    bucket = { used: 0, resetAt: now + windowMs };
+    weightedBuckets.set(key, bucket);
+  }
+  if (bucket.used + weight > max) return { allowed: false, resetAt: bucket.resetAt };
+  bucket.used += weight;
+  return { allowed: true, resetAt: bucket.resetAt };
 }
 
 export function checkRateLimit(key: string): { allowed: boolean; remaining: number; resetAt: number } {

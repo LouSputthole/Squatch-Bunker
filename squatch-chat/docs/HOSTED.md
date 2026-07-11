@@ -75,8 +75,9 @@ Gate every box before taking money:
 - [ ] Status/uptime page (even a bare one)
 - [ ] Load sanity: 200 concurrent socket clients on one box (vitest
       harness exists for the socket layer; extend, don't rewrite)
-- [ ] Abuse basics: registration rate-limit exists — add upload-volume cap
-      per account and a report-user endpoint before public signup
+- [x] Abuse basics: per-account upload caps (30 files / 500MB per hour) and
+      `POST /api/reports` (validated, deduped, 5/hr) shipped 2026-07-11;
+      registration rate-limit already existed
 
 ## Open questions (owner decisions, non-blocking to build)
 
