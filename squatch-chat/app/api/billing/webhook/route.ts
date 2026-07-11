@@ -1,12 +1,6 @@
 import { NextResponse } from "next/server";
 import { constructWebhookEvent, handleWebhookEvent, isStripeEnabled } from "@/lib/stripe";
-
-// In-memory idempotency guard: track Stripe event IDs we've already applied so a
-// replayed or retried delivery doesn't grant/revoke premium twice. This only
-// lives for the lifetime of the process, which is enough to absorb the rapid
-// retries/replays Stripe (or an attacker re-POSTing a captured event) may send.
-const processedEvents = new Set<string>();
-const MAX_TRACKED_EVENTS = 10_000;
+import { claimEvent, completeEvent, releaseEvent } from "@/lib/webhook-idempotency";
 
 export async function POST(req: Request) {
   if (!isStripeEnabled()) {
@@ -36,28 +30,29 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid signature" }, { status: 400 });
   }
 
-  // Idempotency: silently acknowledge an event we've already processed.
-  if (event.id && processedEvents.has(event.id)) {
-    return NextResponse.json({ received: true, duplicate: true });
+  // Idempotency (DB-backed — survives restarts, works across nodes): claim
+  // the event id before touching billing state.
+  if (event.id) {
+    const claim = await claimEvent(event.id);
+    if (claim === "duplicate") {
+      return NextResponse.json({ received: true, duplicate: true });
+    }
+    if (claim === "in-flight") {
+      // Another delivery of this event is mid-handler; let Stripe retry later.
+      return NextResponse.json({ error: "Event is being processed" }, { status: 409 });
+    }
   }
 
   try {
     await handleWebhookEvent(event);
   } catch (err) {
-    // Don't mark as processed — return 500 so Stripe retries the delivery.
+    // Release the claim and return 500 so Stripe retries the delivery.
     console.error("[Campfire] Webhook handler error:", err);
+    if (event.id) await releaseEvent(event.id);
     return NextResponse.json({ error: "Webhook handler failed" }, { status: 500 });
   }
 
-  // Record the event only after it was applied successfully.
-  if (event.id) {
-    if (processedEvents.size >= MAX_TRACKED_EVENTS) {
-      // Bound memory: evict the oldest tracked id (Set preserves insertion order).
-      const oldest = processedEvents.values().next().value;
-      if (oldest !== undefined) processedEvents.delete(oldest);
-    }
-    processedEvents.add(event.id);
-  }
+  if (event.id) await completeEvent(event.id);
 
   return NextResponse.json({ received: true });
 }

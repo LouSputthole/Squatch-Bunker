@@ -296,6 +296,15 @@ CREATE TABLE "UserNote" (
     CONSTRAINT "UserNote_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
+CREATE TABLE "WebhookEvent" (
+    "id" TEXT NOT NULL,
+    "status" TEXT NOT NULL DEFAULT 'processing',
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "WebhookEvent_pkey" PRIMARY KEY ("id")
+);
+
 -- CreateIndex
 CREATE UNIQUE INDEX "User_email_key" ON "User"("email");
 

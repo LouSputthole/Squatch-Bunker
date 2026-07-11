@@ -358,3 +358,12 @@ model UserNote {
 
   @@unique([authorId, targetUserId])
 }
+
+// Stripe webhook idempotency: one row per delivered event id. A row is a
+// processing claim; status flips to "done" after the handler succeeds. Rows
+// are tiny and unbounded — truncate periodically if it ever matters.
+model WebhookEvent {
+  id        String   @id
+  status    String   @default("processing") // "processing" | "done"
+  updatedAt DateTime @updatedAt
+}
