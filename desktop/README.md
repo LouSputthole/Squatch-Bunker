@@ -119,6 +119,10 @@ self-hosted Campfire.
 - Windows Firewall will ask to allow Campfire on first share — click Allow.
 - While sharing is on, anyone on the local network can reach the login page.
   Auth still gates everything behind it.
+- LAN visitors get text + browsing but **no microphone**: browsers only
+  unlock getUserMedia on secure origins, and LAN sharing is plain HTTP (the
+  hosting machine itself is exempt via `127.0.0.1`). Voice for others =
+  the HTTPS deploy (`squatch-chat/docs/DEPLOY.md`).
 - Internet-wide hosting is the self-host server's job (see the deployment
   docs), not the desktop app's.
 

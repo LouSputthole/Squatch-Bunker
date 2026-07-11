@@ -70,6 +70,9 @@ server — **[docs/DEPLOY.md](./docs/DEPLOY.md)** is the full VPS recipe
 (Caddy + coturn + systemd, ~30 minutes). The WebRTC mesh works well up to
 ~6 people per room; larger rooms need an SFU.
 
+What's encrypted where (TLS, voice E2EE via DTLS-SRTP, what the operator
+can see, hardening checklist): **[docs/SECURITY.md](./docs/SECURITY.md)**.
+
 ## License
 
 **AGPL-3.0** (see [LICENSE](./LICENSE)). You're free to self-host, modify, and
