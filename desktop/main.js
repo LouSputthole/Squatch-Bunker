@@ -1,119 +1,319 @@
-const { app, BrowserWindow, shell, Tray, Menu, nativeImage } = require("electron");
+/**
+ * Campfire desktop — Electron main process.
+ *
+ * Boots the bundled Campfire server (Next.js + Socket.IO) as a child process of
+ * Campfire.exe using Electron's embedded Node (ELECTRON_RUN_AS_NODE=1), so the
+ * portable build runs with NO system Node install. The renderer just loads the
+ * local server over a dynamically-chosen port (single-port mode).
+ */
+const { app, BrowserWindow, Tray, Menu, shell, dialog, nativeImage, screen } = require("electron");
 const path = require("path");
-const { spawn } = require("child_process");
+const fs = require("fs");
 const net = require("net");
+const http = require("http");
+const crypto = require("crypto");
+const { spawn } = require("child_process");
 
-// Paths
-const IS_DEV = process.env.NODE_ENV === "development";
-const SERVER_DIR = IS_DEV
-  ? path.join(__dirname, "..", "squatch-chat")
-  : path.join(process.resourcesPath, "server");
+// ─── Resource locations ───
+const SERVER_DIR = app.isPackaged
+  ? path.join(process.resourcesPath, "server")
+  : path.join(__dirname, "..", "squatch-chat", ".next", "standalone");
+const MIGRATIONS_DIR = app.isPackaged
+  ? path.join(process.resourcesPath, "db-migrations")
+  : path.join(__dirname, "db-migrations");
+const SERVER_ENTRY = path.join(SERVER_DIR, "server-desktop.js");
 
-const APP_PORT = parseInt(process.env.APP_PORT || "3000", 10);
-const SOCKET_PORT = parseInt(process.env.SOCKET_PORT || "3001", 10);
+const MIN_WIDTH = 940;
+const MIN_HEIGHT = 600;
+const STARTUP_TIMEOUT_MS = 30000;
+const LOG_MAX_BYTES = 2 * 1024 * 1024;
 
+// ─── State ───
 let mainWindow = null;
 let splashWindow = null;
 let tray = null;
 let serverProcess = null;
-let realtimeProcess = null;
+let serverPort = 0;
+let serverUrl = "";
+let dataDir = "";
+let jwtSecret = "";
+let logStream = null;
+let logFile = "";
+const logRing = []; // last N server log lines for crash/startup dialogs
+let settings = {};
+let saveBoundsTimer = null;
+let dataDirMode = "installed"; // "portable" | "installed" | "portable-fallback"
+let bootComplete = false;
 
-// ─── Server Management ───
+app.isQuitting = false;
 
-function waitForPort(port, timeout = 30000) {
-  return new Promise((resolve, reject) => {
-    const start = Date.now();
-    function check() {
-      const socket = new net.Socket();
-      socket.setTimeout(500);
-      socket.on("connect", () => {
-        socket.destroy();
-        resolve();
-      });
-      socket.on("error", () => {
-        socket.destroy();
-        if (Date.now() - start > timeout) {
-          reject(new Error(`Port ${port} not ready after ${timeout}ms`));
-        } else {
-          setTimeout(check, 300);
-        }
-      });
-      socket.on("timeout", () => {
-        socket.destroy();
-        setTimeout(check, 300);
-      });
-      socket.connect(port, "127.0.0.1");
+// ─── Data dir, secret, settings ───
+
+/**
+ * Portable when a `portable.txt` sits next to the exe AND `<exeDir>\data` is
+ * writable — then all state lives beside the app so the folder is self-contained
+ * and movable (USB). Otherwise fall back to the per-user app data dir.
+ */
+function resolveDataDir() {
+  const exeDir = path.dirname(app.getPath("exe"));
+  if (fs.existsSync(path.join(exeDir, "portable.txt"))) {
+    const dd = path.join(exeDir, "data");
+    try {
+      fs.mkdirSync(dd, { recursive: true });
+      fs.accessSync(dd, fs.constants.W_OK);
+      dataDirMode = "portable";
+      return dd;
+    } catch {
+      // exe dir not writable (e.g. read-only media) — fall through to userData.
+      // Logged in boot(): the user's data will NOT travel with the folder.
+      dataDirMode = "portable-fallback";
     }
-    check();
+  }
+  const dd = app.getPath("userData");
+  fs.mkdirSync(dd, { recursive: true });
+  return dd;
+}
+
+/** Generate the server-side JWT secret once and reuse it (same posture as a
+ * self-host .env JWT_SECRET). */
+function getOrCreateSecret() {
+  const p = path.join(dataDir, "secret");
+  try {
+    const s = fs.readFileSync(p, "utf8").trim();
+    if (s.length >= 32) return s;
+    logLine(`[main] secret file is truncated (${s.length} chars) — regenerating; all sessions will be logged out`);
+  } catch (err) {
+    // ENOENT is the normal first-run case; anything else (permissions, I/O)
+    // must be visible — regenerating silently logs every user out.
+    if (err.code !== "ENOENT") {
+      logLine(`[main] could not read secret file (${err.message}) — regenerating; all sessions will be logged out`);
+    }
+  }
+  const s = crypto.randomBytes(32).toString("hex");
+  fs.writeFileSync(p, s, { mode: 0o600 });
+  return s;
+}
+
+function loadSettings() {
+  const p = path.join(dataDir, "settings.json");
+  try {
+    return JSON.parse(fs.readFileSync(p, "utf8"));
+  } catch (err) {
+    if (err.code !== "ENOENT") {
+      // Corrupt/unreadable — keep the evidence, because boot() saves defaults
+      // right over this file.
+      try {
+        fs.copyFileSync(p, p + ".corrupt");
+      } catch {
+        /* nothing to back up */
+      }
+      logLine(`[main] settings.json unreadable (${err.message}) — backed up to settings.json.corrupt, using defaults`);
+    }
+    return { closeToTray: true };
+  }
+}
+
+function saveSettings() {
+  try {
+    fs.writeFileSync(path.join(dataDir, "settings.json"), JSON.stringify(settings, null, 2));
+  } catch (err) {
+    logLine(`[main] failed to save settings.json: ${err.message}`);
+  }
+}
+
+// ─── Logging ───
+
+function openLog() {
+  const logDir = path.join(dataDir, "logs");
+  fs.mkdirSync(logDir, { recursive: true });
+  logFile = path.join(logDir, "server.log");
+  try {
+    if (fs.existsSync(logFile) && fs.statSync(logFile).size > LOG_MAX_BYTES) {
+      fs.renameSync(logFile, logFile + ".old");
+    }
+  } catch {
+    /* ignore rotation errors */
+  }
+  logStream = fs.createWriteStream(logFile, { flags: "a" });
+}
+
+function logLine(line) {
+  const text = line.toString();
+  for (const l of text.split(/\r?\n/)) {
+    if (!l) continue;
+    logRing.push(l);
+    if (logRing.length > 200) logRing.shift();
+  }
+  if (logStream) logStream.write(text.endsWith("\n") ? text : text + "\n");
+}
+
+// ─── Server lifecycle ───
+
+function findFreePort() {
+  return new Promise((resolve, reject) => {
+    const srv = net.createServer();
+    srv.on("error", reject);
+    srv.listen(0, "127.0.0.1", () => {
+      const { port } = srv.address();
+      srv.close(() => resolve(port));
+    });
   });
 }
 
-function startServers() {
+function writeRuntimeJson(status) {
+  try {
+    fs.writeFileSync(
+      path.join(dataDir, "runtime.json"),
+      JSON.stringify(
+        { status, port: serverPort, url: serverUrl, pid: serverProcess ? serverProcess.pid : null, dataDir, dataDirMode, updatedAt: new Date().toISOString() },
+        null,
+        2,
+      ),
+    );
+  } catch {
+    /* best effort — used for debugging/tests */
+  }
+}
+
+function startServer() {
+  const dbPath = path.join(dataDir, "campfire.db").replace(/\\/g, "/");
   const env = {
     ...process.env,
-    PORT: String(APP_PORT),
-    SOCKET_PORT: String(SOCKET_PORT),
-    NEXT_PUBLIC_SOCKET_URL: `http://localhost:${SOCKET_PORT}`,
-    NEXT_PUBLIC_APP_URL: `http://localhost:${APP_PORT}`,
+    ELECTRON_RUN_AS_NODE: "1",
+    NODE_ENV: "production",
+    CAMPFIRE_PARENT_PID: String(process.pid),
+    PORT: String(serverPort),
+    DATABASE_URL: `file:${dbPath}`,
+    JWT_SECRET: jwtSecret,
+    CAMPFIRE_UPLOAD_DIR: dataDir,
+    CAMPFIRE_MIGRATIONS_DIR: MIGRATIONS_DIR,
   };
+  // Never let a stale two-port dev URL leak into the single-port desktop client.
+  delete env.NEXT_PUBLIC_SOCKET_URL;
+  delete env.NEXT_PUBLIC_APP_URL;
 
-  if (IS_DEV) {
-    // Dev mode: use next dev + tsx watch
-    serverProcess = spawn("npx", ["next", "dev", "--port", String(APP_PORT)], {
-      cwd: SERVER_DIR,
-      env,
-      shell: true,
-      stdio: "pipe",
-    });
-
-    realtimeProcess = spawn("npx", ["tsx", "watch", "realtime/server.ts"], {
-      cwd: SERVER_DIR,
-      env,
-      shell: true,
-      stdio: "pipe",
-    });
-  } else {
-    // Production: use standalone Next.js server
-    const serverEntry = path.join(SERVER_DIR, "server.js");
-    serverProcess = spawn(process.execPath === app.getPath("exe") ? "node" : process.execPath, [serverEntry], {
-      cwd: SERVER_DIR,
-      env,
-      shell: false,
-      stdio: "pipe",
-    });
-
-    const realtimeEntry = path.join(SERVER_DIR, "realtime", "server.js");
-    realtimeProcess = spawn("node", [realtimeEntry], {
-      cwd: SERVER_DIR,
-      env,
-      shell: false,
-      stdio: "pipe",
-    });
-  }
-
-  // Log server output for debugging
-  [serverProcess, realtimeProcess].forEach((proc, i) => {
-    const label = i === 0 ? "[web]" : "[realtime]";
-    if (proc.stdout) proc.stdout.on("data", (d) => console.log(`${label} ${d}`));
-    if (proc.stderr) proc.stderr.on("data", (d) => console.error(`${label} ${d}`));
-    proc.on("error", (err) => console.error(`${label} spawn error:`, err));
+  serverProcess = spawn(process.execPath, [SERVER_ENTRY], {
+    cwd: SERVER_DIR,
+    env,
+    windowsHide: true,
+    stdio: ["ignore", "pipe", "pipe"],
   });
+
+  serverProcess.stdout.on("data", logLine);
+  serverProcess.stderr.on("data", logLine);
+  serverProcess.on("error", (err) => logLine(`[main] server spawn error: ${err.message}`));
+  serverProcess.on("exit", (code, signal) => {
+    logLine(`[main] server exited (code=${code}, signal=${signal})`);
+    const crashed = !app.isQuitting;
+    serverProcess = null;
+    // During boot, waitForHttp's timeout owns error reporting — two competing
+    // dialogs (crash + startup) would race and double-restart the server.
+    if (crashed && bootComplete) handleServerCrash(code);
+  });
+
+  writeRuntimeJson("starting");
 }
 
-function killServers() {
-  [serverProcess, realtimeProcess].forEach((proc) => {
-    if (proc && !proc.killed) {
-      proc.kill("SIGTERM");
-      setTimeout(() => { if (!proc.killed) proc.kill("SIGKILL"); }, 3000);
-    }
-  });
+function killServer() {
+  const proc = serverProcess;
   serverProcess = null;
-  realtimeProcess = null;
+  if (!proc || proc.exitCode !== null || proc.signalCode !== null) return;
+  proc.kill();
+  // Windows: if it hasn't died in 3s, force-kill the whole tree.
+  setTimeout(() => {
+    if (proc.exitCode === null && proc.signalCode === null && proc.pid) {
+      if (process.platform === "win32") {
+        try {
+          spawn("taskkill", ["/pid", String(proc.pid), "/T", "/F"], { windowsHide: true });
+        } catch {
+          /* ignore */
+        }
+      } else {
+        try {
+          proc.kill("SIGKILL");
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+  }, 3000);
 }
 
-// ─── Window Management ───
+function waitForHttp(port, timeout) {
+  return new Promise((resolve, reject) => {
+    const start = Date.now();
+    const attempt = () => {
+      const req = http.get({ host: "127.0.0.1", port, path: "/", timeout: 2000 }, (res) => {
+        res.resume();
+        resolve();
+      });
+      req.on("error", retry);
+      req.on("timeout", () => {
+        req.destroy();
+        retry();
+      });
+    };
+    const retry = () => {
+      if (Date.now() - start > timeout) return reject(new Error(`Server did not respond within ${timeout}ms`));
+      setTimeout(attempt, 300);
+    };
+    attempt();
+  });
+}
 
-function createSplashWindow() {
+function restartServer() {
+  killServer();
+  setTimeout(() => {
+    startServer();
+    waitForHttp(serverPort, STARTUP_TIMEOUT_MS)
+      .then(() => {
+        writeRuntimeJson("ready");
+        if (mainWindow) mainWindow.reload();
+      })
+      .catch(() => showStartupError());
+  }, 500);
+}
+
+function handleServerCrash(code) {
+  const detail = `The Campfire server stopped unexpectedly (exit code ${code}).\n\nLog file:\n${logFile}\n\nRecent log:\n${logRing.slice(-20).join("\n")}`;
+  const choice = dialog.showMessageBoxSync(mainWindow || undefined, {
+    type: "error",
+    title: "Campfire",
+    message: "Campfire's local server stopped.",
+    detail,
+    buttons: ["Restart Campfire", "Quit"],
+    defaultId: 0,
+    cancelId: 1,
+    noLink: true,
+  });
+  if (choice === 0) restartServer();
+  else {
+    app.isQuitting = true;
+    app.quit();
+  }
+}
+
+function showStartupError() {
+  writeRuntimeJson("error");
+  if (splashWindow) {
+    splashWindow.close();
+    splashWindow = null;
+  }
+  dialog.showMessageBoxSync({
+    type: "error",
+    title: "Campfire",
+    message: "Campfire could not start.",
+    detail: `The local server did not come up in time.\n\nLog file:\n${logFile}\n\nRecent log:\n${logRing.slice(-20).join("\n")}`,
+    buttons: ["Quit"],
+    noLink: true,
+  });
+  app.isQuitting = true;
+  app.quit();
+}
+
+// ─── Windows ───
+
+function createSplash() {
   splashWindow = new BrowserWindow({
     width: 300,
     height: 350,
@@ -121,128 +321,261 @@ function createSplashWindow() {
     transparent: true,
     resizable: false,
     alwaysOnTop: true,
-    webPreferences: { nodeIntegration: false, contextIsolation: true },
+    show: true,
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
   });
   splashWindow.loadFile(path.join(__dirname, "splash.html"));
   splashWindow.center();
 }
 
+function iconPath() {
+  const dir = path.join(__dirname, "icons");
+  if (process.platform === "win32") return path.join(dir, "icon.ico");
+  if (process.platform === "darwin") return path.join(dir, "icon.png");
+  return path.join(dir, "icon.png");
+}
+
+function isLocalUrl(url) {
+  try {
+    const u = new URL(url);
+    return (
+      (u.hostname === "127.0.0.1" || u.hostname === "localhost") &&
+      Number(u.port) === serverPort &&
+      (u.protocol === "http:" || u.protocol === "https:")
+    );
+  } catch {
+    return false;
+  }
+}
+
+function openExternalSafe(url) {
+  if (/^https?:\/\//i.test(url)) shell.openExternal(url);
+}
+
 function createMainWindow() {
+  let b = settings.bounds || {};
+  // Saved position may be on a monitor that's gone (undocked laptop). Electron
+  // restores it verbatim → invisible window with no recovery UI. Drop x/y and
+  // let Electron center if the saved rect doesn't intersect any display.
+  const onScreen =
+    b.width &&
+    b.height &&
+    screen.getAllDisplays().some((d) => {
+      const wa = d.workArea;
+      return b.x < wa.x + wa.width && b.x + b.width > wa.x && b.y < wa.y + wa.height && b.y + b.height > wa.y;
+    });
+  if (!onScreen) b = { width: b.width, height: b.height };
   mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 800,
-    minWidth: 900,
-    minHeight: 600,
+    width: b.width || 1280,
+    height: b.height || 800,
+    x: b.x,
+    y: b.y,
+    minWidth: MIN_WIDTH,
+    minHeight: MIN_HEIGHT,
     title: "Campfire",
-    icon: getIconPath(),
+    icon: iconPath(),
     show: false,
-    backgroundColor: "#1a1a2e",
+    backgroundColor: "#17110d",
+    autoHideMenuBar: true,
     webPreferences: {
-      nodeIntegration: false,
       contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
       preload: path.join(__dirname, "preload.js"),
     },
   });
+  mainWindow.removeMenu();
 
-  mainWindow.loadURL(`http://localhost:${APP_PORT}`);
+  mainWindow.loadURL(serverUrl);
 
-  // Open external links in browser
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith("http")) shell.openExternal(url);
-    return { action: "deny" };
-  });
-
-  mainWindow.on("ready-to-show", () => {
+  mainWindow.once("ready-to-show", () => {
     if (splashWindow) {
       splashWindow.close();
       splashWindow = null;
     }
+    if (settings.maximized) mainWindow.maximize();
     mainWindow.show();
     mainWindow.focus();
   });
 
+  // Keep the app to the local server; open anything else in the real browser.
+  mainWindow.webContents.on("will-navigate", (e, url) => {
+    if (!isLocalUrl(url)) {
+      e.preventDefault();
+      openExternalSafe(url);
+    }
+  });
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    openExternalSafe(url);
+    return { action: "deny" };
+  });
+
+  const persistBounds = () => {
+    if (!mainWindow) return;
+    clearTimeout(saveBoundsTimer);
+    saveBoundsTimer = setTimeout(() => {
+      if (!mainWindow) return;
+      settings.maximized = mainWindow.isMaximized();
+      if (!mainWindow.isMaximized() && !mainWindow.isMinimized()) {
+        settings.bounds = mainWindow.getBounds();
+      }
+      saveSettings();
+    }, 400);
+  };
+  mainWindow.on("resize", persistBounds);
+  mainWindow.on("move", persistBounds);
+
   mainWindow.on("close", (e) => {
-    // Minimize to tray on close (Windows/Linux behavior)
-    if (process.platform !== "darwin" && tray) {
+    if (settings.closeToTray && !app.isQuitting) {
       e.preventDefault();
       mainWindow.hide();
     }
   });
-
   mainWindow.on("closed", () => {
     mainWindow = null;
   });
-
-  // Remove menu bar on Windows/Linux
-  if (process.platform !== "darwin") {
-    mainWindow.setMenuBarVisibility(false);
-  }
 }
 
-function getIconPath() {
-  const iconDir = path.join(__dirname, "icons");
-  if (process.platform === "win32") return path.join(iconDir, "icon.ico");
-  if (process.platform === "darwin") return path.join(iconDir, "icon.icns");
-  return path.join(iconDir, "icon.png");
-}
+// ─── Tray ───
 
 function createTray() {
-  const iconPath = path.join(__dirname, "icons", "tray-icon.png");
   try {
-    const icon = nativeImage.createFromPath(iconPath).resize({ width: 16, height: 16 });
-    tray = new Tray(icon);
-    tray.setToolTip("Campfire");
-
-    const contextMenu = Menu.buildFromTemplate([
-      { label: "Show Campfire", click: () => mainWindow?.show() },
-      { type: "separator" },
-      { label: "Quit", click: () => { app.isQuitting = true; app.quit(); } },
-    ]);
-    tray.setContextMenu(contextMenu);
-    tray.on("double-click", () => mainWindow?.show());
-  } catch {
-    // Tray icon not available, skip
+    const img = nativeImage.createFromPath(path.join(__dirname, "icons", "tray-icon.png"));
+    tray = new Tray(img.isEmpty() ? iconPath() : img);
+  } catch (err) {
+    // No tray = no way to unhide or quit a hidden window. Make close actually
+    // quit for this session (don't persist — the user's preference stands).
+    logLine(`[main] tray unavailable (${err.message}) — close button will quit`);
+    settings.closeToTray = false;
+    return;
   }
+  tray.setToolTip("Campfire");
+  refreshTrayMenu();
+  tray.on("double-click", showMainWindow);
 }
 
-// ─── App Lifecycle ───
+function refreshTrayMenu() {
+  if (!tray) return;
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      { label: "Open Campfire", click: showMainWindow },
+      { type: "separator" },
+      {
+        label: "Close button quits",
+        type: "checkbox",
+        checked: settings.closeToTray === false,
+        click: (item) => {
+          settings.closeToTray = !item.checked;
+          saveSettings();
+          refreshTrayMenu();
+        },
+      },
+      { type: "separator" },
+      {
+        label: "Quit Campfire",
+        click: () => {
+          app.isQuitting = true;
+          app.quit();
+        },
+      },
+    ]),
+  );
+}
 
-app.whenReady().then(async () => {
-  createSplashWindow();
-  startServers();
+function showMainWindow() {
+  if (!mainWindow) {
+    createMainWindow();
+    return;
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+// ─── Boot ───
+
+async function boot() {
+  Menu.setApplicationMenu(null);
+  dataDir = resolveDataDir();
+  openLog(); // first, so everything after has a log to land in
+  logLine(`[main] data dir: ${dataDir} (${dataDirMode})`);
+  if (dataDirMode === "portable-fallback") {
+    logLine("[main] WARNING: portable.txt is present but the app folder is not writable — data is stored per-user and will NOT move with the folder");
+  }
+  jwtSecret = getOrCreateSecret();
+  settings = loadSettings();
+  if (typeof settings.closeToTray !== "boolean") settings.closeToTray = true;
+  saveSettings(); // persist resolved defaults on first run; bounds are added later
+
+  createSplash();
 
   try {
-    await Promise.all([
-      waitForPort(APP_PORT),
-      waitForPort(SOCKET_PORT),
-    ]);
+    serverPort = await findFreePort();
   } catch (err) {
-    console.error("Server startup failed:", err);
-    if (splashWindow) splashWindow.close();
-    app.quit();
+    // listen(0) basically never fails; a hardcoded fallback port could belong
+    // to a foreign server the window would then happily load. Fail visibly.
+    logLine(`[main] could not allocate a local port: ${err.message}`);
+    showStartupError();
+    return;
+  }
+  serverUrl = `http://127.0.0.1:${serverPort}`;
+  writeRuntimeJson("starting");
+
+  startServer();
+
+  try {
+    await waitForHttp(serverPort, STARTUP_TIMEOUT_MS);
+  } catch {
+    showStartupError();
     return;
   }
 
+  bootComplete = true;
+  writeRuntimeJson("ready");
   createTray();
   createMainWindow();
-});
+}
 
-app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") {
-    killServers();
-    app.quit();
+function bootFailed(err) {
+  // Pre-splash failures would otherwise be an app that "just doesn't launch".
+  try {
+    logLine(`[main] boot failed: ${err.stack || err.message}`);
+  } catch {
+    /* logging may itself be what failed */
   }
-});
-
-app.on("activate", () => {
-  if (mainWindow) {
-    mainWindow.show();
-  } else {
-    createMainWindow();
-  }
-});
-
-app.on("before-quit", () => {
+  dialog.showMessageBoxSync({
+    type: "error",
+    title: "Campfire",
+    message: "Campfire could not start.",
+    detail: `${err.message}\n\n${logFile ? `Log file:\n${logFile}` : "No log file could be created."}`,
+    buttons: ["Quit"],
+    noLink: true,
+  });
   app.isQuitting = true;
-  killServers();
-});
+  app.quit();
+}
+
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) {
+  app.quit();
+} else {
+  app.on("second-instance", showMainWindow);
+
+  app.whenReady().then(() => boot().catch(bootFailed));
+
+  app.on("activate", () => {
+    if (BrowserWindow.getAllWindows().length === 0) createMainWindow();
+    else showMainWindow();
+  });
+
+  app.on("window-all-closed", () => {
+    // With closeToTray the window only hides, so this fires only when the user
+    // actually chose to quit (closeToTray off, or quitting via tray).
+    if (process.platform !== "darwin") app.quit();
+  });
+
+  app.on("before-quit", () => {
+    app.isQuitting = true;
+    killServer();
+  });
+}

@@ -6,7 +6,11 @@ import { writeFile, mkdir } from "fs/promises";
 import path from "path";
 import crypto from "crypto";
 
-const UPLOAD_DIR = path.join(process.cwd(), "public", "uploads");
+// Uploads are written under public/ so Next serves them at /uploads/*. The
+// desktop build sets CAMPFIRE_UPLOAD_DIR to a writable data dir (the app
+// folder is read-only when installed) and serves /uploads/* from there.
+const UPLOAD_BASE = process.env.CAMPFIRE_UPLOAD_DIR || path.join(process.cwd(), "public");
+const UPLOAD_DIR = path.join(UPLOAD_BASE, "uploads");
 const FREE_MAX_SIZE = 10 * 1024 * 1024; // 10MB (free tier)
 const PREMIUM_MAX_SIZE = 100 * 1024 * 1024; // 100MB (premium "extended_upload")
 // Headroom for multipart envelope (boundaries, headers, filename) so a file at

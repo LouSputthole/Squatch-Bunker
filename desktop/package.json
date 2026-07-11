@@ -1,86 +1,63 @@
 {
   "name": "campfire-desktop",
-  "version": "0.0.5",
-  "description": "Campfire — Discord-like voice & text chat (desktop app)",
+  "version": "0.0.2",
+  "description": "Campfire — Discord-like voice & text chat (portable Windows desktop app)",
   "main": "main.js",
-  "author": "Campfire Team",
-  "license": "MIT",
+  "author": "Squatch Bunker",
+  "license": "AGPL-3.0-only",
   "scripts": {
     "start": "electron .",
-    "dev": "NODE_ENV=development electron .",
-    "build:web": "cd ../squatch-chat && pnpm build",
-    "pack": "electron-builder --dir",
-    "dist": "electron-builder",
-    "dist:win": "electron-builder --win",
-    "dist:mac": "electron-builder --mac",
-    "dist:linux": "electron-builder --linux"
-  },
-  "dependencies": {
-    "electron-is-dev": "^2.0.0"
+    "icons": "node scripts/make-icons.mjs",
+    "build:all": "node build-desktop.mjs",
+    "build:portable": "node build-desktop.mjs --portable",
+    "build:installer": "node build-desktop.mjs --installer"
   },
   "devDependencies": {
-    "electron": "^35.0.0",
-    "electron-builder": "^26.0.0"
+    "@electron/rebuild": "^4.0.1",
+    "electron": "^35.7.5",
+    "electron-builder": "^26.0.12",
+    "esbuild": "^0.28.1"
   },
   "build": {
-    "appId": "com.campfire.chat",
+    "appId": "com.squatchbunker.campfire",
     "productName": "Campfire",
+    "copyright": "© 2026 Squatch Bunker",
+    "artifactName": "${productName}-${version}-${arch}.${ext}",
+    "directories": {
+      "output": "dist",
+      "buildResources": "icons"
+    },
     "files": [
       "main.js",
       "preload.js",
       "splash.html",
-      "icons/**/*"
+      "icons/icon.ico",
+      "icons/icon.png",
+      "icons/tray-icon.png"
     ],
     "extraResources": [
-      {
-        "from": "../squatch-chat/.next/standalone",
-        "to": "server",
-        "filter": ["**/*"]
-      },
-      {
-        "from": "../squatch-chat/.next/static",
-        "to": "server/.next/static",
-        "filter": ["**/*"]
-      },
-      {
-        "from": "../squatch-chat/public",
-        "to": "server/public",
-        "filter": ["**/*"]
-      },
-      {
-        "from": "../squatch-chat/realtime",
-        "to": "server/realtime",
-        "filter": ["**/*"]
-      },
-      {
-        "from": "../squatch-chat/prisma",
-        "to": "server/prisma",
-        "filter": ["**/*"]
-      }
+      { "from": "../squatch-chat/.next/standalone", "to": "server" },
+      { "from": "../squatch-chat/.next/standalone/node_modules", "to": "server/node_modules" },
+      { "from": "../squatch-chat/.next/standalone/.next/node_modules", "to": "server/.next/node_modules" },
+      { "from": "../squatch-chat/.next/static", "to": "server/.next/static" },
+      { "from": "../squatch-chat/public", "to": "server/public" },
+      { "from": "db-migrations", "to": "db-migrations" }
     ],
     "win": {
-      "target": ["nsis"],
+      "target": ["dir", "nsis"],
       "icon": "icons/icon.ico"
     },
     "nsis": {
       "oneClick": false,
+      "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "installerIcon": "icons/icon.ico",
       "uninstallerIcon": "icons/icon.ico",
       "installerHeaderIcon": "icons/icon.ico",
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Campfire"
-    },
-    "mac": {
-      "target": ["dmg"],
-      "icon": "icons/icon.icns",
-      "category": "public.app-category.social-networking"
-    },
-    "linux": {
-      "target": ["AppImage", "deb"],
-      "icon": "icons",
-      "category": "Network;Chat"
+      "shortcutName": "Campfire",
+      "artifactName": "Campfire-Setup-${version}-${arch}.${ext}"
     }
   }
 }

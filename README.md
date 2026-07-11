@@ -43,9 +43,12 @@ For Postgres, migrations, Docker, and the full tech stack, see
 
 ## Desktop app
 
-[`desktop/`](./desktop) is an Electron wrapper that packages the web app as
-a native desktop installer (Windows/macOS/Linux). It bundles the same
-`squatch-chat` server internally — see [desktop/README.md](./desktop/README.md).
+[`desktop/`](./desktop) packages Campfire as a **portable Windows app** that
+runs with no install and **no Node.js** — Electron boots the same
+`squatch-chat` server with its own embedded Node (`ELECTRON_RUN_AS_NODE`) on a
+single dynamic port. Ships as a portable folder (unzip and run; data lives in
+`data\` beside the exe) and an NSIS installer. Build with `cd desktop && npm
+install && npm run build:all`. See [desktop/README.md](./desktop/README.md).
 
 ## License
 
