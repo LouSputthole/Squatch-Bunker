@@ -60,22 +60,29 @@ Mesh voice is fine at friends scale and stays the self-host default forever
 
 Gate every box before taking money:
 
-- [ ] **Regenerate Prisma migrations against Postgres** — the committed
-      migration history is Postgres-drifted; a fresh hosted DB must
-      `prisma migrate deploy` cleanly (known issue, tracked since the
-      2026-06-28 security pass)
-- [ ] Webhook idempotency moved from in-memory to a DB table (multi-node +
-      restart safety); friendship dup-race re-checked on Postgres
+- [x] **Regenerate Prisma migrations against Postgres** — history squashed
+      into one init migration; verified on a fresh Postgres: deploys clean,
+      `migrate diff` reports no drift (2026-07-11)
+- [x] Webhook idempotency moved from in-memory to a DB table
+      (`WebhookEvent` claim protocol, race-safe takeover, route +
+      protocol tests; 2026-07-11)
+- [x] Friendship dup-race on Postgres closed: direction-agnostic unique
+      expression index (migration 20260711000002); reversed-pair insert
+      verified rejected on a live Postgres, `migrate diff` stays quiet
+      about it (2026-07-11)
 - [ ] Deploy: docs/DEPLOY.md recipe on real infra + managed Postgres,
       nightly `pg_dump` + uploads snapshot, restore drill performed once
 - [ ] Stripe live keys, live webhook signing secret, portal configured
 - [ ] Terms of Service + Privacy Policy pages (AGPL source link in footer
       satisfies §13 network-use clause)
 - [ ] Status/uptime page (even a bare one)
-- [ ] Load sanity: 200 concurrent socket clients on one box (vitest
-      harness exists for the socket layer; extend, don't rewrite)
-- [ ] Abuse basics: registration rate-limit exists — add upload-volume cap
-      per account and a report-user endpoint before public signup
+- [x] Load sanity: 200 concurrent socket clients on one box — measured
+      2026-07-11 (`tests/load-sanity.test.ts`, gated `LOAD_TEST=1`):
+      connect 276ms, 1→199 fan-out 61ms, 20-sender burst (3,980
+      deliveries) 125ms. Nowhere near a ceiling at this scale.
+- [x] Abuse basics: per-account upload caps (30 files / 500MB per hour) and
+      `POST /api/reports` (validated, deduped, 5/hr) shipped 2026-07-11;
+      registration rate-limit already existed
 
 ## Open questions (owner decisions, non-blocking to build)
 

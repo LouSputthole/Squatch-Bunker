@@ -1,0 +1,11 @@
+-- Reciprocal friend requests race on multi-connection Postgres: A→B and B→A
+-- can both pass the route's transactional existence check (SQLite serializes
+-- everything on its single connection; Postgres does not), and the
+-- (requesterId, addresseeId) unique key does not block the REVERSED pair.
+-- A friendship pair is unique regardless of direction, so enforce exactly
+-- that. Violations surface as Prisma P2002, which the friends route already
+-- converts to a graceful 409.
+-- (Expression indexes aren't expressible in the Prisma schema; the SQLite
+-- self-host path doesn't need one — its single connection serializes the
+-- check-then-insert.)
+CREATE UNIQUE INDEX "Friendship_pair_key" ON "Friendship" (LEAST("requesterId", "addresseeId"), GREATEST("requesterId", "addresseeId"));

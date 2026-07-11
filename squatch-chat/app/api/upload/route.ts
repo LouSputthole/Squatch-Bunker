@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { getTier, hasFeature } from "@/lib/features";
+import { checkWeightedLimit } from "@/lib/rateLimit";
 import { writeFile, mkdir } from "fs/promises";
 import path from "path";
 import crypto from "crypto";
@@ -13,6 +14,11 @@ const UPLOAD_BASE = process.env.CAMPFIRE_UPLOAD_DIR || path.join(process.cwd(), 
 const UPLOAD_DIR = path.join(UPLOAD_BASE, "uploads");
 const FREE_MAX_SIZE = 10 * 1024 * 1024; // 10MB (free tier)
 const PREMIUM_MAX_SIZE = 100 * 1024 * 1024; // 100MB (premium "extended_upload")
+// Per-account hourly abuse brakes (all tiers — generous for humans, a wall
+// for scripts). In-memory: see checkWeightedLimit's multi-node note.
+const UPLOADS_PER_HOUR = 30;
+const UPLOAD_BYTES_PER_HOUR = 500 * 1024 * 1024; // 500MB
+const HOUR_MS = 60 * 60 * 1000;
 // Headroom for multipart envelope (boundaries, headers, filename) so a file at
 // exactly the cap isn't rejected by the raw body-size gate.
 const MULTIPART_OVERHEAD = 64 * 1024; // 64KB
@@ -102,6 +108,20 @@ export async function POST(req: NextRequest) {
     const ext = ALLOWED_TYPES[file.type];
     if (!ext) {
       return NextResponse.json({ error: "File type not allowed." }, { status: 400 });
+    }
+
+    // Per-account hourly volume caps (count + bytes) so one account can't
+    // fill the disk. Checked after validation so rejected uploads don't burn
+    // budget; bytes weight is the real file size, not Content-Length.
+    const countLimit = checkWeightedLimit(`upload-count:${session.userId}`, 1, UPLOADS_PER_HOUR, HOUR_MS);
+    const bytesLimit = countLimit.allowed
+      ? checkWeightedLimit(`upload-bytes:${session.userId}`, file.size, UPLOAD_BYTES_PER_HOUR, HOUR_MS)
+      : countLimit;
+    if (!countLimit.allowed || !bytesLimit.allowed) {
+      return NextResponse.json(
+        { error: "Upload limit reached. Try again later." },
+        { status: 429 }
+      );
     }
 
     await mkdir(UPLOAD_DIR, { recursive: true });

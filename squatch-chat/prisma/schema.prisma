@@ -8,43 +8,45 @@ datasource db {
 }
 
 model User {
-  id             String    @id @default(uuid())
-  email          String    @unique
-  username       String    @unique
-  passwordHash   String
-  avatar         String?
-  banner         String?
-  bio            String?
-  statusMessage  String?
-  isGuest        Boolean   @default(false)
-  guestExpiresAt DateTime?
-  tier           String    @default("free")
-  tierExpiresAt  DateTime?
-  tokenVersion   Int       @default(0)
+  id                   String    @id @default(uuid())
+  email                String    @unique
+  username             String    @unique
+  passwordHash         String
+  avatar               String?
+  banner               String?
+  bio                  String?
+  statusMessage        String?
+  isGuest              Boolean   @default(false)
+  guestExpiresAt       DateTime?
+  tier                 String    @default("free")
+  tierExpiresAt        DateTime?
+  tokenVersion         Int       @default(0)
   stripeCustomerId     String?
   stripeSubscriptionId String?
   subscriptionStatus   String?
-  resetToken     String?
-  resetExpiry    DateTime?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  resetToken           String?
+  resetExpiry          DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
 
-  memberships    ServerMember[]
-  messages       Message[]
-  reactions      Reaction[]
-  bookmarks      Bookmark[]
-  ownedServers   Server[]
-  conversations1 Conversation[]          @relation("ConvUser1")
-  conversations2 Conversation[]          @relation("ConvUser2")
-  directMessages DirectMessage[]
-  sentRequests   Friendship[]   @relation("FriendRequester")
-  recvRequests   Friendship[]   @relation("FriendAddressee")
+  memberships             ServerMember[]
+  messages                Message[]
+  reactions               Reaction[]
+  bookmarks               Bookmark[]
+  ownedServers            Server[]
+  conversations1          Conversation[]           @relation("ConvUser1")
+  conversations2          Conversation[]           @relation("ConvUser2")
+  directMessages          DirectMessage[]
+  sentRequests            Friendship[]             @relation("FriendRequester")
+  recvRequests            Friendship[]             @relation("FriendAddressee")
   dmReactions             DirectMessageReaction[]
   oauthAccounts           OAuthAccount[]
   scheduledMessages       ScheduledMessage[]
   notificationPreferences NotificationPreference[]
-  authoredNotes           UserNote[] @relation("NoteAuthor")
-  targetedNotes           UserNote[] @relation("NoteTarget")
+  authoredNotes           UserNote[]               @relation("NoteAuthor")
+  targetedNotes           UserNote[]               @relation("NoteTarget")
+  reportsFiled            Report[]                 @relation("ReportsFiled")
+  reportsAgainst          Report[]                 @relation("ReportsAgainst")
 }
 
 model OAuthAccount {
@@ -60,13 +62,13 @@ model OAuthAccount {
 }
 
 model Server {
-  id          String   @id @default(uuid())
-  name        String
-  icon        String?
-  banner      String?
-  ownerId     String
-  createdAt   DateTime @default(now())
-  inviteCode  String   @unique @default(uuid())
+  id                String   @id @default(uuid())
+  name              String
+  icon              String?
+  banner            String?
+  ownerId           String
+  createdAt         DateTime @default(now())
+  inviteCode        String   @unique @default(uuid())
   isPublic          Boolean  @default(false)
   description       String?
   welcomeMessage    String?
@@ -81,7 +83,7 @@ model Server {
   roles        Role[]
   sounds       Sound[]
 
-  soundscape   String?
+  soundscape String?
 }
 
 model Sound {
@@ -89,7 +91,7 @@ model Sound {
   serverId  String
   name      String
   emoji     String   @default("🔊")
-  dataUrl   String   // base64 data URL of the uploaded clip (<= 8s)
+  dataUrl   String // base64 data URL of the uploaded clip (<= 8s)
   createdBy String
   createdAt DateTime @default(now())
 
@@ -102,7 +104,7 @@ model Role {
   name        String
   color       String   @default("#99aab5")
   permissions String   @default("[]") // JSON array of permission keys
-  position    Int      @default(0)     // higher = more senior
+  position    Int      @default(0) // higher = more senior
   isDefault   Boolean  @default(false) // the base @everyone-style role
   createdAt   DateTime @default(now())
 
@@ -357,4 +359,32 @@ model UserNote {
   targetUser User @relation("NoteTarget", fields: [targetUserId], references: [id])
 
   @@unique([authorId, targetUserId])
+}
+
+// Stripe webhook idempotency: one row per delivered event id. A row is a
+// processing claim; status flips to "done" after the handler succeeds. Rows
+// are tiny and unbounded — truncate periodically if it ever matters.
+model WebhookEvent {
+  id        String   @id
+  status    String   @default("processing") // "processing" | "done"
+  updatedAt DateTime @updatedAt
+}
+
+// Abuse reports: users flag a user (optionally a specific message) for the
+// instance operator. v1 has no in-app review UI — operators read/update rows
+// directly (Prisma Studio); the shape is what the future admin UI will need.
+model Report {
+  id           String   @id @default(uuid())
+  reporterId   String
+  targetUserId String
+  messageId    String?
+  reason       String
+  status       String   @default("open") // "open" | "resolved" | "dismissed"
+  createdAt    DateTime @default(now())
+
+  reporter   User @relation("ReportsFiled", fields: [reporterId], references: [id], onDelete: Cascade)
+  targetUser User @relation("ReportsAgainst", fields: [targetUserId], references: [id], onDelete: Cascade)
+
+  @@index([targetUserId, status])
+  @@index([reporterId])
 }
