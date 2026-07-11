@@ -48,8 +48,11 @@ run on this machine. The internet is only touched for:
 - **GIF picker** — optional, only if `GIPHY_API_KEY` / `TENOR_API_KEY` are set
   (off by default; the picker just shows a hint otherwise).
 - **OAuth login & Stripe** — optional, only if you configure those providers.
+- **Update check** — one GET to `api.github.com` for the latest release tag
+  (15s after launch, packaged builds only, plus the tray's "Check for
+  updates…"). Version compare only; nothing is downloaded or sent.
 
-No telemetry, no auto-update calls.
+No telemetry.
 
 ## Build
 
@@ -104,12 +107,37 @@ back to `%APPDATA%\Campfire\`. When that happens it's logged as a WARNING in
 `logs\server.log` and `runtime.json` reports `"dataDirMode": "portable-fallback"`
 — the data will NOT travel with the folder until the write issue is fixed.
 
+## LAN sharing
+
+Off by default (the server binds `127.0.0.1`). Tray → **"Share on this
+network"** rebinds the server to `0.0.0.0` on port **3939** (fixed, so the link
+survives restarts; falls back to a random port if 3939 is taken) and the tray
+gains a **Copy LAN link** entry (`http://<your-LAN-IP>:3939`). Friends on the
+same network open that link in a browser and register/log in like any
+self-hosted Campfire.
+
+- Windows Firewall will ask to allow Campfire on first share — click Allow.
+- While sharing is on, anyone on the local network can reach the login page.
+  Auth still gates everything behind it.
+- LAN visitors get text + browsing but **no microphone**: browsers only
+  unlock getUserMedia on secure origins, and LAN sharing is plain HTTP (the
+  hosting machine itself is exempt via `127.0.0.1`). Voice for others =
+  the HTTPS deploy (`squatch-chat/docs/DEPLOY.md`).
+- Internet-wide hosting is the self-host server's job (see the deployment
+  docs), not the desktop app's.
+
 ## Updating
+
+The app checks GitHub for a newer release at launch (packaged builds only) and
+offers Download / Later / Skip-this-version; tray → "Check for updates…" checks
+on demand. Release tags must be `vX.Y.Z` matching `squatch-chat/package.json`'s
+version, which `build-desktop.mjs` stamps into the app via
+`extraMetadata.version`.
 
 - **Portable:** download the new folder and copy your existing `data\` folder
   into it. Migrations run automatically on next launch; only app files change.
-- **Installed:** run the new installer. There is **no auto-updater** yet — by
-  design (no phone-home).
+- **Installed:** run the new installer. There is **no auto-download** — the
+  updater only opens the release page in your browser.
 
 ## Security posture
 
@@ -120,7 +148,8 @@ back to `%APPDATA%\Campfire\`. When that happens it's logged as a WARNING in
   (http/https handed to the browser).
 - The JWT secret is generated once with `crypto.randomBytes(32)` and stored in
   the data dir — same posture as a self-host `.env` secret.
-- The server binds `127.0.0.1` only.
+- The server binds `127.0.0.1` unless "Share on this network" is on, in which
+  case it binds `0.0.0.0` (LAN exposure is the point; auth still applies).
 
 ## Known limitations
 
@@ -128,9 +157,10 @@ back to `%APPDATA%\Campfire\`. When that happens it's logged as a WARNING in
   are wired for `win`/`x64`).
 - **No code signing** — Windows SmartScreen will warn on first run of an
   unsigned exe/installer. (Add a cert under `win.signtoolOptions` to sign.)
-- **No auto-update.** Updates are manual (see above).
-- Sharing across a network is the job of the self-host server build, not the
-  desktop app (which binds localhost).
+- **No auto-download of updates** — the checker only notifies and links to the
+  release page.
+- LAN sharing covers the local network only; internet-wide hosting is the job
+  of the self-host server build (see `docs/`).
 
 ## Troubleshooting
 

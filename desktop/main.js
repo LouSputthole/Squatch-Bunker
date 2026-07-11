@@ -6,11 +6,13 @@
  * portable build runs with NO system Node install. The renderer just loads the
  * local server over a dynamically-chosen port (single-port mode).
  */
-const { app, BrowserWindow, Tray, Menu, shell, dialog, nativeImage, screen } = require("electron");
+const { app, BrowserWindow, Tray, Menu, shell, dialog, nativeImage, screen, clipboard } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const net = require("net");
+const os = require("os");
 const http = require("http");
+const https = require("https");
 const crypto = require("crypto");
 const { spawn } = require("child_process");
 
@@ -27,6 +29,10 @@ const MIN_WIDTH = 940;
 const MIN_HEIGHT = 600;
 const STARTUP_TIMEOUT_MS = 30000;
 const LOG_MAX_BYTES = 2 * 1024 * 1024;
+// Fixed preferred port for LAN sharing so the link friends use survives
+// restarts. Falls back to a random port if something else owns it.
+const LAN_PORT = 3939;
+const UPDATE_REPO = "LouSputthole/Squatch-Bunker";
 
 // ─── State ───
 let mainWindow = null;
@@ -44,6 +50,7 @@ let settings = {};
 let saveBoundsTimer = null;
 let dataDirMode = "installed"; // "portable" | "installed" | "portable-fallback"
 let bootComplete = false;
+let rebinding = false;
 
 app.isQuitting = false;
 
@@ -149,15 +156,43 @@ function logLine(line) {
 
 // ─── Server lifecycle ───
 
-function findFreePort() {
+function listenProbe(port, host) {
   return new Promise((resolve, reject) => {
     const srv = net.createServer();
     srv.on("error", reject);
-    srv.listen(0, "127.0.0.1", () => {
-      const { port } = srv.address();
-      srv.close(() => resolve(port));
+    srv.listen(port, host, () => {
+      const chosen = srv.address().port;
+      srv.close(() => resolve(chosen));
     });
   });
+}
+
+async function pickPort() {
+  if (settings.lanSharing) {
+    try {
+      return await listenProbe(LAN_PORT, "0.0.0.0");
+    } catch {
+      logLine(`[main] preferred LAN port ${LAN_PORT} is busy — using a random port (the LAN link will change)`);
+    }
+    return listenProbe(0, "0.0.0.0");
+  }
+  return listenProbe(0, "127.0.0.1");
+}
+
+/** Best LAN address to hand to friends: prefer private-range IPv4 so a VPN or
+ * virtual adapter doesn't win. ponytail: first match, no NIC ranking beyond this. */
+function lanUrl() {
+  const all = [];
+  for (const list of Object.values(os.networkInterfaces())) {
+    for (const ni of list || []) {
+      if (ni.family === "IPv4" && !ni.internal) all.push(ni.address);
+    }
+  }
+  const pick =
+    all.find((a) => a.startsWith("192.168.")) ||
+    all.find((a) => a.startsWith("10.")) ||
+    all[0];
+  return pick ? `http://${pick}:${serverPort}` : null;
 }
 
 function writeRuntimeJson(status) {
@@ -165,7 +200,7 @@ function writeRuntimeJson(status) {
     fs.writeFileSync(
       path.join(dataDir, "runtime.json"),
       JSON.stringify(
-        { status, port: serverPort, url: serverUrl, pid: serverProcess ? serverProcess.pid : null, dataDir, dataDirMode, updatedAt: new Date().toISOString() },
+        { status, port: serverPort, url: serverUrl, lan: !!settings.lanSharing, lanUrl: settings.lanSharing ? lanUrl() : null, pid: serverProcess ? serverProcess.pid : null, dataDir, dataDirMode, updatedAt: new Date().toISOString() },
         null,
         2,
       ),
@@ -183,6 +218,7 @@ function startServer() {
     NODE_ENV: "production",
     CAMPFIRE_PARENT_PID: String(process.pid),
     PORT: String(serverPort),
+    CAMPFIRE_HOST: settings.lanSharing ? "0.0.0.0" : "127.0.0.1",
     DATABASE_URL: `file:${dbPath}`,
     JWT_SECRET: jwtSecret,
     CAMPFIRE_UPLOAD_DIR: dataDir,
@@ -192,23 +228,30 @@ function startServer() {
   delete env.NEXT_PUBLIC_SOCKET_URL;
   delete env.NEXT_PUBLIC_APP_URL;
 
-  serverProcess = spawn(process.execPath, [SERVER_ENTRY], {
+  const proc = spawn(process.execPath, [SERVER_ENTRY], {
     cwd: SERVER_DIR,
     env,
     windowsHide: true,
     stdio: ["ignore", "pipe", "pipe"],
   });
+  // Expected-exit is tracked PER PROCESS: a slow-dying old server's exit event
+  // must never clobber the state (or the serverProcess reference) of the new
+  // one spawned after it — that orphans the new server on quit and swallows or
+  // misattributes real crashes.
+  proc.campfireExpectedExit = false;
+  serverProcess = proc;
 
-  serverProcess.stdout.on("data", logLine);
-  serverProcess.stderr.on("data", logLine);
-  serverProcess.on("error", (err) => logLine(`[main] server spawn error: ${err.message}`));
-  serverProcess.on("exit", (code, signal) => {
+  proc.stdout.on("data", logLine);
+  proc.stderr.on("data", logLine);
+  proc.on("error", (err) => logLine(`[main] server spawn error: ${err.message}`));
+  proc.on("exit", (code, signal) => {
     logLine(`[main] server exited (code=${code}, signal=${signal})`);
-    const crashed = !app.isQuitting;
-    serverProcess = null;
-    // During boot, waitForHttp's timeout owns error reporting — two competing
-    // dialogs (crash + startup) would race and double-restart the server.
-    if (crashed && bootComplete) handleServerCrash(code);
+    const crashed = !app.isQuitting && !proc.campfireExpectedExit;
+    if (serverProcess === proc) serverProcess = null;
+    // During boot and rebinds, waitForHttp's failure path owns error reporting
+    // — two competing dialogs (crash + startup) would race and double-restart
+    // the server.
+    if (crashed && bootComplete && !rebinding) handleServerCrash(code);
   });
 
   writeRuntimeJson("starting");
@@ -218,6 +261,7 @@ function killServer() {
   const proc = serverProcess;
   serverProcess = null;
   if (!proc || proc.exitCode !== null || proc.signalCode !== null) return;
+  proc.campfireExpectedExit = true;
   proc.kill();
   // Windows: if it hasn't died in 3s, force-kill the whole tree.
   setTimeout(() => {
@@ -272,6 +316,100 @@ function restartServer() {
       })
       .catch(() => showStartupError());
   }, 500);
+}
+
+/** Kill the current server and wait until it has actually exited (or the
+ * force-kill window has passed) — starting a replacement on the same fixed
+ * port while the old process still holds it would just make the new one die. */
+function killServerAndWait(timeoutMs = 4000) {
+  const proc = serverProcess;
+  killServer();
+  if (!proc || proc.exitCode !== null || proc.signalCode !== null) return Promise.resolve();
+  return new Promise((resolve) => {
+    const t = setTimeout(resolve, timeoutMs);
+    proc.once("exit", () => {
+      clearTimeout(t);
+      resolve();
+    });
+  });
+}
+
+/** Restart the server on a freshly-picked port/interface. Unlike
+ * restartServer(), the port can change, so the window must loadURL rather
+ * than reload. Throws on failure — the caller owns recovery. */
+async function rebindServer() {
+  await killServerAndWait();
+  serverPort = await pickPort();
+  serverUrl = `http://127.0.0.1:${serverPort}`;
+  startServer();
+  await waitForHttp(serverPort, STARTUP_TIMEOUT_MS);
+  writeRuntimeJson("ready");
+  if (mainWindow) mainWindow.loadURL(serverUrl);
+}
+
+/** Switch LAN sharing on/off. The setting is persisted only after the new
+ * binding is proven to work; on failure the server is restored on the previous
+ * setting and the user gets a non-fatal dialog — a failed tray toggle must
+ * never take down a working app (or brick the next launch). */
+async function applyLanSetting(next) {
+  if (rebinding) return false;
+  rebinding = true;
+  const prev = settings.lanSharing;
+  settings.lanSharing = next;
+  refreshTrayMenu();
+  try {
+    await rebindServer();
+    saveSettings();
+    return true;
+  } catch (err) {
+    logLine(`[main] switching LAN sharing ${next ? "on" : "off"} failed (${err.message}) — reverting`);
+    settings.lanSharing = prev;
+    try {
+      await rebindServer();
+    } catch (err2) {
+      // No server on either binding — now it genuinely is a startup-class
+      // failure, and quitting via the boot-style dialog is honest.
+      logLine(`[main] recovery rebind also failed: ${err2.message}`);
+      showStartupError();
+      return false;
+    }
+    dialog.showMessageBox(mainWindow || undefined, {
+      type: "warning",
+      title: "Campfire",
+      message: next ? "Couldn't turn on LAN sharing." : "Couldn't turn off LAN sharing.",
+      detail: `${err.message}\n\nCampfire is still running with the previous setting.`,
+      buttons: ["OK"],
+      noLink: true,
+    });
+    return false;
+  } finally {
+    rebinding = false;
+    refreshTrayMenu();
+  }
+}
+
+function toggleLanSharing() {
+  const next = !settings.lanSharing;
+  applyLanSetting(next)
+    .then((ok) => {
+      if (!ok || !next) return;
+      const url = lanUrl();
+      dialog.showMessageBox(mainWindow || undefined, {
+        type: "info",
+        title: "Campfire",
+        message: "LAN sharing is on.",
+        detail:
+          `${url ? `Friends on your network can join at:\n${url}\n\n` : "No network address found — check your connection.\n\n"}` +
+          "If Windows asks to allow Campfire through the firewall, click Allow.\n\n" +
+          "Anyone on your local network can reach this Campfire's login page while sharing is on.",
+        buttons: url ? ["Copy link", "OK"] : ["OK"],
+        defaultId: 0,
+        noLink: true,
+      }).then(({ response }) => {
+        if (url && response === 0) clipboard.writeText(url);
+      });
+    })
+    .catch((err) => logLine(`[main] LAN toggle error: ${err.stack || err.message}`));
 }
 
 function handleServerCrash(code) {
@@ -456,30 +594,51 @@ function createTray() {
 
 function refreshTrayMenu() {
   if (!tray) return;
-  tray.setContextMenu(
-    Menu.buildFromTemplate([
-      { label: "Open Campfire", click: showMainWindow },
-      { type: "separator" },
-      {
-        label: "Close button quits",
-        type: "checkbox",
-        checked: settings.closeToTray === false,
-        click: (item) => {
-          settings.closeToTray = !item.checked;
-          saveSettings();
-          refreshTrayMenu();
-        },
+  const items = [
+    { label: "Open Campfire", click: showMainWindow },
+    { type: "separator" },
+    {
+      label: "Share on this network",
+      type: "checkbox",
+      checked: !!settings.lanSharing,
+      enabled: !rebinding,
+      click: toggleLanSharing,
+    },
+  ];
+  if (settings.lanSharing) {
+    const url = lanUrl();
+    items.push({
+      label: url ? `Copy LAN link  (${url})` : "LAN link unavailable (no network)",
+      enabled: !!url && !rebinding,
+      click: () => {
+        const u = lanUrl(); // re-read at click time — the menu label may be stale
+        if (u) clipboard.writeText(u);
       },
-      { type: "separator" },
-      {
-        label: "Quit Campfire",
-        click: () => {
-          app.isQuitting = true;
-          app.quit();
-        },
+    });
+  }
+  items.push(
+    { type: "separator" },
+    { label: "Check for updates…", click: () => checkForUpdates(true) },
+    {
+      label: "Close button quits",
+      type: "checkbox",
+      checked: settings.closeToTray === false,
+      click: (item) => {
+        settings.closeToTray = !item.checked;
+        saveSettings();
+        refreshTrayMenu();
       },
-    ]),
+    },
+    { type: "separator" },
+    {
+      label: "Quit Campfire",
+      click: () => {
+        app.isQuitting = true;
+        app.quit();
+      },
+    },
   );
+  tray.setContextMenu(Menu.buildFromTemplate(items));
 }
 
 function showMainWindow() {
@@ -490,6 +649,100 @@ function showMainWindow() {
   if (mainWindow.isMinimized()) mainWindow.restore();
   mainWindow.show();
   mainWindow.focus();
+}
+
+// ─── Update check ───
+
+function fetchLatestRelease() {
+  return new Promise((resolve, reject) => {
+    const req = https.get(
+      {
+        host: "api.github.com",
+        path: `/repos/${UPDATE_REPO}/releases/latest`,
+        headers: { "User-Agent": "Campfire", Accept: "application/vnd.github+json" },
+        timeout: 10000,
+      },
+      (res) => {
+        let body = "";
+        res.on("error", reject); // connection reset mid-body must not become an uncaughtException
+        res.on("data", (d) => (body += d));
+        res.on("end", () => {
+          if (res.statusCode === 404) return resolve(null); // no releases published yet
+          if (res.statusCode !== 200) return reject(new Error(`GitHub API responded ${res.statusCode}`));
+          try {
+            resolve(JSON.parse(body));
+          } catch (err) {
+            reject(err);
+          }
+        });
+      },
+    );
+    req.on("error", reject);
+    req.on("timeout", () => req.destroy(new Error("update check timed out")));
+  });
+}
+
+/** Numeric dotted compare; ignores a leading "v". Returns >0 if a is newer. */
+function cmpVersions(a, b) {
+  const parse = (v) => String(v).replace(/^v/i, "").split(".").map((n) => parseInt(n, 10) || 0);
+  const pa = parse(a);
+  const pb = parse(b);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) - (pb[i] || 0);
+  }
+  return 0;
+}
+
+async function checkForUpdates(interactive) {
+  let rel;
+  try {
+    rel = await fetchLatestRelease();
+  } catch (err) {
+    logLine(`[main] update check failed: ${err.message}`);
+    if (interactive) {
+      dialog.showMessageBox(mainWindow || undefined, {
+        type: "warning",
+        title: "Campfire",
+        message: "Could not check for updates.",
+        detail: err.message,
+        buttons: ["OK"],
+        noLink: true,
+      });
+    }
+    return;
+  }
+  const current = app.getVersion();
+  const latest = rel && rel.tag_name;
+  if (!latest || cmpVersions(latest, current) <= 0) {
+    logLine(`[main] update check: up to date (current ${current}, latest ${latest || "none published"})`);
+    if (interactive) {
+      dialog.showMessageBox(mainWindow || undefined, {
+        type: "info",
+        title: "Campfire",
+        message: "You're up to date.",
+        detail: `Campfire ${current} is the latest version.`,
+        buttons: ["OK"],
+        noLink: true,
+      });
+    }
+    return;
+  }
+  if (!interactive && settings.skipUpdateVersion === latest) return;
+  const { response } = await dialog.showMessageBox(mainWindow || undefined, {
+    type: "info",
+    title: "Campfire",
+    message: `Campfire ${latest.replace(/^v/i, "")} is available`,
+    detail: `You have ${current}. Your messages and settings are kept across updates.`,
+    buttons: ["Download", "Later", "Skip this version"],
+    defaultId: 0,
+    cancelId: 1,
+    noLink: true,
+  });
+  if (response === 0) openExternalSafe(rel.html_url);
+  if (response === 2) {
+    settings.skipUpdateVersion = latest;
+    saveSettings();
+  }
 }
 
 // ─── Boot ───
@@ -505,12 +758,13 @@ async function boot() {
   jwtSecret = getOrCreateSecret();
   settings = loadSettings();
   if (typeof settings.closeToTray !== "boolean") settings.closeToTray = true;
+  if (typeof settings.lanSharing !== "boolean") settings.lanSharing = false;
   saveSettings(); // persist resolved defaults on first run; bounds are added later
 
   createSplash();
 
   try {
-    serverPort = await findFreePort();
+    serverPort = await pickPort();
   } catch (err) {
     // listen(0) basically never fails; a hardcoded fallback port could belong
     // to a foreign server the window would then happily load. Fail visibly.
@@ -534,6 +788,10 @@ async function boot() {
   writeRuntimeJson("ready");
   createTray();
   createMainWindow();
+
+  // Auto-check only when packaged: in dev app.getVersion() is Electron's own
+  // version, so the compare would be nonsense. Manual tray check still works.
+  if (app.isPackaged) setTimeout(() => checkForUpdates(false), 15000);
 }
 
 function bootFailed(err) {

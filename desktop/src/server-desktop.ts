@@ -10,6 +10,7 @@
  * (ELECTRON_RUN_AS_NODE=1), so no system Node install is required. All runtime
  * configuration arrives via env from main.js:
  *   PORT                    dynamically-chosen free port
+ *   CAMPFIRE_HOST           "0.0.0.0" for LAN sharing, else loopback
  *   DATABASE_URL            absolute file: URL into the data dir
  *   JWT_SECRET              per-install server secret
  *   CAMPFIRE_UPLOAD_DIR     writable dir for /uploads + /avatars
@@ -27,7 +28,9 @@ import { makeStaticHandler } from "./static-serve";
 
 const dir = process.cwd(); // main.js sets cwd to the standalone tree root
 const PORT = parseInt(process.env.PORT || "3000", 10);
-const HOST = "127.0.0.1";
+// LAN sharing: main.js sets CAMPFIRE_HOST=0.0.0.0 when the tray toggle is on.
+// Only the two known values are accepted — anything else stays loopback.
+const HOST = process.env.CAMPFIRE_HOST === "0.0.0.0" ? "0.0.0.0" : "127.0.0.1";
 
 function loadNextConfig(): Record<string, unknown> {
   // The standalone build embeds the fully-resolved next config here; reuse it so

@@ -86,7 +86,11 @@ export async function validateSessionToken(
     ) {
       return null;
     }
-  } catch {
+  } catch (err) {
+    // Fail closed, but never silently: a DB hiccup here downgrades logged-in
+    // users to anonymous (e.g. /api/config withholds TURN creds) with no other
+    // trace of why.
+    console.error("[auth] session validation failed closed:", err);
     return null;
   }
 

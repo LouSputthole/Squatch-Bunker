@@ -65,9 +65,13 @@ npm run host
 | Auth       | JWT in HttpOnly cookies; bcrypt password hashing |
 | Styling    | Tailwind CSS + CSS custom-property theming        |
 
-For internet (not just LAN) voice, put the app behind HTTPS and add a TURN
-server (see `.env.example`). The WebRTC mesh works well up to ~6 people per
-room; larger rooms need an SFU.
+For internet (not just LAN) use, put the app behind HTTPS and add a TURN
+server — **[docs/DEPLOY.md](./docs/DEPLOY.md)** is the full VPS recipe
+(Caddy + coturn + systemd, ~30 minutes). The WebRTC mesh works well up to
+~6 people per room; larger rooms need an SFU.
+
+What's encrypted where (TLS, voice E2EE via DTLS-SRTP, what the operator
+can see, hardening checklist): **[docs/SECURITY.md](./docs/SECURITY.md)**.
 
 ## License
 
