@@ -9,6 +9,7 @@ export interface RuntimeConfig {
   turnUrl: string;
   turnUsername: string;
   turnCredential: string;
+  sfuAvailable: boolean;
 }
 
 const DEFAULT_CONFIG: RuntimeConfig = {
@@ -18,6 +19,7 @@ const DEFAULT_CONFIG: RuntimeConfig = {
   turnUrl: "",
   turnUsername: "",
   turnCredential: "",
+  sfuAvailable: false,
 };
 
 let cachedConfig: RuntimeConfig | null = null;

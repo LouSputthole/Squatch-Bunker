@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
+import { sfuConfigured } from "@/lib/sfu";
 
 /**
  * Runtime config endpoint. Returns connection URLs derived from the request.
@@ -28,5 +29,13 @@ export async function GET(request: Request) {
   const turnUsername = (session && process.env.TURN_USERNAME) || "";
   const turnCredential = (session && process.env.TURN_CREDENTIAL) || "";
 
-  return NextResponse.json({ appUrl, socketUrl, socketPath, turnUrl, turnUsername, turnCredential });
+  return NextResponse.json({
+    appUrl,
+    socketUrl,
+    socketPath,
+    turnUrl,
+    turnUsername,
+    turnCredential,
+    sfuAvailable: sfuConfigured(),
+  });
 }

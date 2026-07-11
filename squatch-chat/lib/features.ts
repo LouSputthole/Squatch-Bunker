@@ -38,6 +38,7 @@ export const FEATURES: Record<string, FeatureDefinition> = {
   priority_support:  { name: "Priority Support",    description: "Fast-track support from the team",               tier: "premium" },
   extended_upload:   { name: "Extended Uploads",     description: "Upload files up to 100MB",                      tier: "premium" },
   server_discovery:  { name: "Server Discovery",    description: "List your server in the public directory",       tier: "premium" },
+  sfu_voice:         { name: "Big Voice Rooms",     description: "SFU-backed voice that scales past the ~6-person mesh", tier: "premium" },
 };
 
 const SELF_HOSTED = process.env.SELF_HOSTED === "true" || !process.env.STRIPE_SECRET_KEY;
