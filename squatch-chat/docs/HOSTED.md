@@ -73,8 +73,10 @@ Gate every box before taking money:
 - [ ] Terms of Service + Privacy Policy pages (AGPL source link in footer
       satisfies §13 network-use clause)
 - [ ] Status/uptime page (even a bare one)
-- [ ] Load sanity: 200 concurrent socket clients on one box (vitest
-      harness exists for the socket layer; extend, don't rewrite)
+- [x] Load sanity: 200 concurrent socket clients on one box — measured
+      2026-07-11 (`tests/load-sanity.test.ts`, gated `LOAD_TEST=1`):
+      connect 276ms, 1→199 fan-out 61ms, 20-sender burst (3,980
+      deliveries) 125ms. Nowhere near a ceiling at this scale.
 - [x] Abuse basics: per-account upload caps (30 files / 500MB per hour) and
       `POST /api/reports` (validated, deduped, 5/hr) shipped 2026-07-11;
       registration rate-limit already existed
