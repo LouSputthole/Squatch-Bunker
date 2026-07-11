@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from "react";
 import { getSocket } from "@/lib/socket";
 import { sounds } from "@/lib/sounds";
-import { getRuntimeConfig } from "@/hooks/useRuntimeConfig";
+import { getRuntimeConfig, ensureRuntimeConfig } from "@/hooks/useRuntimeConfig";
 
 interface VoiceParticipant {
   userId: string;
@@ -333,6 +333,13 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
       }
     }
   }, [channelId]);
+
+  // Warm the runtime-config cache so getIceServers() (synchronous) sees the
+  // TURN relay by the time the first peer connection is created on join —
+  // without this the TURN env vars silently never reach the client.
+  useEffect(() => {
+    void ensureRuntimeConfig();
+  }, []);
 
   // Screen share signaling handlers
   useEffect(() => {

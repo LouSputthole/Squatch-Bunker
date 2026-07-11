@@ -50,7 +50,6 @@ let settings = {};
 let saveBoundsTimer = null;
 let dataDirMode = "installed"; // "portable" | "installed" | "portable-fallback"
 let bootComplete = false;
-let expectedExit = false; // killServer() was called — the next server exit is not a crash
 let rebinding = false;
 
 app.isQuitting = false;
@@ -229,24 +228,30 @@ function startServer() {
   delete env.NEXT_PUBLIC_SOCKET_URL;
   delete env.NEXT_PUBLIC_APP_URL;
 
-  serverProcess = spawn(process.execPath, [SERVER_ENTRY], {
+  const proc = spawn(process.execPath, [SERVER_ENTRY], {
     cwd: SERVER_DIR,
     env,
     windowsHide: true,
     stdio: ["ignore", "pipe", "pipe"],
   });
+  // Expected-exit is tracked PER PROCESS: a slow-dying old server's exit event
+  // must never clobber the state (or the serverProcess reference) of the new
+  // one spawned after it — that orphans the new server on quit and swallows or
+  // misattributes real crashes.
+  proc.campfireExpectedExit = false;
+  serverProcess = proc;
 
-  serverProcess.stdout.on("data", logLine);
-  serverProcess.stderr.on("data", logLine);
-  serverProcess.on("error", (err) => logLine(`[main] server spawn error: ${err.message}`));
-  serverProcess.on("exit", (code, signal) => {
+  proc.stdout.on("data", logLine);
+  proc.stderr.on("data", logLine);
+  proc.on("error", (err) => logLine(`[main] server spawn error: ${err.message}`));
+  proc.on("exit", (code, signal) => {
     logLine(`[main] server exited (code=${code}, signal=${signal})`);
-    const crashed = !app.isQuitting && !expectedExit;
-    expectedExit = false;
-    serverProcess = null;
-    // During boot, waitForHttp's timeout owns error reporting — two competing
-    // dialogs (crash + startup) would race and double-restart the server.
-    if (crashed && bootComplete) handleServerCrash(code);
+    const crashed = !app.isQuitting && !proc.campfireExpectedExit;
+    if (serverProcess === proc) serverProcess = null;
+    // During boot and rebinds, waitForHttp's failure path owns error reporting
+    // — two competing dialogs (crash + startup) would race and double-restart
+    // the server.
+    if (crashed && bootComplete && !rebinding) handleServerCrash(code);
   });
 
   writeRuntimeJson("starting");
@@ -256,7 +261,7 @@ function killServer() {
   const proc = serverProcess;
   serverProcess = null;
   if (!proc || proc.exitCode !== null || proc.signalCode !== null) return;
-  expectedExit = true;
+  proc.campfireExpectedExit = true;
   proc.kill();
   // Windows: if it hasn't died in 3s, force-kill the whole tree.
   setTimeout(() => {
@@ -313,60 +318,98 @@ function restartServer() {
   }, 500);
 }
 
-/** Restart the server on a freshly-picked port/interface after the LAN toggle
- * changed. Unlike restartServer(), the port can change, so the window must
- * loadURL rather than reload. */
-async function rebindServer() {
-  if (rebinding) return;
-  rebinding = true;
-  refreshTrayMenu();
+/** Kill the current server and wait until it has actually exited (or the
+ * force-kill window has passed) — starting a replacement on the same fixed
+ * port while the old process still holds it would just make the new one die. */
+function killServerAndWait(timeoutMs = 4000) {
+  const proc = serverProcess;
   killServer();
-  await new Promise((r) => setTimeout(r, 500));
-  try {
-    serverPort = await pickPort();
-  } catch (err) {
-    logLine(`[main] could not allocate a local port: ${err.message}`);
-    rebinding = false;
-    showStartupError();
-    return;
-  }
+  if (!proc || proc.exitCode !== null || proc.signalCode !== null) return Promise.resolve();
+  return new Promise((resolve) => {
+    const t = setTimeout(resolve, timeoutMs);
+    proc.once("exit", () => {
+      clearTimeout(t);
+      resolve();
+    });
+  });
+}
+
+/** Restart the server on a freshly-picked port/interface. Unlike
+ * restartServer(), the port can change, so the window must loadURL rather
+ * than reload. Throws on failure — the caller owns recovery. */
+async function rebindServer() {
+  await killServerAndWait();
+  serverPort = await pickPort();
   serverUrl = `http://127.0.0.1:${serverPort}`;
   startServer();
-  try {
-    await waitForHttp(serverPort, STARTUP_TIMEOUT_MS);
-  } catch {
-    rebinding = false;
-    showStartupError();
-    return;
-  }
-  rebinding = false;
+  await waitForHttp(serverPort, STARTUP_TIMEOUT_MS);
   writeRuntimeJson("ready");
   if (mainWindow) mainWindow.loadURL(serverUrl);
-  refreshTrayMenu(); // port may have changed → copy-link label
+}
+
+/** Switch LAN sharing on/off. The setting is persisted only after the new
+ * binding is proven to work; on failure the server is restored on the previous
+ * setting and the user gets a non-fatal dialog — a failed tray toggle must
+ * never take down a working app (or brick the next launch). */
+async function applyLanSetting(next) {
+  if (rebinding) return false;
+  rebinding = true;
+  const prev = settings.lanSharing;
+  settings.lanSharing = next;
+  refreshTrayMenu();
+  try {
+    await rebindServer();
+    saveSettings();
+    return true;
+  } catch (err) {
+    logLine(`[main] switching LAN sharing ${next ? "on" : "off"} failed (${err.message}) — reverting`);
+    settings.lanSharing = prev;
+    try {
+      await rebindServer();
+    } catch (err2) {
+      // No server on either binding — now it genuinely is a startup-class
+      // failure, and quitting via the boot-style dialog is honest.
+      logLine(`[main] recovery rebind also failed: ${err2.message}`);
+      showStartupError();
+      return false;
+    }
+    dialog.showMessageBox(mainWindow || undefined, {
+      type: "warning",
+      title: "Campfire",
+      message: next ? "Couldn't turn on LAN sharing." : "Couldn't turn off LAN sharing.",
+      detail: `${err.message}\n\nCampfire is still running with the previous setting.`,
+      buttons: ["OK"],
+      noLink: true,
+    });
+    return false;
+  } finally {
+    rebinding = false;
+    refreshTrayMenu();
+  }
 }
 
 function toggleLanSharing() {
-  settings.lanSharing = !settings.lanSharing;
-  saveSettings();
-  const turnedOn = settings.lanSharing;
-  rebindServer().then(() => {
-    if (!turnedOn || !settings.lanSharing) return;
-    const url = lanUrl();
-    dialog.showMessageBox(mainWindow || undefined, {
-      type: "info",
-      title: "Campfire",
-      message: "LAN sharing is on.",
-      detail:
-        `${url ? `Friends on your network can join at:\n${url}\n\n` : "No network address found — check your connection.\n\n"}` +
-        "If Windows asks to allow Campfire through the firewall, click Allow.\n\n" +
-        "Anyone on your local network can reach this Campfire's login page while sharing is on.",
-      buttons: url ? ["Copy link", "OK"] : ["OK"],
-      defaultId: 0,
-      noLink: true,
-    }).then(({ response }) => {
-      if (url && response === 0) clipboard.writeText(url);
-    });
-  });
+  const next = !settings.lanSharing;
+  applyLanSetting(next)
+    .then((ok) => {
+      if (!ok || !next) return;
+      const url = lanUrl();
+      dialog.showMessageBox(mainWindow || undefined, {
+        type: "info",
+        title: "Campfire",
+        message: "LAN sharing is on.",
+        detail:
+          `${url ? `Friends on your network can join at:\n${url}\n\n` : "No network address found — check your connection.\n\n"}` +
+          "If Windows asks to allow Campfire through the firewall, click Allow.\n\n" +
+          "Anyone on your local network can reach this Campfire's login page while sharing is on.",
+        buttons: url ? ["Copy link", "OK"] : ["OK"],
+        defaultId: 0,
+        noLink: true,
+      }).then(({ response }) => {
+        if (url && response === 0) clipboard.writeText(url);
+      });
+    })
+    .catch((err) => logLine(`[main] LAN toggle error: ${err.stack || err.message}`));
 }
 
 function handleServerCrash(code) {
@@ -621,6 +664,7 @@ function fetchLatestRelease() {
       },
       (res) => {
         let body = "";
+        res.on("error", reject); // connection reset mid-body must not become an uncaughtException
         res.on("data", (d) => (body += d));
         res.on("end", () => {
           if (res.statusCode === 404) return resolve(null); // no releases published yet
