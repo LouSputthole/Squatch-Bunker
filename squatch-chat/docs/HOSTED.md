@@ -52,6 +52,12 @@ Mesh voice is fine at friends scale and stays the self-host default forever
   building on mediasoup/Janus: it bundles SFU + TURN, has first-class JS
   SDKs, and slots behind a feature flag. New `FEATURES` entry `sfu_voice`
   (premium) — room chooses SFU when available, falls back to mesh.
+- Server-side groundwork shipped 2026-07-11: `sfu_voice` premium flag,
+  `sfuAvailable` in `/api/config` (driven by `LIVEKIT_URL` +
+  `LIVEKIT_API_KEY`/`_SECRET`), and `POST /api/voice/sfu-token` minting
+  LiveKit access tokens (identity = userId, room = channelId; gated on the
+  flag + channel membership, 503 when unconfigured). Remaining: deploy a
+  LiveKit instance and wire the client SDK into the voice panel.
 - Sequencing: hosted launches on mesh (rooms ≤6 enforced by UX copy, not
   hard caps), SFU lands as the first post-launch premium upgrade.
 - Server-side recording/streaming stays out of scope until SFU exists.
