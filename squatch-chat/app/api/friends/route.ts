@@ -80,10 +80,11 @@ export async function POST(request: Request) {
 
     // Run the existence check and the create/auto-accept atomically. On the
     // single-connection SQLite default this fully serializes concurrent
-    // reciprocal requests, so they can't both pass the check and create two
-    // rows; the P2002 handler below converts any residual unique-constraint
-    // race into a graceful response. `requesterId`/`addresseeId` still record
-    // the real sender/recipient so incoming vs outgoing display is preserved.
+    // reciprocal requests; on Postgres the direction-agnostic unique index
+    // Friendship_pair_key (migration 20260711000002) is the real guarantee —
+    // either way the P2002 handler below converts a lost race into a graceful
+    // response. `requesterId`/`addresseeId` still record the real
+    // sender/recipient so incoming vs outgoing display is preserved.
     const result = await prisma.$transaction(
       async (tx): Promise<{ status: number; body: Record<string, unknown> }> => {
         const existing = await tx.friendship.findFirst({

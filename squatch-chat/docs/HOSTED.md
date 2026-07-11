@@ -65,8 +65,11 @@ Gate every box before taking money:
       `migrate diff` reports no drift (2026-07-11)
 - [x] Webhook idempotency moved from in-memory to a DB table
       (`WebhookEvent` claim protocol, race-safe takeover, route +
-      protocol tests; 2026-07-11) — friendship dup-race on Postgres still
-      to re-check
+      protocol tests; 2026-07-11)
+- [x] Friendship dup-race on Postgres closed: direction-agnostic unique
+      expression index (migration 20260711000002); reversed-pair insert
+      verified rejected on a live Postgres, `migrate diff` stays quiet
+      about it (2026-07-11)
 - [ ] Deploy: docs/DEPLOY.md recipe on real infra + managed Postgres,
       nightly `pg_dump` + uploads snapshot, restore drill performed once
 - [ ] Stripe live keys, live webhook signing secret, portal configured
