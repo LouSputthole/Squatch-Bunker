@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import { useDismissable } from "@/hooks/useDismissable";
 
 interface SoundTheme {
   id: string;
@@ -81,7 +82,7 @@ interface TrackState {
 }
 
 export default function AmbientSounds() {
-  const [open, setOpen] = useState(false);
+  const { open, setOpen, ref: popoverRef } = useDismissable();
   const [activeTheme, setActiveTheme] = useState<string | null>(null);
   const [masterVolume, setMasterVolume] = useState(0.3);
   const [tracks, setTracks] = useState<Record<string, TrackState>>({});
@@ -163,7 +164,7 @@ export default function AmbientSounds() {
   const isPlaying = Object.values(tracks).some((t) => t.playing);
 
   return (
-    <div className="relative">
+    <div ref={popoverRef} className="relative">
       <button
         onClick={() => setOpen(!open)}
         className={`w-7 h-7 rounded-full flex items-center justify-center transition-colors ${

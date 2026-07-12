@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useRef } from "react";
+import { useDismissable } from "@/hooks/useDismissable";
 
 interface NotificationItem {
   id: string;
@@ -23,30 +23,10 @@ function relativeTime(timestamp: number): string {
 }
 
 export default function NotificationBell({ notifications, onMarkAllRead }: NotificationBellProps) {
-  const [open, setOpen] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const { open, setOpen, ref: containerRef } = useDismissable();
 
   const unreadCount = notifications.filter((n) => !n.read).length;
   const recent = notifications.slice(0, 10);
-
-  // Close on outside click
-  useEffect(() => {
-    if (!open) return;
-    function handleClick(e: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    }
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setOpen(false);
-    }
-    document.addEventListener("mousedown", handleClick);
-    document.addEventListener("keydown", handleKey);
-    return () => {
-      document.removeEventListener("mousedown", handleClick);
-      document.removeEventListener("keydown", handleKey);
-    };
-  }, [open]);
 
   return (
     <div ref={containerRef} style={{ position: "relative", display: "inline-flex" }}>
