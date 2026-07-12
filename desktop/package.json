@@ -1,6 +1,6 @@
 {
   "name": "campfire-desktop",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "Campfire — Discord-like voice & text chat (portable Windows desktop app)",
   "main": "main.js",
   "author": "Squatch Bunker",
