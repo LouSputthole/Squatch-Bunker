@@ -1,10 +1,11 @@
 "use client";
 
 import { useState } from "react";
+import { useDismissable } from "@/hooks/useDismissable";
 
 export default function ShareLink() {
   const [copied, setCopied] = useState(false);
-  const [open, setOpen] = useState(false);
+  const { open, setOpen, ref } = useDismissable();
 
   const url = typeof window !== "undefined" ? window.location.origin : "";
 
@@ -15,7 +16,7 @@ export default function ShareLink() {
   }
 
   return (
-    <div className="relative">
+    <div ref={ref} className="relative">
       <button
         onClick={() => setOpen(!open)}
         className="w-7 h-7 flex items-center justify-center rounded-md hover:bg-[var(--accent-2)]/30 text-[var(--muted)] hover:text-[var(--text)] transition-colors"

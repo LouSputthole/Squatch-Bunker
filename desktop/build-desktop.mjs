@@ -309,8 +309,25 @@ PROBLEMS?
   https://github.com/LouSputthole/Squatch-Bunker/issues
 `;
 
+// Windows checkouts can silently carry the wrong case for renamed files (git
+// case-rename artifact) — fs.existsSync won't catch it, but the packaged Next
+// serves public/ case-SENSITIVELY, so a wrong-case asset 404s in the shipped
+// app (v0.0.2 shipped `campfire-logo.png` → broken logo). Compare exact names.
+function verifyPublicAssetCase() {
+  const onDisk = readdirSync(join(SQUATCH, "public"));
+  for (const name of ["Campfire-Logo.png"]) {
+    if (!onDisk.includes(name)) {
+      throw new Error(
+        `public/${name} has wrong case on disk (found: ${onDisk.filter((f) => f.toLowerCase() === name.toLowerCase()).join(", ") || "nothing"}). ` +
+        `Fix with: git checkout -- squatch-chat/public`,
+      );
+    }
+  }
+}
+
 async function main() {
   console.log(`Campfire desktop build — v${version} — mode: ${only}`);
+  verifyPublicAssetCase();
   webBuild();
   await bundleServer();
   await rebuildNative();
