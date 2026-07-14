@@ -12,6 +12,7 @@
   "files": [
     "main.cjs",
     "database.cjs",
+    "legacy-state.cjs",
     "package.json",
     "!node_modules{,/**/*}"
   ],

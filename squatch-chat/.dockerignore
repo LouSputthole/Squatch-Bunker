@@ -3,6 +3,15 @@ node_modules
 .git
 .env
 .env.*
+.npmrc
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+*.bak
+backups/
 *.md
 
 data/

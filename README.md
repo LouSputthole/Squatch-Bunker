@@ -43,12 +43,17 @@ For Postgres, migrations, Docker, and the full tech stack, see
 
 ## Desktop app
 
-[`desktop/`](./desktop) packages Campfire as a **portable Windows app** that
-runs with no install and **no Node.js** — Electron boots the same
-`squatch-chat` server with its own embedded Node (`ELECTRON_RUN_AS_NODE`) on a
-single dynamic port. Ships as a portable folder (unzip and run; data lives in
-`data\` beside the exe) and an NSIS installer. Build with `cd desktop && npm
-install && npm run build:all`. See [desktop/README.md](./desktop/README.md).
+The supported Windows packaging pipeline lives with the application under
+[`squatch-chat/desktop`](./squatch-chat/desktop) and
+[`squatch-chat/packaging`](./squatch-chat/packaging). From `squatch-chat`, run
+`npm run desktop:stage`, `npm run desktop:verify`, or `npm run desktop:dist`.
+Published desktop artifacts remain release candidates until the desktop gates
+in [RELEASE_CHECKLIST.md](./squatch-chat/docs/RELEASE_CHECKLIST.md) pass.
+
+The repository-root [`desktop/`](./desktop) implementation is archived source.
+Its unique tray, LAN-sharing, and update-checker work may be ported into the
+supported pipeline later, but it must not be used to produce releases because
+its database migration bundle predates the current Campfire schema.
 
 ## License
 

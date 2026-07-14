@@ -8,6 +8,7 @@ const http = require("node:http");
 const net = require("node:net");
 const path = require("node:path");
 const { upgradeDesktopDatabase } = require("./database.cjs");
+const { importLegacyDesktopState } = require("./legacy-state.cjs");
 
 const APP_NAME = "Campfire";
 const STARTUP_TIMEOUT_MS = 45_000;
@@ -43,6 +44,16 @@ function getServerRoot() {
   return app.isPackaged
     ? path.join(process.resourcesPath, "server")
     : path.join(__dirname, ".stage", "server");
+}
+
+function logDesktop(message) {
+  const logDirectory = path.join(app.getPath("userData"), "logs");
+  fs.mkdirSync(logDirectory, { recursive: true });
+  fs.appendFileSync(
+    path.join(logDirectory, "desktop.log"),
+    new Date().toISOString() + " " + message + "\n",
+  );
+  console.log(message);
 }
 
 function ensureDesktopConfig() {
@@ -152,6 +163,16 @@ async function startServer() {
   if (!fs.existsSync(serverEntry)) {
     throw new Error(`Desktop server bundle is missing: ${serverEntry}`);
   }
+
+  const Database = require(
+    path.join(serverRoot, "node_modules", "better-sqlite3"),
+  );
+  await importLegacyDesktopState({
+    userDataPath: app.getPath("userData"),
+    portableDirectory: process.env.PORTABLE_EXECUTABLE_DIR || null,
+    Database,
+    log: logDesktop,
+  });
 
   const desktopConfig = ensureDesktopConfig();
   const databasePath = ensureDatabase(serverRoot);

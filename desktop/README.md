@@ -1,4 +1,12 @@
-# Campfire Desktop (Windows, portable)
+# Campfire Desktop (archived implementation)
+
+> **Do not build or publish this package.** This repository-root implementation
+> is retained only so its tray, LAN-sharing, and update-checker work can be
+> ported later. Its migration bundle predates the current Campfire schema, so
+> its start and build scripts intentionally fail closed. The supported pipeline
+> is under `squatch-chat/desktop` and `squatch-chat/packaging`; run
+> `npm run desktop:stage`, `npm run desktop:verify`, or `npm run desktop:dist`
+> from `squatch-chat` and follow `squatch-chat/docs/RELEASE_CHECKLIST.md`.
 
 Packages Campfire — the self-hosted, Discord-style chat app — as a Windows
 desktop app that runs with **no install and no Node.js required**. Ships as a

@@ -52,6 +52,7 @@ for (const dependency of ["@electron/rebuild", "electron", "electron-builder", "
 for (const sourcePath of [
   "desktop/main.cjs",
   "desktop/database.cjs",
+  "desktop/legacy-state.cjs",
   "desktop/package-lock.json",
   "packaging/stage-desktop.mjs",
   "packaging/verify-desktop.mjs",
@@ -61,7 +62,7 @@ for (const sourcePath of [
   assert(existsSync(join(projectRoot, sourcePath)), `Missing ${sourcePath}`);
 }
 
-for (const sourcePath of ["desktop/main.cjs", "desktop/database.cjs", "packaging/stage-desktop.mjs", "packaging/verify-desktop.mjs"]) {
+for (const sourcePath of ["desktop/main.cjs", "desktop/database.cjs", "desktop/legacy-state.cjs", "packaging/stage-desktop.mjs", "packaging/verify-desktop.mjs"]) {
   const result = spawnSync(process.execPath, ["--check", join(projectRoot, sourcePath)], {
     cwd: projectRoot,
     stdio: "inherit",
@@ -84,10 +85,18 @@ assert(
   "Desktop launcher must store uploads and avatars under the per-user data directory",
 );
 assert(
+  desktopLauncher.includes("importLegacyDesktopState"),
+  "Desktop launcher must import v0.0.3 state before creating beta state",
+);
+assert(
   builder.files?.includes("database.cjs"),
   "Desktop database upgrader must be packaged with the Electron main process",
 );
 
+assert(
+  builder.files?.includes("legacy-state.cjs"),
+  "Desktop legacy-state importer must be packaged with the Electron main process",
+);
 const stagedServerRoot = join(projectRoot, "desktop", ".stage", "server");
 if (requireStage || existsSync(stagedServerRoot)) {
   const bootstrapPath = join(stagedServerRoot, "campfire-server.mjs");

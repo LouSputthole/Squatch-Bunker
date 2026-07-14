@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   copyFileSync,
   existsSync,
   mkdirSync,
   readFileSync,
   rmSync,
-  statSync,
 } from "node:fs";
 import { createRequire } from "node:module";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
@@ -114,6 +114,68 @@ function assertDatabaseIntegrity(database) {
       `SQLite foreign_key_check found ${foreignKeyProblems.length} violation(s)`,
     );
   }
+}
+
+function sqliteTableExists(database, table) {
+  return Boolean(
+    database
+      .prepare(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+      )
+      .get(table),
+  );
+}
+
+export function migrateLegacySqliteData(database) {
+  if (
+    !sqliteTableExists(database, "Friendship") ||
+    !sqliteTableExists(database, "UserBlock")
+  ) {
+    return { migratedBlocks: 0, removedLegacyRows: 0 };
+  }
+
+  const migrate = database.transaction(() => {
+    const inserted = database
+      .prepare(
+        [
+          'INSERT OR IGNORE INTO "UserBlock" (',
+          '  "id", "blockerId", "blockedId", "createdAt"',
+          ')',
+          "SELECT",
+          '  \'legacy-block-\' || "id",',
+          '  "addresseeId",',
+          '  "requesterId",',
+          '  "updatedAt"',
+          'FROM "Friendship"',
+          'WHERE "status" = \'blocked\'',
+          '  AND "addresseeId" <> "requesterId"',
+        ].join("\n"),
+      )
+      .run();
+    const removed = database
+      .prepare('DELETE FROM "Friendship" WHERE "status" = ?')
+      .run("blocked");
+    return {
+      migratedBlocks: inserted.changes,
+      removedLegacyRows: removed.changes,
+    };
+  });
+
+  return migrate();
+}
+
+function legacyBlockCount(database) {
+  if (
+    !sqliteTableExists(database, "Friendship") ||
+    !sqliteTableExists(database, "UserBlock")
+  ) {
+    return 0;
+  }
+  return database
+    .prepare(
+      'SELECT COUNT(*) AS count FROM "Friendship" WHERE "status" = ?',
+    )
+    .get("blocked").count;
 }
 
 export function analyseSqliteDiff(sql, existingColumns) {
@@ -277,9 +339,24 @@ function assertUniqueIndexesSafe(
   }
 }
 
-function fingerprint(path) {
-  const stat = statSync(path);
-  return `${stat.size}:${stat.mtimeMs}`;
+export function databaseContentFingerprint(databasePath) {
+  return createHash("sha256").update(readFileSync(databasePath)).digest("hex");
+}
+
+export function checkpointedDatabaseContentFingerprint(databasePath) {
+  const database = new Database(databasePath, { fileMustExist: true });
+  try {
+    assertDatabaseIntegrity(database);
+    const checkpoint = database.pragma("wal_checkpoint(TRUNCATE)");
+    if (checkpoint.some((entry) => entry.busy)) {
+      throw new Error(
+        "SQLite database is busy; stop Campfire before synchronizing it",
+      );
+    }
+    return databaseContentFingerprint(databasePath);
+  } finally {
+    database.close();
+  }
 }
 
 function backupPathFor(databasePath) {
@@ -322,27 +399,34 @@ export function syncSqlite() {
   }
 
   let existingColumns;
+  let pendingLegacyBlocks;
   {
     const database = new Database(databasePath);
     try {
       assertDatabaseIntegrity(database);
-      database.pragma("wal_checkpoint(TRUNCATE)");
+      const checkpoint = database.pragma("wal_checkpoint(TRUNCATE)");
+      if (checkpoint.some((entry) => entry.busy)) {
+        throw new Error(
+          "SQLite database is busy; stop Campfire before synchronizing it",
+        );
+      }
       existingColumns = tableColumns(database);
+      pendingLegacyBlocks = legacyBlockCount(database);
     } finally {
       database.close();
     }
   }
 
-  const beforeDiff = fingerprint(databasePath);
+  const beforeDiff = checkpointedDatabaseContentFingerprint(databasePath);
   const sql = currentDiffSql(databaseUrl);
   const analysis = analyseSqliteDiff(sql, existingColumns);
-  if (!analysis.hasChanges) {
+  if (!analysis.hasChanges && pendingLegacyBlocks === 0) {
     console.log("[Campfire] Existing SQLite database is already in sync.");
     return;
   }
 
   {
-    const database = new Database(databasePath, { readonly: true, fileMustExist: true });
+    const database = new Database(databasePath, { fileMustExist: true });
     try {
       assertDatabaseIntegrity(database);
       assertUniqueIndexesSafe(
@@ -355,7 +439,7 @@ export function syncSqlite() {
       database.close();
     }
   }
-  if (fingerprint(databasePath) !== beforeDiff) {
+  if (checkpointedDatabaseContentFingerprint(databasePath) !== beforeDiff) {
     throw new Error("SQLite database changed during upgrade analysis; stop Campfire and retry");
   }
 
@@ -364,16 +448,27 @@ export function syncSqlite() {
   console.log(`[Campfire] Backed up SQLite database to ${backupPath}`);
 
   try {
-    runPrisma([
-      "db",
-      "push",
-      "--config",
-      sqliteConfig,
-      "--accept-data-loss",
-    ], { databaseUrl });
-    const database = new Database(databasePath, { readonly: true, fileMustExist: true });
+    if (analysis.hasChanges) {
+      runPrisma([
+        "db",
+        "push",
+        "--config",
+        sqliteConfig,
+        "--accept-data-loss",
+      ], { databaseUrl });
+    }
+    const database = new Database(databasePath, { fileMustExist: true });
     let upgradedColumns;
     try {
+      assertDatabaseIntegrity(database);
+      const dataMigration = migrateLegacySqliteData(database);
+      if (dataMigration.removedLegacyRows > 0) {
+        console.log(
+          "[Campfire] Migrated " +
+            dataMigration.migratedBlocks +
+            " legacy personal block(s).",
+        );
+      }
       assertDatabaseIntegrity(database);
       upgradedColumns = tableColumns(database);
     } finally {

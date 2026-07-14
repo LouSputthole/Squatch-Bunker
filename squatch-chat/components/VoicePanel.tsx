@@ -5,6 +5,20 @@ import { getSocket } from "@/lib/socket";
 import { sounds } from "@/lib/sounds";
 import { getRuntimeConfig, ensureRuntimeConfig } from "@/hooks/useRuntimeConfig";
 import { effectiveUserVolume } from "@/lib/voiceVolume";
+import {
+  AUDIO_SETTINGS_STORAGE_KEY,
+  MEDIA_DEVICE_SETTINGS_EVENT,
+  applyAudioOutputDevice,
+  getMediaDeviceSettings,
+  readAudioSettings,
+  readMediaDeviceSettings,
+  reconcileMediaDeviceSettings,
+  replaceActiveAudioTrack,
+  requestCameraStream,
+  requestVoiceStream,
+  saveAudioSettings,
+  type MediaDeviceSettings,
+} from "@/lib/mediaDeviceSettings";
 
 interface VoiceParticipant {
   userId: string;
@@ -74,6 +88,14 @@ function getIceServers(): RTCConfiguration {
   return { iceServers: servers };
 }
 
+function clearUnavailableMediaDevice(
+  setting: "inputDevice" | "outputDevice" | "videoDevice",
+) {
+  const settings = readAudioSettings();
+  if (!settings[setting]) return;
+  saveAudioSettings({ ...settings, [setting]: "" });
+}
+
 
 function SettingsIcon() {
   return (
@@ -124,6 +146,13 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
   const routingMutedUsersRef = useRef<Set<string>>(new Set());
   const socketToUserRef = useRef<Map<string, string>>(new Map());
   const vadThresholdRef = useRef(15);
+  const mediaDeviceSettingsRef = useRef<MediaDeviceSettings>({
+    inputDevice: "",
+    outputDevice: "",
+    videoDevice: "",
+  });
+  const microphoneChangeIdRef = useRef(0);
+  const microphoneChangeQueueRef = useRef<Promise<void>>(Promise.resolve());
 
   // Screen share state
   const screenStreamRef = useRef<MediaStream | null>(null);
@@ -190,6 +219,165 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
     analyserRef.current = null;
     wasSpeakingRef.current = false;
   }, []);
+
+  const changeMicrophone = useCallback(async (deviceId: string, requestId: number) => {
+    if (
+      requestId !== microphoneChangeIdRef.current
+      || !joinedRef.current
+      || !localStreamRef.current
+    ) {
+      return;
+    }
+
+    let replacementStream: MediaStream;
+    let usedDefault = false;
+    try {
+      const requested = await requestVoiceStream(navigator.mediaDevices, deviceId);
+      replacementStream = requested.stream;
+      usedDefault = requested.usedDefault;
+    } catch (error) {
+      if (requestId === microphoneChangeIdRef.current) {
+        console.error("[Voice] Could not switch input device; keeping the current microphone:", error);
+      }
+      return;
+    }
+
+    const currentStream = localStreamRef.current;
+    if (
+      requestId !== microphoneChangeIdRef.current
+      || !joinedRef.current
+      || !currentStream
+    ) {
+      replacementStream.getTracks().forEach((track) => track.stop());
+      return;
+    }
+
+    const senders = Array.from(peersRef.current.values())
+      .flatMap((peer) => peer.getSenders());
+    const replaced = await replaceActiveAudioTrack(
+      currentStream,
+      replacementStream,
+      senders,
+    );
+
+    if (!replaced) {
+      console.error("[Voice] Could not replace every outgoing audio track; keeping the current microphone.");
+      return;
+    }
+
+    if (!joinedRef.current) {
+      replacementStream.getTracks().forEach((track) => track.stop());
+      return;
+    }
+
+    stopVAD();
+    localStreamRef.current = replacementStream;
+    startVAD(replacementStream);
+    if (usedDefault) {
+      mediaDeviceSettingsRef.current = {
+        ...mediaDeviceSettingsRef.current,
+        inputDevice: "",
+      };
+      clearUnavailableMediaDevice("inputDevice");
+    }
+  }, [startVAD, stopVAD]);
+
+  const queueMicrophoneChange = useCallback((deviceId: string) => {
+    const requestId = ++microphoneChangeIdRef.current;
+    microphoneChangeQueueRef.current = microphoneChangeQueueRef.current
+      .then(() => changeMicrophone(deviceId, requestId))
+      .catch((error) => {
+        console.error("[Voice] Unexpected microphone switch failure:", error);
+      });
+  }, [changeMicrophone]);
+
+  useEffect(() => {
+    function applyDeviceSettings(nextSettings: MediaDeviceSettings) {
+      const previousSettings = mediaDeviceSettingsRef.current;
+      mediaDeviceSettingsRef.current = nextSettings;
+      const inputChanged = previousSettings.inputDevice !== nextSettings.inputDevice;
+      const outputChanged = previousSettings.outputDevice !== nextSettings.outputDevice;
+
+      if (outputChanged) {
+        audioElementsRef.current.forEach((audio) => {
+          void applyAudioOutputDevice(audio, nextSettings.outputDevice);
+        });
+      }
+
+      if (
+        inputChanged
+        && joinedRef.current
+        && localStreamRef.current
+      ) {
+        queueMicrophoneChange(nextSettings.inputDevice);
+      }
+
+      return { inputChanged, outputChanged };
+    }
+
+    function handleDeviceSettingsChange(event: Event) {
+      const nextSettings = (event as CustomEvent<MediaDeviceSettings>).detail;
+      applyDeviceSettings(nextSettings ?? readMediaDeviceSettings());
+    }
+
+    function handleStorage(event: StorageEvent) {
+      if (event.key === AUDIO_SETTINGS_STORAGE_KEY || event.key === null) {
+        applyDeviceSettings(readMediaDeviceSettings());
+      }
+    }
+
+    async function refreshAvailableDevices() {
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const reconciled = reconcileMediaDeviceSettings(readAudioSettings(), devices);
+        const nextSettings = getMediaDeviceSettings(reconciled.settings);
+        const { inputChanged, outputChanged } = applyDeviceSettings(nextSettings);
+
+        if (reconciled.changed) saveAudioSettings(reconciled.settings);
+
+        if (!outputChanged) {
+          audioElementsRef.current.forEach((audio) => {
+            void applyAudioOutputDevice(audio, nextSettings.outputDevice);
+          });
+        }
+
+        const activeTrack = localStreamRef.current?.getAudioTracks()[0];
+        const activeDeviceId = activeTrack?.getSettings().deviceId;
+        const availableInputs = new Set(
+          devices
+            .filter((device) => device.kind === "audioinput")
+            .map((device) => device.deviceId),
+        );
+        const activeInputUnavailable = activeTrack?.readyState === "ended"
+          || Boolean(activeDeviceId && !availableInputs.has(activeDeviceId));
+
+        if (
+          !inputChanged
+          && activeInputUnavailable
+          && joinedRef.current
+          && localStreamRef.current
+        ) {
+          queueMicrophoneChange(nextSettings.inputDevice);
+        }
+      } catch (error) {
+        console.error("[Voice] Could not refresh media devices:", error);
+      }
+    }
+
+    function handleDeviceChange() {
+      void refreshAvailableDevices();
+    }
+
+    applyDeviceSettings(readMediaDeviceSettings());
+    window.addEventListener(MEDIA_DEVICE_SETTINGS_EVENT, handleDeviceSettingsChange);
+    window.addEventListener("storage", handleStorage);
+    navigator.mediaDevices.addEventListener("devicechange", handleDeviceChange);
+    return () => {
+      window.removeEventListener(MEDIA_DEVICE_SETTINGS_EVENT, handleDeviceSettingsChange);
+      window.removeEventListener("storage", handleStorage);
+      navigator.mediaDevices.removeEventListener("devicechange", handleDeviceChange);
+    };
+  }, [queueMicrophoneChange]);
 
   // ─── Screen Share Logic ───
 
@@ -304,10 +492,18 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
     } else {
       // Turn on: get camera stream, add video track to all peers
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 24 } },
-          audio: false,
-        });
+        const { videoDevice } = readMediaDeviceSettings();
+        const { stream, usedDefault } = await requestCameraStream(
+          navigator.mediaDevices,
+          videoDevice,
+        );
+        if (usedDefault) {
+          mediaDeviceSettingsRef.current = {
+            ...mediaDeviceSettingsRef.current,
+            videoDevice: "",
+          };
+          clearUnavailableMediaDevice("videoDevice");
+        }
         cameraStreamRef.current = stream;
         const videoTrack = stream.getVideoTracks()[0];
 
@@ -497,6 +693,7 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
             audioElementsRef.current.set(remoteSocketId, audio);
           }
           audio.srcObject = stream;
+          void applyAudioOutputDevice(audio, mediaDeviceSettingsRef.current.outputDevice);
           // Apply saved volume for this user
           const uid = socketToUserRef.current.get(remoteSocketId);
           if (uid) {
@@ -601,10 +798,19 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
 
   const autoJoin = useEffectEvent(async (isCancelled: () => boolean) => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-        video: false,
-      });
+      const deviceSettings = readMediaDeviceSettings();
+      mediaDeviceSettingsRef.current = deviceSettings;
+      const { stream, usedDefault } = await requestVoiceStream(
+        navigator.mediaDevices,
+        deviceSettings.inputDevice,
+      );
+      if (usedDefault) {
+        mediaDeviceSettingsRef.current = {
+          ...mediaDeviceSettingsRef.current,
+          inputDevice: "",
+        };
+        clearUnavailableMediaDevice("inputDevice");
+      }
       if (isCancelled()) { stream.getTracks().forEach((track) => track.stop()); return; }
       localStreamRef.current = stream;
       startVAD(stream);
@@ -660,6 +866,7 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
     joinedChannelRef.current = null;
     setJoined(false);
     joinedRef.current = false;
+    microphoneChangeIdRef.current += 1;
     setMuted(false);
     setDeafened(false);
     setParticipants([]);
@@ -972,6 +1179,7 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
     const incomingScreens = incomingScreensRef.current;
     return () => {
       joinedRef.current = false;
+      microphoneChangeIdRef.current += 1;
       if (joinedChannelRef.current) {
         getSocket().emit("voice:leave", joinedChannelRef.current);
       }

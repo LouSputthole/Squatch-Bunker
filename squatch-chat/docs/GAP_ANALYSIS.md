@@ -58,12 +58,16 @@ These changes address concrete correctness, authorization, and operations risks.
 
 ### P0 — release and managed-service gates
 
-1. **Clean release evidence.** The current dirty Node 24 worktree is locally green (61 passing files, 373 passing tests, lint, typecheck, dual-provider Prisma checks, idempotent SQLite sync, production build, high-severity audit, and 200-client sanity), but release evidence still requires an untracked-file-free Node 22 checkout plus fresh SQLite upgrade, live PostgreSQL migration, and Docker checks.
+1. **Clean release evidence.** The `0.1.0-beta.1` release line defines clean
+   Node 22 zero-config/reproducibility, real previous-version PostgreSQL upgrade,
+   and production Compose persistence/backup/restore CI gates. An exact-candidate green run and public staging evidence are still required before tagging.
 2. **Backup and restore operations.** Define retention, encryption, ownership, off-host storage, and recovery objectives; then restore the database, public media, and private attachments into a clean environment. Campfire currently documents backups but does not provide a managed backup product.
 3. **Public media reliability.** Configure and exercise TURN across residential, corporate, and mobile networks. The current peer-to-peer mesh remains a practical small-room design, not a large-room media architecture.
 4. **SFU client integration.** Dormant LiveKit token groundwork is not Discord-scale voice. `sfu_voice` remains planned and denied to every tier; the browser client, deployment, capacity model, failure fallback, moderation, and observability still have to be completed and tested.
 5. **Managed-service readiness.** Legal pages, privacy terms, data-processing posture, live billing/webhook drills, status page, on-call ownership, abuse handling, support channel, and restore evidence are required before charging users.
-6. **Distribution verification.** The current worktree passed desktop staging and verification and rebuilt portable/NSIS candidates with recorded checksums. Both remain unsigned, and this environment did not execute the actual binaries without explicit unsigned-artifact authorization. Installer state under `%APPDATA%\Campfire`, portable state under adjacent `CampfireData`, actual launch, install/upgrade/repair/uninstall, clean-machine coverage, signing, backup/restore, and failure paths remain release gates.
+6. **Distribution verification.** Historical `0.0.3` desktop staging and build
+   evidence does not apply to the beta. The beta source must preserve real prior
+   installed/portable state, and any published artifact still requires candidate-specific build, signing, launch, lifecycle, clean-machine, backup/restore, and failure-path evidence.
 7. **Live billing and recovery proof.** Source-level entitlement and password-reset safeguards now exist, but a paid launch still needs live Stripe signature/replay/checkout/portal/refund/payment-failure drills, production-database transition tests, and verified Resend domain, delivery, bounce, abuse, and monitoring behavior.
 
 ### P1 — major Discord/product gaps

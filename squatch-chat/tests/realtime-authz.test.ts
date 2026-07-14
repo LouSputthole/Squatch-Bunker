@@ -39,13 +39,16 @@ let userCId: string;
 // server-side presence/voice state (keyed by userId) doesn't leak between tests.
 const openSockets: ClientSocket[] = [];
 
-function connect(token?: string): Promise<ClientSocket> {
+function connect(token?: string, origin?: string): Promise<ClientSocket> {
   const socket = ioc(`http://localhost:${port}`, {
     path: SOCKET_PATH,
     transports: ["websocket"],
     reconnection: false,
     forceNew: true,
-    extraHeaders: token ? { cookie: `squatch-token=${token}` } : {},
+    extraHeaders: {
+      ...(token ? { cookie: `squatch-token=${token}` } : {}),
+      ...(origin ? { origin } : {}),
+    },
   });
   openSockets.push(socket);
   return new Promise((resolve, reject) => {
@@ -173,6 +176,10 @@ describe("socket handshake auth", () => {
   it("accepts a connection with a valid token", async () => {
     const a = await connect(tokenA);
     expect(a.connected).toBe(true);
+  });
+
+  it("rejects a valid ambient session from a hostile browser origin", async () => {
+    await expect(connect(tokenA, "https://evil.example")).rejects.toBeDefined();
   });
 });
 

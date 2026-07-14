@@ -27,6 +27,14 @@ describe("hosted deployment safety", () => {
 
     expect(compose).toContain("${DB_PASSWORD:?Set DB_PASSWORD");
     expect(compose).not.toContain("${DB_PASSWORD:-postgres}");
+    expect(compose).toMatch(
+      /image: postgres:16-alpine@sha256:[a-f0-9]{64}/,
+    );
+    expect(dockerfile).toMatch(/^FROM node:22-alpine@sha256:[a-f0-9]{64} AS base$/m);
+    expect(compose).toContain(
+      "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-campfire}",
+    );
+    expect(compose).toContain('"127.0.0.1:${PORT:-3000}:3000"');
     expect(dockerfile).toContain('case "${DATABASE_URL:-}" in');
     expect(dockerfile).toContain("supports PostgreSQL DATABASE_URL values only");
     expect(dockerfile).toContain("npm run db:migrate");
@@ -42,5 +50,46 @@ describe("hosted deployment safety", () => {
     expect(compose).toContain(
       'CAMPFIRE_TRUST_PROXY_HOPS: "${CAMPFIRE_TRUST_PROXY_HOPS:-}"',
     );
+  });
+
+  it("forwards the documented Community runtime settings", () => {
+    const compose = projectFile("docker-compose.prod.yml");
+
+    for (const variable of [
+      "COOKIE_NAME",
+      "INSTANCE_ADMIN_USER_IDS",
+      "MAX_AVATAR_SIZE",
+      "MAX_UPLOAD_SIZE",
+      "RATE_LIMIT_REQUESTS",
+      "RATE_LIMIT_WINDOW_MS",
+      "GIPHY_API_KEY",
+      "TENOR_API_KEY",
+      "LIBRETRANSLATE_URL",
+      "LIBRETRANSLATE_KEY",
+      "SCHEDULER_SECRET",
+      "GITHUB_CLIENT_ID",
+      "GITHUB_CLIENT_SECRET",
+      "GOOGLE_CLIENT_ID",
+      "GOOGLE_CLIENT_SECRET",
+    ]) {
+      expect(compose).toContain(variable + ': "${' + variable);
+    }
+  });
+
+  it("does not forward unsupported runtime/build-time overrides", () => {
+    const compose = projectFile("docker-compose.prod.yml");
+
+    for (const variable of [
+      "SOCKET_PATH",
+      "NEXT_PUBLIC_SOCKET_PATH",
+      "NEXT_PUBLIC_SOCKET_URL",
+      "COOKIE_SECURE",
+      "CAMPFIRE_BIND_HOST",
+      "LIVEKIT_URL",
+      "LIVEKIT_API_KEY",
+      "LIVEKIT_API_SECRET",
+    ]) {
+      expect(compose).not.toContain(`${variable}:`);
+    }
   });
 });

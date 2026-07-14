@@ -3,7 +3,7 @@
 
 services:
   db:
-    image: postgres:16-alpine
+    image: postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
     container_name: campfire-db
     restart: unless-stopped
     environment:
@@ -13,10 +13,15 @@ services:
     volumes:
       - campfire-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres}"]
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-campfire}",
+        ]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 10s
 
   app:
     build: .
@@ -26,17 +31,32 @@ services:
       db:
         condition: service_healthy
     ports:
-      - "${PORT:-3000}:3000"
+      - "127.0.0.1:${PORT:-3000}:3000"
     environment:
       NODE_ENV: production
       CAMPFIRE_EDITION: "${CAMPFIRE_EDITION:-community}"
       DATABASE_URL: "postgresql://${DB_USER:-postgres}:${DB_PASSWORD:?Set DB_PASSWORD to a strong random value}@db:5432/${DB_NAME:-campfire}?schema=public"
       JWT_SECRET: "${JWT_SECRET:?Set JWT_SECRET to at least 32 random characters}"
+      COOKIE_NAME: "${COOKIE_NAME:-squatch-token}"
+      INSTANCE_ADMIN_USER_IDS: "${INSTANCE_ADMIN_USER_IDS:-}"
       NEXT_PUBLIC_APP_URL: "${NEXT_PUBLIC_APP_URL:-}"
       STRICT_CORS: "${STRICT_CORS:-false}"
       CORS_ORIGINS: "${CORS_ORIGINS:-}"
       CAMPFIRE_UPLOAD_DIR: "/app/media"
       CAMPFIRE_TRUST_PROXY_HOPS: "${CAMPFIRE_TRUST_PROXY_HOPS:-}"
+      MAX_AVATAR_SIZE: "${MAX_AVATAR_SIZE:-2097152}"
+      MAX_UPLOAD_SIZE: "${MAX_UPLOAD_SIZE:-10485760}"
+      RATE_LIMIT_REQUESTS: "${RATE_LIMIT_REQUESTS:-30}"
+      RATE_LIMIT_WINDOW_MS: "${RATE_LIMIT_WINDOW_MS:-60000}"
+      GIPHY_API_KEY: "${GIPHY_API_KEY:-}"
+      TENOR_API_KEY: "${TENOR_API_KEY:-}"
+      LIBRETRANSLATE_URL: "${LIBRETRANSLATE_URL:-https://libretranslate.com}"
+      LIBRETRANSLATE_KEY: "${LIBRETRANSLATE_KEY:-}"
+      SCHEDULER_SECRET: "${SCHEDULER_SECRET:-}"
+      GITHUB_CLIENT_ID: "${GITHUB_CLIENT_ID:-}"
+      GITHUB_CLIENT_SECRET: "${GITHUB_CLIENT_SECRET:-}"
+      GOOGLE_CLIENT_ID: "${GOOGLE_CLIENT_ID:-}"
+      GOOGLE_CLIENT_SECRET: "${GOOGLE_CLIENT_SECRET:-}"
       STRIPE_SECRET_KEY: "${STRIPE_SECRET_KEY:-}"
       STRIPE_WEBHOOK_SECRET: "${STRIPE_WEBHOOK_SECRET:-}"
       STRIPE_PRICE_MONTHLY: "${STRIPE_PRICE_MONTHLY:-}"
@@ -55,7 +75,8 @@ services:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 15s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 20s
 
 
 volumes:

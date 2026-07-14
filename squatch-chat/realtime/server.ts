@@ -14,6 +14,7 @@ import {
 } from "@/lib/realtimeControl";
 import { usersHaveBlock } from "@/lib/userBlocks";
 import { checkRateLimit } from "@/lib/rateLimit";
+import { createOriginPolicy } from "@/lib/originPolicy";
 
 const COOKIE_NAME = process.env.COOKIE_NAME || "squatch-token";
 const SOCKET_PATH = process.env.SOCKET_PATH || "/api/socketio";
@@ -40,32 +41,11 @@ function isBlob(v: unknown): boolean {
 // working regardless. Cross-origin connections must be explicitly allow-listed,
 // plus — in self-hosted mode — private-LAN origins so "share the Network URL"
 // and cross-port dev still work without exposing the box to public origins.
-const SELF_HOSTED = !process.env.CORS_ORIGINS && !process.env.STRICT_CORS;
-const ALLOWED_ORIGINS = new Set<string>();
-{
-  const raw = process.env.CORS_ORIGINS || process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-  for (const o of raw.split(",").map((s) => s.trim()).filter(Boolean)) ALLOWED_ORIGINS.add(o);
-}
-
-function isPrivateLanOrigin(origin: string): boolean {
-  try {
-    const { hostname } = new URL(origin);
-    if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1") return true;
-    // RFC1918 private ranges + link-local — not public internet origins.
-    return /^(10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.)/.test(hostname);
-  } catch {
-    return false;
-  }
-}
-
-function isOriginAllowed(origin: string | undefined): boolean {
-  // No Origin header (native apps, server-to-server) carries no ambient-cookie
-  // CSWSH risk.
-  if (!origin) return true;
-  if (ALLOWED_ORIGINS.has(origin)) return true;
-  if (SELF_HOSTED && isPrivateLanOrigin(origin)) return true;
-  return false;
-}
+const { isOriginAllowed } = createOriginPolicy({
+  corsOrigins: process.env.CORS_ORIGINS,
+  appUrl: process.env.NEXT_PUBLIC_APP_URL,
+  strictCors: process.env.STRICT_CORS,
+});
 
 // ─── Process-level safety nets ───
 // A malformed packet or rejected promise must never take down the shared
@@ -142,6 +122,8 @@ export function attachSocketIO(
   options: { rateLimitNow?: () => number } = {},
 ): Server {
   const io = new Server(httpServer, {
+    allowRequest: (request, callback) =>
+      callback(null, isOriginAllowed(request.headers.origin)),
     cors: {
       origin: (origin, callback) => callback(null, isOriginAllowed(origin)),
       credentials: true,

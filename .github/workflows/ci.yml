@@ -10,33 +10,51 @@ permissions:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
 
     defaults:
       run:
         # The app lives in squatch-chat/; every step runs from there.
         working-directory: squatch-chat
 
-    env:
-      # Harmless CI values. Tests force their own throwaway SQLite file, but
-      # lib/config validates JWT_SECRET at import and the build/postinstall need
-      # a database URL — SQLite keeps CI dependency-free (no Postgres service).
-      JWT_SECRET: ci-jwt-secret-not-a-real-secret-0123456789-abcdef
-      DATABASE_URL: file:./data/campfire.db
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: squatch-chat/package-lock.json
+      - name: Verify release tag matches package version
+        if: github.ref_type == 'tag'
+        run: |
+          package_version="$(node -p "require('./package.json').version")"
+          tag_version="${GITHUB_REF_NAME#v}"
+          if [ "$tag_version" != "$package_version" ]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match package version ${package_version}." >&2
+            exit 1
+          fi
+      - name: Assert clean install inputs
+        run: |
+          test ! -e .env
+          test ! -d node_modules
+          test ! -d generated
+          test ! -e data/campfire.db
 
       # postinstall generates both Prisma clients and synchronizes SQLite.
       - name: Install dependencies
         run: npm ci
 
+
+      - name: Verify zero-config installation
+        run: |
+          grep -Fxq 'DATABASE_URL="file:./data/campfire.db"' .env
+          grep -Eq '^JWT_SECRET="[0-9a-f]{64}"$' .env
+          test -s data/campfire.db
+
+      - name: Check release metadata
+        run: npm run release:check
       - name: Audit production dependencies
         run: npm audit --audit-level=high
 
@@ -54,3 +72,24 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      - name: Verify reproducible regeneration and build
+        run: |
+          find generated -type f -print0 |
+            sort -z |
+            xargs -0 sha256sum > "$RUNNER_TEMP/prisma-first.sha256"
+
+          rm -rf generated .next
+          npm run db:generate
+          npm run db:check
+
+          find generated -type f -print0 |
+            sort -z |
+            xargs -0 sha256sum > "$RUNNER_TEMP/prisma-second.sha256"
+
+          diff -u \
+            "$RUNNER_TEMP/prisma-first.sha256" \
+            "$RUNNER_TEMP/prisma-second.sha256"
+
+          npm run build
+          git diff --exit-code -- prisma/schema.postgresql.prisma

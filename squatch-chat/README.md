@@ -2,7 +2,7 @@
 
 Campfire is an open-source, self-hostable voice and chat community app: Discord-shaped servers, channels, DMs, roles, text, and voice, with a warmer “sit around the fire” identity.
 
-> **Current status: pre-release stabilization.** The current worktree is suitable for development and invited self-hosted alpha testing after the release gates pass. It is not yet claimed to have Discord parity, Discord-scale voice, a production SLA, or production-ready mobile/desktop distribution. Read the [gap analysis](./docs/GAP_ANALYSIS.md) and [release checklist](./docs/RELEASE_CHECKLIST.md) before exposing it publicly.
+> **Current status: `0.1.0-beta.1` release-candidate stabilization.** This version is intended for invited, small-community self-hosted beta testing only after its candidate-specific release gates pass; it is not yet a published release or a production SLA. Read the [beta release note](./docs/releases/0.1.0-beta.1.md), [gap analysis](./docs/GAP_ANALYSIS.md), and [release checklist](./docs/RELEASE_CHECKLIST.md) before exposing it publicly.
 
 ## What Campfire includes
 
@@ -39,7 +39,7 @@ Prerequisites:
 From this directory:
 
 ```bash
-npm install
+npm ci
 npm run host
 ```
 
@@ -56,6 +56,7 @@ The printed network URL is useful on a trusted LAN. Browsers generally require H
 npm run host
 
 # Automated release checks
+npm run release:check
 npm run db:check
 npm test
 npm run lint
@@ -71,7 +72,7 @@ SQLite is intended for a small, single Campfire instance. For a managed or large
 
 ```bash
 DATABASE_URL="postgresql://user:password@host:5432/campfire?schema=public"
-npm install
+npm ci
 npm run db:migrate
 npm run db:check
 npm run build
@@ -90,6 +91,17 @@ The production Compose path is PostgreSQL-only. It includes the app plus Postgre
 # Set strong, unique JWT_SECRET and DB_PASSWORD values first.
 docker compose -f docker-compose.prod.yml up -d --build
 ```
+
+For the `0.1.0-beta.1` Community image, Compose intentionally uses one
+same-origin Socket.IO endpoint at `/api/socketio`, binds the published app port
+to host loopback, and fixes media storage at `/app/media`. It forwards the
+documented Community settings for admin access, cookie naming, upload and rate
+limits, GIF search, translation, scheduled-message authorization, OAuth, email,
+CORS, proxy trust, and TURN. Custom socket paths/URLs, `COOKIE_SECURE`,
+`CAMPFIRE_BIND_HOST`, and dormant LiveKit settings are outside this Compose beta
+contract. Use URL-safe `DB_USER`, `DB_NAME`, and `DB_PASSWORD` values because
+Compose constructs `DATABASE_URL`; `openssl rand -hex 32` is the safe password
+default.
 
 Docker does not remove the need for a reverse proxy, HTTPS, TURN, encrypted backups, monitoring, updates, or restore drills. See [DEPLOY.md](./docs/DEPLOY.md) for the public VPS path.
 
@@ -112,9 +124,15 @@ WebRTC voice is currently peer-to-peer mesh. It is appropriate for small rooms; 
 
 ## Windows portable and installer status
 
-Desktop distribution uses an Electron/electron-builder layer around the same custom server. The current worktree generates `Campfire-Portable-0.0.3-x64.exe` and `Campfire-Setup-0.0.3-x64.exe` as local release candidates.
+Desktop distribution uses an Electron/electron-builder layer around the same custom server. Package metadata now targets `0.1.0-beta.1`, but no beta desktop artifact has been validated or published. Earlier `0.0.3` local binaries are not beta artifacts.
 
-The current worktree passed desktop staging and staged-runtime verification, then rebuilt both Windows candidates. Both binaries are still unsigned, and actual portable/installer launch smoke was not run because this environment requires explicit authorization to execute unsigned local artifacts. Installer state is intended for `%APPDATA%\Campfire`; portable state is intended for `CampfireData` beside the executable. Actual launch, NSIS install/upgrade/repair/uninstall, signing, and independent clean-machine tests remain release gates. These are not production-ready distribution claims.
+Earlier `0.0.3` work passed desktop staging, staged-runtime verification, and
+rebuilt both Windows candidates. That evidence does not carry forward to this
+beta: the old binaries are unsigned and were not launch-tested. Installer state
+is intended for `%APPDATA%\Campfire`; portable state is intended for
+`CampfireData` beside the executable. A candidate-specific build, actual launch,
+NSIS install/upgrade/repair/uninstall, signing, and independent clean-machine
+tests remain release gates. These are not production-ready distribution claims.
 
 The packaging entry points are the [electron-builder configuration](./packaging/electron-builder.json), [staging script](./packaging/stage-desktop.mjs), and [Electron launcher](./desktop/main.cjs). See the desktop section of [RELEASE_CHECKLIST.md](./docs/RELEASE_CHECKLIST.md) before publishing artifacts from `desktop/dist/`.
 
@@ -148,6 +166,7 @@ See [SECURITY.md](./docs/SECURITY.md) for the threat model and operator hardenin
 
 ## Documentation
 
+- [0.1.0-beta.1 release note](./docs/releases/0.1.0-beta.1.md) - intended beta scope, operator actions, limitations, rollback, and open evidence gates
 - [Gap analysis](./docs/GAP_ANALYSIS.md) — what is complete, bounded, or still missing
 - [Editions](./docs/EDITIONS.md) — free AGPL self-hosting versus managed hosting
 - [Release checklist](./docs/RELEASE_CHECKLIST.md) — evidence required before shipping
