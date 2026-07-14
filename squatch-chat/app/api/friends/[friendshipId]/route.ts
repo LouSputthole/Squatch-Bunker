@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
+import { createUserBlock, usersHaveBlock } from "@/lib/userBlocks";
 
 // PATCH — accept or block a friend request
 export async function PATCH(
@@ -34,9 +35,18 @@ export async function PATCH(
       return NextResponse.json({ error: "Request already resolved" }, { status: 409 });
     }
 
+    if (action === "block") {
+      const block = await createUserBlock(session.userId, friendship.requesterId);
+      return NextResponse.json({ block, blocked: true });
+    }
+
+    if (await usersHaveBlock(session.userId, friendship.requesterId)) {
+      return NextResponse.json({ error: "Cannot accept request" }, { status: 403 });
+    }
+
     const updated = await prisma.friendship.update({
       where: { id: friendshipId },
-      data: { status: action === "accept" ? "accepted" : "blocked" },
+      data: { status: "accepted" },
     });
 
     return NextResponse.json({ friendship: updated });

@@ -42,14 +42,32 @@ export async function POST(req: Request) {
     });
 
     if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      return NextResponse.json({ error: (err as any).error ?? "Translation failed" }, { status: res.status });
+      const errorPayload: unknown = await res.json().catch(() => null);
+      const providerError =
+        typeof errorPayload === "object" &&
+        errorPayload !== null &&
+        "error" in errorPayload &&
+        typeof errorPayload.error === "string"
+          ? errorPayload.error
+          : "Translation failed";
+      return NextResponse.json({ error: providerError }, { status: res.status });
     }
 
-    const data = await res.json() as { translatedText: string; detectedLanguage?: unknown };
+    const data: unknown = await res.json();
+    if (
+      typeof data !== "object" ||
+      data === null ||
+      !("translatedText" in data) ||
+      typeof data.translatedText !== "string"
+    ) {
+      return NextResponse.json(
+        { error: "Translation service returned an invalid response" },
+        { status: 502 },
+      );
+    }
     return NextResponse.json({
       translatedText: data.translatedText,
-      detectedLanguage: data.detectedLanguage,
+      detectedLanguage: "detectedLanguage" in data ? data.detectedLanguage : undefined,
     });
   } catch (err: unknown) {
     if (err instanceof Error && err.name === "TimeoutError") {

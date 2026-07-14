@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
 import Avatar from "@/components/Avatar";
 import { displayName } from "@/lib/utils";
@@ -10,6 +11,7 @@ interface UserProfileModalProps {
   onClose: () => void;
   onMessageUser?: (userId: string) => void;
   onAddFriend?: (userId: string) => void;
+  onBlockChange?: (userId: string, blocked: boolean) => void;
 }
 
 interface UserData {
@@ -35,12 +37,17 @@ function formatJoinDate(iso: string) {
   return d.toLocaleDateString(undefined, { month: "long", year: "numeric" });
 }
 
-export default function UserProfileModal({
+export default function UserProfileModal(props: UserProfileModalProps) {
+  return <UserProfileContent key={props.userId} {...props} />;
+}
+
+function UserProfileContent({
   userId,
   currentUserId,
   onClose,
   onMessageUser,
   onAddFriend,
+  onBlockChange,
 }: UserProfileModalProps) {
   const backdropRef = useRef<HTMLDivElement>(null);
   const [user, setUser] = useState<UserData | null>(null);
@@ -49,6 +56,10 @@ export default function UserProfileModal({
   const [mutualServers, setMutualServers] = useState<MutualServer[]>([]);
   const [serversLoading, setServersLoading] = useState(false);
   const [friendStatus, setFriendStatus] = useState<"idle" | "sending" | "sent" | "friends" | "error">("idle");
+  const [blockStatus, setBlockStatus] = useState<"loading" | "unblocked" | "blocked" | "saving" | "error">(
+    userId === currentUserId ? "unblocked" : "loading",
+  );
+  const [blockError, setBlockError] = useState<string | null>(null);
 
   // Edit state
   const [editing, setEditing] = useState(false);
@@ -59,28 +70,64 @@ export default function UserProfileModal({
   const isSelf = userId === currentUserId;
 
   useEffect(() => {
-    setLoading(true);
+    let cancelled = false;
     fetch(`/api/users/${userId}`)
       .then((r) => r.json())
       .then((data) => {
-        if (data.user) {
+        if (!cancelled && data.user) {
           setUser(data.user);
           setEditBio(data.user.bio || "");
           setEditBanner(data.user.banner || "");
         }
       })
-      .finally(() => setLoading(false));
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [userId]);
 
   useEffect(() => {
+    if (isSelf) return;
+    let cancelled = false;
+    fetch(`/api/blocks/${userId}`)
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Could not load block status.");
+        return response.json() as Promise<{ blocked: boolean }>;
+      })
+      .then((data) => {
+        if (!cancelled) setBlockStatus(data.blocked ? "blocked" : "unblocked");
+      })
+      .catch((statusError: unknown) => {
+        if (!cancelled) {
+          setBlockStatus("error");
+          setBlockError(
+            statusError instanceof Error ? statusError.message : "Could not load block status.",
+          );
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isSelf, userId]);
+
+  useEffect(() => {
     if (tab !== "servers") return;
-    setServersLoading(true);
+    let cancelled = false;
     fetch(`/api/users/${userId}/mutual-servers`)
       .then((r) => r.json())
       .then((data) => {
-        if (data.servers) setMutualServers(data.servers);
+        if (!cancelled && data.servers) setMutualServers(data.servers);
       })
-      .finally(() => setServersLoading(false));
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setServersLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [tab, userId]);
 
   useEffect(() => {
@@ -97,11 +144,12 @@ export default function UserProfileModal({
 
   async function handleAddFriend() {
     if (onAddFriend) onAddFriend(userId);
+    if (!user) return;
     setFriendStatus("sending");
     const res = await fetch("/api/friends", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ addresseeId: userId }),
+      body: JSON.stringify({ username: user.username }),
     });
     const data = await res.json();
     if (res.ok) {
@@ -113,6 +161,45 @@ export default function UserProfileModal({
           : data.error === "Request already sent"
           ? "sent"
           : "error"
+      );
+    }
+  }
+
+  async function handleBlockToggle() {
+    const wasBlocked = blockStatus === "blocked";
+    if (
+      !wasBlocked &&
+      !window.confirm(
+        "Block this user? Existing friendship will be removed, their shared-server messages will be collapsed, and neither of you can start new DMs or friend requests.",
+      )
+    ) {
+      return;
+    }
+
+    setBlockStatus("saving");
+    setBlockError(null);
+    try {
+      const response = await fetch(
+        wasBlocked ? `/api/blocks/${userId}` : "/api/blocks",
+        wasBlocked
+          ? { method: "DELETE" }
+          : {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ userId }),
+            },
+      );
+      const data = (await response.json().catch(() => null)) as { error?: string } | null;
+      if (!response.ok) throw new Error(data?.error || "Could not update block status.");
+
+      const blocked = !wasBlocked;
+      setBlockStatus(blocked ? "blocked" : "unblocked");
+      if (blocked) setFriendStatus("idle");
+      onBlockChange?.(userId, blocked);
+    } catch (toggleError) {
+      setBlockStatus(wasBlocked ? "blocked" : "unblocked");
+      setBlockError(
+        toggleError instanceof Error ? toggleError.message : "Could not update block status.",
       );
     }
   }
@@ -172,10 +259,13 @@ export default function UserProfileModal({
         {/* Banner */}
         {(user?.banner || editBanner) && !loading ? (
           <div className="relative h-28 overflow-hidden">
-            <img
+            <Image
               src={editing ? editBanner || user?.banner || "" : user?.banner || ""}
               alt="Banner"
-              className="w-full h-full object-cover"
+              fill
+              sizes="(max-width: 600px) 90vw, 540px"
+              className="object-cover"
+              unoptimized
             />
             {editing && (
               <label className="absolute inset-0 flex items-center justify-center bg-black/40 cursor-pointer opacity-0 hover:opacity-100 transition-opacity">
@@ -232,8 +322,9 @@ export default function UserProfileModal({
               </div>
 
               {!isSelf && (
-                <div className="flex gap-2 mt-4">
-                  {onMessageUser && (
+                <div className="mt-4 space-y-2">
+                  <div className="flex gap-2">
+                  {onMessageUser && blockStatus === "unblocked" && (
                     <button
                       onClick={() => { onMessageUser(userId); onClose(); }}
                       className="flex-1 text-sm px-4 py-2 rounded-lg font-medium transition-colors"
@@ -243,7 +334,7 @@ export default function UserProfileModal({
                     </button>
                   )}
                   <button
-                    disabled={friendStatus === "sending" || friendStatus === "sent" || friendStatus === "friends"}
+                    disabled={blockStatus !== "unblocked" || friendStatus === "sending" || friendStatus === "sent" || friendStatus === "friends"}
                     onClick={handleAddFriend}
                     className={`flex-1 text-sm px-4 py-2 rounded-lg font-medium transition-colors ${
                       friendStatus === "friends"
@@ -257,6 +348,8 @@ export default function UserProfileModal({
                   >
                     {friendStatus === "sending"
                       ? "..."
+                      : blockStatus === "blocked"
+                      ? "Blocked"
                       : friendStatus === "friends"
                       ? "Friends"
                       : friendStatus === "sent"
@@ -265,6 +358,26 @@ export default function UserProfileModal({
                       ? "Failed"
                       : "Add Friend"}
                   </button>
+                  <button
+                    type="button"
+                    onClick={handleBlockToggle}
+                    disabled={blockStatus === "loading" || blockStatus === "saving"}
+                    className={`flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-colors disabled:opacity-50 ${
+                      blockStatus === "blocked"
+                        ? "bg-[var(--panel-2)] text-[var(--muted)] hover:text-[var(--text)]"
+                        : "bg-red-500/10 text-red-300 hover:bg-red-500/20"
+                    }`}
+                  >
+                    {blockStatus === "saving"
+                      ? "Saving…"
+                      : blockStatus === "blocked"
+                      ? "Unblock"
+                      : "Block"}
+                  </button>
+                  </div>
+                  {blockError && (
+                    <p className="text-xs text-red-300" role="alert">{blockError}</p>
+                  )}
                 </div>
               )}
 
@@ -293,7 +406,12 @@ export default function UserProfileModal({
             return (
               <button
                 key={t}
-                onClick={() => setTab(t)}
+                onClick={() => {
+                  if (t === "servers" && tab !== "servers") {
+                    setServersLoading(true);
+                  }
+                  setTab(t);
+                }}
                 className={`py-3 px-1 mr-6 text-sm font-medium border-b-2 transition-colors ${
                   tab === t
                     ? "border-[var(--accent-2)] text-[var(--text)]"
@@ -402,10 +520,13 @@ export default function UserProfileModal({
                   {mutualServers.map((server) => (
                     <li key={server.id} className="flex items-center gap-3 p-2 rounded-lg hover:bg-[var(--panel-2)]/50">
                       {server.icon ? (
-                        <img
+                        <Image
                           src={server.icon}
                           alt={server.name}
+                          width={40}
+                          height={40}
                           className="w-10 h-10 rounded-xl object-cover shrink-0"
+                          unoptimized
                         />
                       ) : (
                         <div className="w-10 h-10 rounded-xl bg-[var(--accent-2)]/30 flex items-center justify-center text-sm font-bold text-[var(--text)] shrink-0">

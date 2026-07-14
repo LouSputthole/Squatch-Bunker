@@ -1,7 +1,14 @@
+import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { checkRateLimit } from "@/lib/rateLimit";
-import { requireMembership, requireChannelMembership } from "@/lib/membership";
+import { resolveChannelAccess } from "@/lib/channelAccess";
+import {
+  claimPrivateUpload,
+  parseRemoteAttachmentUrl,
+  privateAttachmentUrl,
+  PrivateUploadClaimError,
+} from "@/lib/privateUploads";
 
 const MAX_MESSAGE_LENGTH = 4000;
 
@@ -28,12 +35,12 @@ export async function GET(request: Request) {
   try {
     const { prisma } = await import("@/lib/db");
 
-    // Authorization: caller must be an active (non-banned) member of the
-    // channel's server. requireChannelMembership returns null if the channel
-    // is missing or the user is not a member / is banned.
-    const access = await requireChannelMembership(channelId, session.userId);
-    if (!access) {
-      return NextResponse.json({ error: "Not a server member" }, { status: 403 });
+    const access = await resolveChannelAccess(channelId, session.userId);
+    if (!access?.canView) {
+      return NextResponse.json(
+        { error: "Not authorized to view this channel" },
+        { status: 403 },
+      );
     }
 
     const messages = await prisma.message.findMany({
@@ -52,6 +59,12 @@ export async function GET(request: Request) {
             id: true,
             content: true,
             author: { select: { id: true, username: true } },
+          },
+        },
+        poll: {
+          include: {
+            options: { orderBy: { position: "asc" }, include: { votes: { select: { userId: true } } } },
+            votes: { select: { userId: true, optionId: true } },
           },
         },
       },
@@ -104,8 +117,39 @@ export async function POST(request: Request) {
     );
   }
 
-  const { channelId, content, attachmentUrl, attachmentName, replyToId, parentMessageId } = await request.json();
-  if (!channelId || (!content?.trim() && !attachmentUrl)) {
+  const {
+    channelId,
+    content,
+    attachmentId: rawAttachmentId,
+    attachmentUrl,
+    attachmentName,
+    replyToId,
+    parentMessageId,
+  } = await request.json();
+  if (
+    rawAttachmentId !== undefined &&
+    (typeof rawAttachmentId !== "string" || !rawAttachmentId.trim())
+  ) {
+    return NextResponse.json({ error: "Invalid attachment" }, { status: 400 });
+  }
+  const attachmentId =
+    typeof rawAttachmentId === "string" ? rawAttachmentId.trim() : null;
+  const remoteAttachment = parseRemoteAttachmentUrl(attachmentUrl);
+  if (!remoteAttachment.ok) {
+    return NextResponse.json(
+      { error: "Local upload URLs cannot be attached to new messages" },
+      { status: 400 },
+    );
+  }
+  if (attachmentId && remoteAttachment.url) {
+    return NextResponse.json({ error: "Choose one attachment" }, { status: 400 });
+  }
+  if (
+    !channelId ||
+    (!(typeof content === "string" && content.trim()) &&
+      !attachmentId &&
+      !remoteAttachment.url)
+  ) {
     return NextResponse.json(
       { error: "channelId and content or attachment are required" },
       { status: 400 }
@@ -132,12 +176,38 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Channel not found" }, { status: 404 });
     }
 
-    // Authorization: caller must be an active (non-banned) member of the
-    // channel's server. requireMembership excludes banned members.
-    const membership = await requireMembership(channel.serverId, session.userId);
+    const access = await resolveChannelAccess(channelId, session.userId);
+    if (!access?.canSend) {
+      return NextResponse.json(
+        { error: "Not authorized to send messages in this channel" },
+        { status: 403 },
+      );
+    }
 
-    if (!membership) {
-      return NextResponse.json({ error: "Not a server member" }, { status: 403 });
+    const references = [replyToId, parentMessageId].filter(
+      (id): id is string => typeof id === "string" && id.length > 0,
+    );
+    if (
+      (replyToId !== undefined && !references.includes(replyToId)) ||
+      (parentMessageId !== undefined && !references.includes(parentMessageId))
+    ) {
+      return NextResponse.json({ error: "Invalid message reference" }, { status: 400 });
+    }
+    if (references.length > 0) {
+      const uniqueReferences = [...new Set(references)];
+      const referencedMessages = await prisma.message.findMany({
+        where: { id: { in: uniqueReferences } },
+        select: { id: true, channelId: true },
+      });
+      if (
+        referencedMessages.length !== uniqueReferences.length ||
+        referencedMessages.some((message) => message.channelId !== channelId)
+      ) {
+        return NextResponse.json(
+          { error: "Referenced messages must belong to this channel" },
+          { status: 400 },
+        );
+      }
     }
 
     // Slow mode check
@@ -160,29 +230,66 @@ export async function POST(request: Request) {
       }
     }
 
-    const message = await prisma.message.create({
-      data: {
-        channelId,
-        authorId: session.userId,
-        content: content?.trim() || "",
-        ...(attachmentUrl ? { attachmentUrl, attachmentName } : {}),
-        ...(replyToId ? { replyToId } : {}),
-        ...(parentMessageId ? { parentMessageId } : {}),
-      },
-      include: {
-        author: { select: { id: true, username: true, avatar: true } },
-        replyTo: {
-          select: {
-            id: true,
-            content: true,
-            author: { select: { id: true, username: true } },
+    const messageId = randomUUID();
+    const message = await prisma.$transaction(async (tx) => {
+      let attachmentData: {
+        attachmentUrl?: string;
+        attachmentName?: string | null;
+        privateUploadId?: string;
+      } = {};
+      if (attachmentId) {
+        const upload = await claimPrivateUpload(tx, {
+          attachmentId,
+          ownerId: session.userId,
+          claimKind: "channel-message",
+          claimId: messageId,
+        });
+        attachmentData = {
+          attachmentUrl: privateAttachmentUrl(upload.id),
+          attachmentName: upload.originalName,
+          privateUploadId: upload.id,
+        };
+      } else if (remoteAttachment.url) {
+        attachmentData = {
+          attachmentUrl: remoteAttachment.url,
+          attachmentName:
+            typeof attachmentName === "string" ? attachmentName.slice(0, 255) : null,
+        };
+      }
+      return tx.message.create({
+        data: {
+          id: messageId,
+          channelId,
+          authorId: session.userId,
+          content: content?.trim() || "",
+          ...attachmentData,
+          ...(replyToId ? { replyToId } : {}),
+          ...(parentMessageId ? { parentMessageId } : {}),
+        },
+        include: {
+          author: { select: { id: true, username: true, avatar: true } },
+          replyTo: {
+            select: {
+              id: true,
+              content: true,
+              author: { select: { id: true, username: true } },
+            },
+          },
+          poll: {
+            include: {
+              options: { orderBy: { position: "asc" }, include: { votes: { select: { userId: true } } } },
+              votes: { select: { userId: true, optionId: true } },
+            },
           },
         },
-      },
+      });
     });
 
     return NextResponse.json({ message }, { status: 201 });
   } catch (err) {
+    if (err instanceof PrivateUploadClaimError) {
+      return NextResponse.json({ error: err.message }, { status: 400 });
+    }
     console.error("[Campfire] Failed to save message:", err);
     return NextResponse.json(
       { error: "Database unavailable. Check the server's database connection (DATABASE_URL)." },

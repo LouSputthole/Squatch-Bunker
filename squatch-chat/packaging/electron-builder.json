@@ -1,0 +1,68 @@
+{
+  "$schema": "https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json",
+  "appId": "com.squatchbunker.campfire",
+  "productName": "Campfire",
+  "asar": true,
+  "npmRebuild": false,
+  "directories": {
+    "app": "desktop",
+    "buildResources": "public",
+    "output": "desktop/dist"
+  },
+  "files": [
+    "main.cjs",
+    "database.cjs",
+    "package.json",
+    "!node_modules{,/**/*}"
+  ],
+  "extraResources": [
+    {
+      "from": "desktop/.stage/server",
+      "to": "server",
+      "filter": [
+        "**/*",
+        "!node_modules{,/**/*}"
+      ]
+    },
+    {
+      "from": "desktop/.stage/server/node_modules",
+      "to": "server/node_modules",
+      "filter": [
+        "**/*"
+      ]
+    },
+    {
+      "from": "LICENSE",
+      "to": "LICENSE.campfire.txt"
+    }
+  ],
+  "win": {
+    "icon": "Campfire-Icon.png",
+    "target": [
+      {
+        "target": "portable",
+        "arch": ["x64"]
+      },
+      {
+        "target": "nsis",
+        "arch": ["x64"]
+      }
+    ],
+    "requestedExecutionLevel": "asInvoker",
+    "signAndEditExecutable": true
+  },
+  "portable": {
+    "artifactName": "Campfire-Portable-${version}-${arch}.${ext}"
+  },
+  "nsis": {
+    "artifactName": "Campfire-Setup-${version}-${arch}.${ext}",
+    "oneClick": false,
+    "perMachine": false,
+    "allowElevation": true,
+    "allowToChangeInstallationDirectory": true,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "runAfterFinish": true,
+    "deleteAppDataOnUninstall": false
+  }
+}

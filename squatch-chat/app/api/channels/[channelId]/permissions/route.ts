@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
+import { notifyRealtimeAuthorizationChange } from "@/lib/realtimeControl";
+import { memberHasPermission } from "@/lib/serverRoles";
 
 export async function GET(
   _req: NextRequest,
@@ -19,10 +21,7 @@ export async function GET(
     });
     if (!channel) return NextResponse.json({ error: "Channel not found" }, { status: 404 });
 
-    const member = await prisma.serverMember.findUnique({
-      where: { serverId_userId: { serverId: channel.serverId, userId: session.userId } },
-    });
-    if (!member || !["owner", "admin"].includes(member.role)) {
+    if (!(await memberHasPermission(channel.serverId, session.userId, "MANAGE_CHANNELS"))) {
       return NextResponse.json({ error: "Admin access required" }, { status: 403 });
     }
 
@@ -61,10 +60,7 @@ export async function PUT(
     });
     if (!channel) return NextResponse.json({ error: "Channel not found" }, { status: 404 });
 
-    const member = await prisma.serverMember.findUnique({
-      where: { serverId_userId: { serverId: channel.serverId, userId: session.userId } },
-    });
-    if (!member || !["owner", "admin"].includes(member.role)) {
+    if (!(await memberHasPermission(channel.serverId, session.userId, "MANAGE_CHANNELS"))) {
       return NextResponse.json({ error: "Admin access required" }, { status: 403 });
     }
 
@@ -92,6 +88,10 @@ export async function PUT(
       },
     });
 
+    await notifyRealtimeAuthorizationChange({
+      scope: "channel",
+      channelId,
+    });
     return NextResponse.json({ permission });
   } catch (err) {
     console.error("[Campfire] Channel permission update error:", err);

@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import Image from "next/image";
+import { useState, useRef } from "react";
 import RolesManager from "@/components/RolesManager";
 
 interface ServerSettingsModalProps {
@@ -24,7 +25,24 @@ interface ServerSettingsModalProps {
 }
 
 export default function ServerSettingsModal({
-  open,
+  ...props
+}: ServerSettingsModalProps) {
+  if (!props.open) return null;
+
+  const resetKey = JSON.stringify([
+    props.serverId,
+    props.serverName,
+    props.serverDescription ?? null,
+    props.serverIcon ?? null,
+    props.serverBanner ?? null,
+    props.isPublic ?? false,
+    props.welcomeMessage ?? null,
+  ]);
+
+  return <ServerSettingsContent key={resetKey} {...props} />;
+}
+
+function ServerSettingsContent({
   serverId,
   serverName,
   serverDescription,
@@ -54,20 +72,6 @@ export default function ServerSettingsModal({
   const [bannerPreview, setBannerPreview] = useState(serverBanner ?? "");
   const iconInputRef = useRef<HTMLInputElement>(null);
   const bannerInputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    setName(serverName);
-    setDescription(serverDescription ?? "");
-    setIsPublic(initialPublic ?? false);
-    setWelcomeMsg(initialWelcome ?? "");
-    setIconPreview(serverIcon ?? "");
-    setBannerPreview(serverBanner ?? "");
-    setTab("general");
-    setError("");
-    setSuccess("");
-  }, [open, serverName, serverDescription, serverIcon, serverBanner, initialPublic, initialWelcome]);
-
-  if (!open) return null;
 
   async function uploadImage(file: File): Promise<string | null> {
     const formData = new FormData();
@@ -195,10 +199,17 @@ export default function ServerSettingsModal({
                   <label className="text-xs text-[var(--muted)] mb-1 block">Icon</label>
                   <button
                     onClick={() => iconInputRef.current?.click()}
-                    className="w-16 h-16 rounded-xl bg-[var(--panel-2)] border border-[var(--accent-2)]/30 flex items-center justify-center overflow-hidden hover:border-[var(--accent-2)] transition-colors"
+                    className="relative w-16 h-16 rounded-xl bg-[var(--panel-2)] border border-[var(--accent-2)]/30 flex items-center justify-center overflow-hidden hover:border-[var(--accent-2)] transition-colors"
                   >
                     {iconPreview ? (
-                      <img src={iconPreview} alt="Icon" className="w-full h-full object-cover" />
+                      <Image
+                        src={iconPreview}
+                        alt="Icon"
+                        fill
+                        sizes="4rem"
+                        className="object-cover"
+                        unoptimized
+                      />
                     ) : (
                       <span className="text-2xl font-bold text-[var(--muted)]">{name.charAt(0).toUpperCase()}</span>
                     )}
@@ -209,10 +220,17 @@ export default function ServerSettingsModal({
                   <label className="text-xs text-[var(--muted)] mb-1 block">Banner</label>
                   <button
                     onClick={() => bannerInputRef.current?.click()}
-                    className="w-full h-16 rounded-lg bg-[var(--panel-2)] border border-[var(--accent-2)]/30 flex items-center justify-center overflow-hidden hover:border-[var(--accent-2)] transition-colors"
+                    className="relative w-full h-16 rounded-lg bg-[var(--panel-2)] border border-[var(--accent-2)]/30 flex items-center justify-center overflow-hidden hover:border-[var(--accent-2)] transition-colors"
                   >
                     {bannerPreview ? (
-                      <img src={bannerPreview} alt="Banner" className="w-full h-full object-cover" />
+                      <Image
+                        src={bannerPreview}
+                        alt="Banner"
+                        fill
+                        sizes="28rem"
+                        className="object-cover"
+                        unoptimized
+                      />
                     ) : (
                       <span className="text-xs text-[var(--muted)]">Click to upload banner</span>
                     )}

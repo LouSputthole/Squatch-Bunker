@@ -42,12 +42,17 @@ yarn-error.log*
 next-env.d.ts
 
 /generated/prisma
+/generated/prisma-postgresql
 
 # temp files
 /tmp/
 
 # local SQLite database (self-host default)
 /data/
+/public/uploads/*
+!/public/uploads/.gitkeep
+/public/avatars/*
+!/public/avatars/.gitkeep
 *.db
 *.db-journal
 prisma/dev.db*

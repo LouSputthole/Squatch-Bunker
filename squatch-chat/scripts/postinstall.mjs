@@ -1,77 +1,65 @@
 #!/usr/bin/env node
-/**
- * Campfire post-install — cross-platform (Node, runs on Windows/macOS/Linux).
- * Replaces the old bash-only postinstall.sh so `npm install` works everywhere.
- *
- * Zero-config self-host path:
- *   1. Create .env with SQLite defaults + a random JWT secret (if .env missing).
- *   2. Point the Prisma datasource provider at the right DB (Prisma 7 can't env() it).
- *   3. Generate the client; for SQLite also create the DB file so first run works.
- *
- * After this, `npm run host` just works. For Postgres, set DATABASE_URL in .env
- * before installing (or edit .env and run `npm run db:push`).
- */
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
-import { execSync } from "node:child_process";
+
 import { randomBytes } from "node:crypto";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const envPath = join(root, ".env");
-const schemaPath = join(root, "prisma", "schema.prisma");
+const generateOnly = process.env.CAMPFIRE_POSTINSTALL_GENERATE_ONLY === "1";
 
-// 1. Create .env (SQLite, self-host defaults) only if there's no .env AND no
-//    DATABASE_URL already in the environment (don't clobber a hosted/Postgres setup).
-if (!existsSync(envPath) && !process.env.DATABASE_URL) {
+function runNode(script, args = []) {
+  const result = spawnSync(process.execPath, [script, ...args], {
+    cwd: root,
+    env: process.env,
+    stdio: "inherit",
+    shell: false,
+  });
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    throw new Error(`${script} failed with exit code ${result.status}`);
+  }
+}
+
+function readEnvVar(key) {
+  if (process.env[key]) return process.env[key];
+  if (!existsSync(envPath)) return "";
+  const match = readFileSync(envPath, "utf8").match(new RegExp(`^${key}=(.*)$`, "m"));
+  return match ? match[1].trim().replace(/^["']|["']$/g, "") : "";
+}
+
+if (!generateOnly && !existsSync(envPath) && !process.env.DATABASE_URL) {
   const secret = randomBytes(32).toString("hex");
   writeFileSync(
     envPath,
     [
       "# Auto-generated for local / self-host (SQLite, zero-config).",
-      "# For the hosted/Postgres setup, set DATABASE_URL to a postgresql:// URL.",
+      "# For hosted PostgreSQL, set DATABASE_URL before installing.",
+      'CAMPFIRE_EDITION="community"',
       'DATABASE_URL="file:./data/campfire.db"',
       `JWT_SECRET="${secret}"`,
       "SOCKET_PORT=3001",
       "",
     ].join("\n"),
   );
-  console.log("[Campfire] Created .env (SQLite self-host defaults, random JWT secret).");
+  console.log("[Campfire] Created .env with SQLite self-host defaults.");
 }
 
-// 2. Detect provider from DATABASE_URL (unset or file: => sqlite).
-function readEnvVar(key) {
-  if (process.env[key]) return process.env[key]; // a real environment value wins over the .env file
-  if (existsSync(envPath)) {
-    const m = readFileSync(envPath, "utf8").match(new RegExp(`^${key}=(.*)$`, "m"));
-    if (m) return m[1].trim().replace(/^["']|["']$/g, "");
-  }
-  return "";
-}
-const dbUrl = readEnvVar("DATABASE_URL");
-const provider = !dbUrl || dbUrl.startsWith("file:") ? "sqlite" : "postgresql";
+// Client generation is mandatory: both server providers are compiled separately.
+runNode(join(root, "scripts", "generate-prisma.mjs"));
 
-// 3. Ensure the datasource provider matches (only touches the datasource line —
-//    the generator line is provider = "prisma-client", which the alternation skips).
-const schema = readFileSync(schemaPath, "utf8");
-const fixed = schema.replace(/provider = "(?:sqlite|postgresql)"/, `provider = "${provider}"`);
-if (fixed !== schema) {
-  writeFileSync(schemaPath, fixed);
-  console.log(`[Campfire] Set Prisma datasource provider to "${provider}".`);
-}
-
-// 4. Generate client; for SQLite, create the DB so the app runs immediately.
-try {
-  if (provider === "sqlite") {
+if (generateOnly) {
+  console.log("[Campfire] Postinstall generation-only mode complete.");
+} else {
+  const databaseUrl = readEnvVar("DATABASE_URL");
+  if (!databaseUrl || databaseUrl.startsWith("file:")) {
     mkdirSync(join(root, "data"), { recursive: true });
-    execSync("npx prisma db push", { cwd: root, stdio: "inherit" });
+    runNode(join(root, "scripts", "sync-sqlite.mjs"));
   } else {
-    execSync("npx prisma generate", { cwd: root, stdio: "inherit" });
-    console.log("[Campfire] Postgres detected — run `npm run db:migrate` (or db:push) once your DB is reachable.");
+    console.log(
+      "[Campfire] PostgreSQL detected. Run `npm run db:migrate` when the database is reachable.",
+    );
   }
-} catch (err) {
-  console.warn(
-    "[Campfire] Prisma setup skipped — run `npm run db:push` after configuring .env.\n         " +
-      (err && err.message ? err.message : err),
-  );
 }

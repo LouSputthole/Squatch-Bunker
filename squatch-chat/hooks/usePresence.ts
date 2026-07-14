@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { getSocket, setPresenceStatus } from "@/lib/socket";
 import type { Server, User } from "@/types/chat";
 
@@ -12,12 +12,28 @@ interface MemberPresence {
   status: PresenceStatus;
 }
 
+interface UserServerAccess {
+  serverId: string;
+  userId: string;
+  role: string;
+  canManageChannels: boolean;
+}
+
 export function usePresence(activeServer: Server | null, user: User | null) {
   const [onlineMembers, setOnlineMembers] = useState<Set<string>>(new Set());
   const [memberStatuses, setMemberStatuses] = useState<Map<string, PresenceStatus>>(new Map());
-  const [userRole, setUserRole] = useState<string>("member");
+  const [userAccess, setUserAccess] = useState<UserServerAccess | null>(null);
   const [myStatus, setMyStatus] = useState<PresenceStatus>("online");
   const activeServerIdRef = useRef<string | null>(null);
+  const currentUserAccess =
+    userAccess !== null &&
+    userAccess.serverId === activeServer?.id &&
+    userAccess.userId === user?.id
+      ? userAccess
+      : null;
+  const userRole = currentUserAccess?.role ?? "member";
+  const canManageChannels =
+    currentUserAccess?.canManageChannels ?? false;
 
   useEffect(() => {
     activeServerIdRef.current = activeServer?.id ?? null;
@@ -27,25 +43,55 @@ export function usePresence(activeServer: Server | null, user: User | null) {
   useEffect(() => {
     if (!activeServer) return;
     const socket = getSocket();
+    const controller = new AbortController();
+    const serverId = activeServer.id;
     // Send role with server join so realtime server can enforce mod permissions
     if (user) {
-      fetch(`/api/servers/${activeServer.id}/members`)
+      fetch(`/api/servers/${serverId}/members`, {
+        signal: controller.signal,
+      })
         .then((r) => r.ok ? r.json() : null)
         .then((data) => {
+          if (controller.signal.aborted || activeServerIdRef.current !== serverId) {
+            return;
+          }
           if (data?.members) {
             const me = data.members.find((m: { id: string; role?: string }) => m.id === user.id);
             const role = me?.role || "member";
-            setUserRole(role);
-            socket.emit("server:join", { serverId: activeServer.id, role });
+            const canManageChannels =
+              Array.isArray(data.currentUserPermissions) &&
+              data.currentUserPermissions.includes("MANAGE_CHANNELS");
+            setUserAccess({
+              serverId,
+              userId: user.id,
+              role,
+              canManageChannels,
+            });
+            socket.emit("server:join", { serverId, role });
           } else {
-            socket.emit("server:join", { serverId: activeServer.id, role: "member" });
+            setUserAccess({
+              serverId,
+              userId: user.id,
+              role: "member",
+              canManageChannels: false,
+            });
+            socket.emit("server:join", { serverId, role: "member" });
           }
         })
         .catch(() => {
-          socket.emit("server:join", { serverId: activeServer.id, role: "member" });
+          if (controller.signal.aborted || activeServerIdRef.current !== serverId) {
+            return;
+          }
+          setUserAccess({
+            serverId,
+            userId: user.id,
+            role: "member",
+            canManageChannels: false,
+          });
+          socket.emit("server:join", { serverId, role: "member" });
         });
     } else {
-      socket.emit("server:join", { serverId: activeServer.id, role: "member" });
+      socket.emit("server:join", { serverId, role: "member" });
     }
 
     function handlePresence(data: { serverId: string; members: MemberPresence[] }) {
@@ -60,19 +106,11 @@ export function usePresence(activeServer: Server | null, user: User | null) {
     }
     socket.on("presence:update", handlePresence);
 
-    // Optimistically show current user as online immediately
-    if (user) {
-      setOnlineMembers((prev) => {
-        if (prev.has(user.id)) return prev;
-        const next = new Set(prev);
-        next.add(user.id);
-        return next;
-      });
-    }
 
     return () => {
+      controller.abort();
       socket.off("presence:update", handlePresence);
-      socket.emit("server:leave", activeServer.id);
+      socket.emit("server:leave", serverId);
     };
   }, [activeServer, user]);
 
@@ -125,10 +163,19 @@ export function usePresence(activeServer: Server | null, user: User | null) {
     setMemberStatuses(new Map());
   };
 
+  // Optimistically include the current user without mirroring props into state.
+  const visibleOnlineMembers = useMemo(() => {
+    if (!activeServer || !user || onlineMembers.has(user.id)) return onlineMembers;
+    const next = new Set(onlineMembers);
+    next.add(user.id);
+    return next;
+  }, [activeServer, onlineMembers, user]);
+
   return {
-    onlineMembers,
+    onlineMembers: visibleOnlineMembers,
     memberStatuses,
     userRole,
+    canManageChannels,
     myStatus,
     changeStatus,
     resetPresence,

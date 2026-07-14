@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 import { getSocket } from "@/lib/socket";
 import type { Channel, Server } from "@/types/chat";
@@ -31,30 +31,31 @@ function saveUnreads(counts: Map<string, number>) {
 export function useChannels(activeServer: Server | null) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const [activeChannel, setActiveChannel] = useState<Channel | null>(null);
+  const [activeChannel, setActiveChannelState] = useState<Channel | null>(null);
   const [unreadCounts, setUnreadCounts] = useState<Map<string, number>>(() => loadStoredUnreads());
-  const activeChannelIdRef = useRef<string | null>(null);
 
   const urlServerId = searchParams.get("s");
   const urlChannelId = searchParams.get("c");
+  const activeChannelId = activeChannel?.id ?? null;
+
+  const clearChannelUnread = useCallback((channelId: string) => {
+    setUnreadCounts((prev) => {
+      if (!prev.has(channelId)) return prev;
+      const next = new Map(prev);
+      next.delete(channelId);
+      return next;
+    });
+  }, []);
+
+  const setActiveChannel = useCallback((channel: Channel | null) => {
+    setActiveChannelState(channel);
+    if (channel) clearChannelUnread(channel.id);
+  }, [clearChannelUnread]);
 
   // Persist unread counts to localStorage whenever they change
   useEffect(() => {
     saveUnreads(unreadCounts);
   }, [unreadCounts]);
-
-  // Sync ref
-  useEffect(() => {
-    activeChannelIdRef.current = activeChannel?.id ?? null;
-    if (activeChannel) {
-      setUnreadCounts((prev) => {
-        if (!prev.has(activeChannel.id)) return prev;
-        const next = new Map(prev);
-        next.delete(activeChannel.id);
-        return next;
-      });
-    }
-  }, [activeChannel]);
 
   // URL sync
   const updateUrl = useCallback((serverId?: string, channelId?: string) => {
@@ -84,7 +85,7 @@ export function useChannels(activeServer: Server | null) {
 
     function handleMessage(channelId: string) {
       return () => {
-        if (channelId === activeChannelIdRef.current) return;
+        if (channelId === activeChannelId) return;
         setUnreadCounts((prev) => {
           const next = new Map(prev);
           next.set(channelId, (next.get(channelId) || 0) + 1);
@@ -103,26 +104,21 @@ export function useChannels(activeServer: Server | null) {
       handlers.forEach(({ event, handler }) => socket.off(event, handler));
       textChannelIds.forEach((id) => socket.emit("channel:leave", id));
     };
-  }, [activeServer]);
+  }, [activeServer, activeChannelId]);
 
   const markChannelRead = useCallback((channelId: string) => {
-    setUnreadCounts((prev) => {
-      if (!prev.has(channelId)) return prev;
-      const next = new Map(prev);
-      next.delete(channelId);
-      return next;
-    });
+    clearChannelUnread(channelId);
     try {
       localStorage.setItem(`lastRead:${channelId}`, new Date().toISOString());
     } catch { /* ignore */ }
-  }, []);
+  }, [clearChannelUnread]);
 
   const selectChannel = useCallback((channel: Channel) => {
     if (!channel.type || channel.type === "text") {
       setActiveChannel(channel);
       markChannelRead(channel.id);
     }
-  }, [markChannelRead]);
+  }, [markChannelRead, setActiveChannel]);
 
   const resetUnreads = useCallback(() => {
     setUnreadCounts(new Map());

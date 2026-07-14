@@ -14,13 +14,21 @@ function isFocusModeActive(): boolean {
 }
 
 export function useDMNotifications(activeConversationId?: string | null) {
-  const [unreadDMs, setUnreadDMs] = useState(0);
+  const [unreadState, setUnreadState] = useState(() => ({
+    count: 0,
+    activeConversationId,
+  }));
   const activeConvRef = useRef(activeConversationId);
+
+  if (unreadState.activeConversationId !== activeConversationId) {
+    setUnreadState({
+      count: activeConversationId ? 0 : unreadState.count,
+      activeConversationId,
+    });
+  }
 
   useEffect(() => {
     activeConvRef.current = activeConversationId;
-    // Clear badge when DM panel is open
-    if (activeConversationId) setUnreadDMs(0);
   }, [activeConversationId]);
 
   useEffect(() => {
@@ -30,7 +38,7 @@ export function useDMNotifications(activeConversationId?: string | null) {
       // Don't count if we're currently in this conversation
       if (activeConvRef.current === data.conversationId) return;
 
-      setUnreadDMs((prev) => prev + 1);
+      setUnreadState((prev) => ({ ...prev, count: prev.count + 1 }));
 
       // Desktop notification (suppressed when focus mode is active)
       if (!isFocusModeActive()) {
@@ -52,5 +60,8 @@ export function useDMNotifications(activeConversationId?: string | null) {
     };
   }, []);
 
-  return { unreadDMs, clearDMBadge: () => setUnreadDMs(0) };
+  return {
+    unreadDMs: unreadState.count,
+    clearDMBadge: () => setUnreadState((prev) => ({ ...prev, count: 0 })),
+  };
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import Image from "next/image";
 
 interface CustomEmoji {
   id: string;
@@ -41,7 +42,9 @@ export default function CustomEmojiManager({ serverId, open, onClose }: CustomEm
   }, [serverId]);
 
   useEffect(() => {
-    if (open) fetchEmojis();
+    if (!open) return;
+    const timer = setTimeout(() => { void fetchEmojis(); }, 0);
+    return () => clearTimeout(timer);
   }, [open, fetchEmojis]);
 
   useEffect(() => {
@@ -179,9 +182,12 @@ export default function CustomEmojiManager({ serverId, open, onClose }: CustomEm
                   key={emoji.id}
                   className="flex flex-col items-center gap-1.5 p-2 rounded-lg bg-[var(--panel-2)] border border-[var(--accent-2)]/20 group relative"
                 >
-                  <img
+                  <Image
                     src={emoji.url}
                     alt={emoji.name}
+                    width={48}
+                    height={48}
+                    unoptimized
                     className="w-12 h-12 object-contain rounded"
                   />
                   <span className="text-[11px] text-[var(--muted)] truncate w-full text-center">

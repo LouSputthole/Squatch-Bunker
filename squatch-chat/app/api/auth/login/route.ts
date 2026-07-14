@@ -1,14 +1,7 @@
 import { NextResponse } from "next/server";
 import { verifyPassword, createToken, setTokenCookie } from "@/lib/auth";
 import { checkRateLimit } from "@/lib/rateLimit";
-
-function clientIp(request: Request): string {
-  return (
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    request.headers.get("x-real-ip") ||
-    "unknown"
-  );
-}
+import { clientIp } from "@/lib/clientIp";
 
 export async function POST(request: Request) {
   const { allowed, remaining, resetAt } = checkRateLimit(`login:${clientIp(request)}`);

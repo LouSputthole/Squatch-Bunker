@@ -12,6 +12,9 @@ import { POST } from "@/app/api/reports/route";
 
 let reporter: { id: string };
 let target: { id: string };
+let server: { id: string };
+let visibleMessage: { id: string };
+let hiddenMessage: { id: string };
 
 function post(body: unknown) {
   return POST(
@@ -29,6 +32,30 @@ beforeAll(async () => {
   });
   target = await prisma.user.create({
     data: { email: "rep-b@t.local", username: "rep_b", passwordHash: "x" },
+  });
+  server = await prisma.server.create({
+    data: { name: "Report scope", ownerId: reporter.id },
+  });
+  await prisma.serverMember.createMany({
+    data: [
+      { serverId: server.id, userId: reporter.id, role: "member" },
+      { serverId: server.id, userId: target.id, role: "member" },
+    ],
+  });
+  const visibleChannel = await prisma.channel.create({
+    data: { serverId: server.id, name: "visible" },
+  });
+  const hiddenChannel = await prisma.channel.create({
+    data: { serverId: server.id, name: "hidden" },
+  });
+  await prisma.channelPermission.create({
+    data: { channelId: hiddenChannel.id, role: "member", canView: false, canSend: false },
+  });
+  visibleMessage = await prisma.message.create({
+    data: { channelId: visibleChannel.id, authorId: target.id, content: "visible abuse evidence" },
+  });
+  hiddenMessage = await prisma.message.create({
+    data: { channelId: hiddenChannel.id, authorId: target.id, content: "private message" },
   });
   authMock.getSession.mockResolvedValue({ userId: reporter.id, username: "rep_a" });
 });
@@ -69,6 +96,48 @@ describe("POST /api/reports", () => {
       reason: "message report with bogus message id",
     });
     expect(res.status).toBe(404);
+  });
+
+  it("allows visible message evidence but hides inaccessible message evidence", async () => {
+    const scopedReporter = await prisma.user.create({
+      data: { email: "rep-visible@t.local", username: "rep_visible", passwordHash: "x" },
+    });
+    await prisma.serverMember.create({
+      data: { serverId: server.id, userId: scopedReporter.id, role: "member" },
+    });
+    authMock.getSession.mockResolvedValueOnce({
+      userId: scopedReporter.id,
+      username: "rep_visible",
+    });
+    expect((await post({
+      targetUserId: target.id,
+      messageId: visibleMessage.id,
+      reason: "visible message contains reportable abuse",
+    })).status).toBe(201);
+
+    authMock.getSession.mockResolvedValueOnce({
+      userId: scopedReporter.id,
+      username: "rep_visible",
+    });
+    expect((await post({
+      targetUserId: target.id,
+      messageId: hiddenMessage.id,
+      reason: "trying to report hidden evidence",
+    })).status).toBe(404);
+  });
+
+  it("does not expose or accept user-level reports without a shared server", async () => {
+    const outsider = await prisma.user.create({
+      data: { email: "rep-outside@t.local", username: "rep_outside", passwordHash: "x" },
+    });
+    authMock.getSession.mockResolvedValueOnce({
+      userId: outsider.id,
+      username: "rep_outside",
+    });
+    expect((await post({
+      targetUserId: target.id,
+      reason: "attempting a report without shared context",
+    })).status).toBe(404);
   });
 
   it("rate-limits a reporter to 5 submissions per hour", async () => {

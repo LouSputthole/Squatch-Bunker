@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { constructWebhookEvent, handleWebhookEvent, isStripeEnabled } from "@/lib/stripe";
+import { constructWebhookEvent, handleWebhookEvent, isStripeEnabled, type BillingEvent } from "@/lib/stripe";
 import { claimEvent, completeEvent, releaseEvent } from "@/lib/webhook-idempotency";
 
 export async function POST(req: Request) {
@@ -16,7 +16,7 @@ export async function POST(req: Request) {
   // sent, so we must NOT parse it as JSON first or verification will fail.
   const rawBody = await req.text();
 
-  let event: { id?: string; type: string; data: { object: Record<string, unknown> } } | null;
+  let event: BillingEvent | null;
   try {
     event = await constructWebhookEvent(rawBody, signature);
   } catch (err) {

@@ -21,6 +21,7 @@ interface MessageContextMenuProps {
   onReact: (emoji: string) => void;
   onCopyText: () => void;
   onBookmark: () => void;
+  onJournal?: () => void;
   onTranslate?: () => void;
   onClose: () => void;
 }
@@ -43,6 +44,7 @@ export default function MessageContextMenu({
   onReact,
   onCopyText,
   onBookmark,
+  onJournal,
   onTranslate,
   onClose,
 }: MessageContextMenuProps) {
@@ -58,11 +60,12 @@ export default function MessageContextMenu({
     const items: string[] = ["reply", "react"];
     if (isOwn && onEdit) items.push("edit");
     items.push("copytext", "bookmark");
+    if (onJournal) items.push("journal");
     if (onTranslate && message.content) items.push("translate");
     if (canPin) items.push("pin");
     if (isOwn && onDelete) items.push("delete");
     return items;
-  }, [isOwn, canPin, onEdit, onDelete, onTranslate, message.content]);
+  }, [isOwn, canPin, onEdit, onDelete, onJournal, onTranslate, message.content]);
 
   // Flip position to avoid viewport overflow
   useEffect(() => {
@@ -212,6 +215,18 @@ export default function MessageContextMenu({
         <span>★</span>
         <span>Bookmark</span>
       </button>
+
+      {onJournal && (
+        <button className={ITEM_CLASS} onClick={wrap(onJournal)} {...itemProps("journal")}>
+          <span aria-hidden="true">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H11a3 3 0 0 1 3 3v15a3 3 0 0 0-3-3H4Z" />
+              <path d="M20 5.5A2.5 2.5 0 0 0 17.5 3H14v18a3 3 0 0 1 3-3h3Z" />
+            </svg>
+          </span>
+          <span>Save to Camp Journal</span>
+        </button>
+      )}
 
       {/* 7. Translate */}
       {onTranslate && message.content && (

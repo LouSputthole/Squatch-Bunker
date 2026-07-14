@@ -2,17 +2,10 @@ import { NextResponse } from "next/server";
 import jwt from "jsonwebtoken";
 import { config } from "@/lib/config";
 import { checkRateLimit } from "@/lib/rateLimit";
+import { clientIp } from "@/lib/clientIp";
 
 const JWT_SECRET = config.jwtSecret;
 const COOKIE_NAME = config.cookieName;
-
-function clientIp(request: Request): string {
-  return (
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    request.headers.get("x-real-ip") ||
-    "unknown"
-  );
-}
 
 export async function POST(request: Request) {
   const rl = checkRateLimit(`guest:${clientIp(request)}`);

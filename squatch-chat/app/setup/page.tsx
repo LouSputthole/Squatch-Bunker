@@ -1,11 +1,11 @@
 "use client";
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 
 export default function SetupPage() {
   const router = useRouter();
   const [checking, setChecking] = useState(true);
-  const [needsSetup, setNeedsSetup] = useState(false);
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -15,11 +15,18 @@ export default function SetupPage() {
 
   useEffect(() => {
     fetch("/api/setup")
-      .then((r) => r.json())
+      .then(async (response) => {
+        const data = await response.json();
+        if (!response.ok) throw new Error("Setup status unavailable");
+        return data;
+      })
       .then((data) => {
-        setNeedsSetup(data.needsSetup);
         setChecking(false);
         if (!data.needsSetup) router.replace("/");
+      })
+      .catch(() => {
+        setError("Campfire could not check the database. Try again in a moment.");
+        setChecking(false);
       });
   }, [router]);
 
@@ -64,7 +71,7 @@ export default function SetupPage() {
     <div className="min-h-screen bg-[var(--bg)] flex items-center justify-center">
       <div className="w-full max-w-md p-8 bg-[var(--panel)] rounded-xl shadow-xl">
         <div className="flex items-center gap-3 mb-6">
-          <img src="/Campfire-Logo.png" alt="Campfire" className="w-10 h-10" />
+          <Image src="/Campfire-Logo.png" alt="Campfire" width={40} height={40} priority />
           <div>
             <h1 className="text-xl font-bold text-[var(--text)]">Welcome to Campfire</h1>
             <p className="text-sm text-[var(--muted)]">First-run setup — create your admin account</p>
@@ -84,6 +91,8 @@ export default function SetupPage() {
               type="text"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
+              minLength={2}
+              maxLength={32}
               required
               className="w-full px-3 py-2 bg-[var(--panel-2)] text-[var(--text)] border border-[var(--accent-2)] rounded focus:outline-none focus:border-[var(--accent)] text-sm"
             />
@@ -97,6 +106,7 @@ export default function SetupPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
+              maxLength={254}
               className="w-full px-3 py-2 bg-[var(--panel-2)] text-[var(--text)] border border-[var(--accent-2)] rounded focus:outline-none focus:border-[var(--accent)] text-sm"
             />
           </div>
@@ -110,6 +120,7 @@ export default function SetupPage() {
               onChange={(e) => setPassword(e.target.value)}
               required
               minLength={8}
+              maxLength={128}
               className="w-full px-3 py-2 bg-[var(--panel-2)] text-[var(--text)] border border-[var(--accent-2)] rounded focus:outline-none focus:border-[var(--accent)] text-sm"
             />
           </div>

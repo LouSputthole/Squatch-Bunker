@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
-import { requireChannelMembership } from "@/lib/membership";
+import { resolveChannelAccess } from "@/lib/channelAccess";
+import { memberHasPermission } from "@/lib/serverRoles";
+import {
+  removeUnreferencedPrivateUpload,
+  removeUnreferencedUpload,
+} from "@/lib/messageRetention";
 
 export async function GET(
   _request: Request,
@@ -29,8 +34,8 @@ export async function GET(
 
     // Authorization: only members of the message's channel/server may read it.
     // Returning 404 (not 403) avoids leaking the existence of the message.
-    const access = await requireChannelMembership(message.channelId, session.userId);
-    if (!access) {
+    const access = await resolveChannelAccess(message.channelId, session.userId);
+    if (!access?.canView) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
 
@@ -51,7 +56,16 @@ export async function PATCH(
   }
 
   const { messageId } = await params;
-  const body = await request.json();
+  let body: Record<string, unknown>;
+  try {
+    const parsed: unknown = await request.json();
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
+    }
+    body = parsed as Record<string, unknown>;
+  } catch {
+    return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
+  }
 
   try {
     const { prisma } = await import("@/lib/db");
@@ -61,7 +75,7 @@ export async function PATCH(
       select: {
         authorId: true,
         channelId: true,
-        channel: { select: { serverId: true, server: { select: { ownerId: true } } } },
+        channel: { select: { serverId: true } },
       },
     });
 
@@ -69,29 +83,42 @@ export async function PATCH(
       return NextResponse.json({ error: "Message not found" }, { status: 404 });
     }
 
+
+    // Apply the same visibility decision to reads and mutations. Banned
+    // members, including authors and moderators, resolve to no access.
+    const access = await resolveChannelAccess(message.channelId, session.userId);
+    if (!access?.canView) {
+      return NextResponse.json({ error: "Message not found" }, { status: 404 });
+    }
+
     // Handle pin toggle — allowed for server owner, admin, and mod
     if ("pinned" in body) {
-      const membership = await prisma.serverMember.findUnique({
-        where: { serverId_userId: { serverId: message.channel.serverId, userId: session.userId } },
-      });
-      const canPin =
-        message.channel.server.ownerId === session.userId ||
-        membership?.role === "admin" ||
-        membership?.role === "mod";
+      if (typeof body.pinned !== "boolean") {
+        return NextResponse.json({ error: "Pinned must be a boolean" }, { status: 400 });
+      }
+      const canPin = await memberHasPermission(
+        message.channel.serverId,
+        session.userId,
+        "MANAGE_MESSAGES",
+      );
       if (!canPin) {
         return NextResponse.json({ error: "No permission to pin" }, { status: 403 });
       }
       const updated = await prisma.message.update({
         where: { id: messageId },
-        data: { pinned: !!body.pinned },
+        data: { pinned: body.pinned },
         include: { author: { select: { id: true, username: true, avatar: true } } },
       });
       return NextResponse.json({ message: updated });
     }
 
+    if (!access.canSend) {
+      return NextResponse.json({ error: "Channel is read only" }, { status: 403 });
+    }
+
     // Handle content edit — author only
     const { content } = body;
-    if (!content || !content.trim()) {
+    if (typeof content !== "string" || !content.trim()) {
       return NextResponse.json({ error: "Content is required" }, { status: 400 });
     }
     if (message.authorId !== session.userId) {
@@ -110,7 +137,7 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  request: Request,
+  _request: Request,
   { params }: { params: Promise<{ messageId: string }> }
 ) {
   const session = await getSession();
@@ -125,22 +152,46 @@ export async function DELETE(
 
     const message = await prisma.message.findUnique({
       where: { id: messageId },
-      select: { authorId: true, channelId: true, channel: { select: { server: { select: { ownerId: true } } } } },
+      select: {
+        authorId: true,
+        channelId: true,
+        attachmentUrl: true,
+        privateUploadId: true,
+      },
     });
 
     if (!message) {
       return NextResponse.json({ error: "Message not found" }, { status: 404 });
     }
 
-    // Author or server owner can delete
-    const isAuthor = message.authorId === session.userId;
-    const isServerOwner = message.channel.server.ownerId === session.userId;
+    const access = await resolveChannelAccess(message.channelId, session.userId);
+    if (!access?.canView) {
+      return NextResponse.json({ error: "Message not found" }, { status: 404 });
+    }
 
-    if (!isAuthor && !isServerOwner) {
+
+    // Author or server owner can delete
+    // Effective MANAGE_MESSAGES permission also covers moderators and custom roles.
+    const isAuthor = message.authorId === session.userId;
+    const canManageMessages = isAuthor
+      ? false
+      : await memberHasPermission(
+          access.serverId,
+          session.userId,
+          "MANAGE_MESSAGES",
+        );
+
+    if (!isAuthor && !canManageMessages) {
       return NextResponse.json({ error: "Not authorized" }, { status: 403 });
     }
 
     await prisma.message.delete({ where: { id: messageId } });
+    await Promise.all([
+      message.attachmentUrl ? removeUnreferencedUpload(message.attachmentUrl) : Promise.resolve(),
+      message.privateUploadId
+        ? removeUnreferencedPrivateUpload(message.privateUploadId)
+        : Promise.resolve(),
+    ]);
 
     return NextResponse.json({ deleted: true, messageId, channelId: message.channelId });
   } catch (err) {

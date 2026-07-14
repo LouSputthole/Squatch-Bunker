@@ -30,7 +30,7 @@ interface FriendPanelProps {
   onMessageUser: (userId: string) => void;
 }
 
-export default function FriendPanel({ currentUserId, onlineMemberIds, onMessageUser }: FriendPanelProps) {
+export default function FriendPanel({ onlineMemberIds, onMessageUser }: FriendPanelProps) {
   const [tab, setTab] = useState<Tab>("all");
   const [friends, setFriends] = useState<Friend[]>([]);
   const [incoming, setIncoming] = useState<FriendRequest[]>([]);
@@ -38,8 +38,15 @@ export default function FriendPanel({ currentUserId, onlineMemberIds, onMessageU
   const [loading, setLoading] = useState(true);
   const [addInput, setAddInput] = useState("");
   const [addStatus, setAddStatus] = useState<{ type: "ok" | "err"; msg: string } | null>(null);
-  const [searchResults, setSearchResults] = useState<FriendUser[]>([]);
-  const [searching, setSearching] = useState(false);
+  const searchQuery = tab === "add" && addInput.trim().length >= 2 ? addInput.trim() : "";
+  const [searchState, setSearchState] = useState<{
+    query: string;
+    users: FriendUser[];
+    searching: boolean;
+  }>({ query: "", users: [], searching: false });
+  const currentSearch = searchState.query === searchQuery ? searchState : null;
+  const searchResults = currentSearch?.users ?? [];
+  const searching = currentSearch?.searching ?? false;
 
   const fetchFriends = useCallback(async () => {
     try {
@@ -57,22 +64,29 @@ export default function FriendPanel({ currentUserId, onlineMemberIds, onMessageU
 
   // Search users as they type
   useEffect(() => {
-    if (tab !== "add" || addInput.trim().length < 2) {
-      setSearchResults([]);
-      return;
-    }
+    if (!searchQuery) return;
+    const controller = new AbortController();
     const timer = setTimeout(async () => {
-      setSearching(true);
+      setSearchState({ query: searchQuery, users: [], searching: true });
       try {
-        const res = await fetch(`/api/users/search?q=${encodeURIComponent(addInput.trim())}`);
+        const res = await fetch(`/api/users/search?q=${encodeURIComponent(searchQuery)}`, {
+          signal: controller.signal,
+        });
         const data = await res.json();
-        setSearchResults(data.users || []);
-      } finally {
-        setSearching(false);
+        if (!controller.signal.aborted) {
+          setSearchState({ query: searchQuery, users: data.users || [], searching: false });
+        }
+      } catch {
+        if (!controller.signal.aborted) {
+          setSearchState({ query: searchQuery, users: [], searching: false });
+        }
       }
     }, 300);
-    return () => clearTimeout(timer);
-  }, [addInput, tab]);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [searchQuery]);
 
   async function sendRequest(username: string) {
     setAddStatus(null);
@@ -85,7 +99,7 @@ export default function FriendPanel({ currentUserId, onlineMemberIds, onMessageU
     if (res.ok) {
       setAddStatus({ type: "ok", msg: data.autoAccepted ? `Now friends with ${username}!` : `Request sent to ${username}` });
       setAddInput("");
-      setSearchResults([]);
+      setSearchState({ query: "", users: [], searching: false });
       fetchFriends();
     } else {
       setAddStatus({ type: "err", msg: data.error || "Failed" });

@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { displayName, truncateName } from "@/lib/utils";
+import { truncateName } from "@/lib/utils";
 import Avatar from "@/components/Avatar";
+import BlockedMessageGate from "@/components/BlockedMessageGate";
 
 interface SearchResult {
   id: string;
@@ -16,9 +17,10 @@ interface SearchPanelProps {
   serverId: string;
   onClose: () => void;
   onJumpToMessage?: (channelId: string, messageId: string) => void;
+  blockedUserIds?: ReadonlySet<string>;
 }
 
-export default function SearchPanel({ serverId, onClose, onJumpToMessage }: SearchPanelProps) {
+export default function SearchPanel({ serverId, onClose, onJumpToMessage, blockedUserIds }: SearchPanelProps) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
   const [searching, setSearching] = useState(false);
@@ -156,23 +158,31 @@ export default function SearchPanel({ serverId, onClose, onJumpToMessage }: Sear
           </div>
         )}
 
-        {!searching && results.map((r) => (
-          <button
-            key={r.id}
-            onClick={() => onJumpToMessage?.(r.channel.id, r.id)}
-            className="w-full text-left px-3 py-2.5 border-b border-[var(--accent-2)]/10 hover:bg-[var(--panel-2)]/50 transition-colors"
-          >
-            <div className="flex items-center gap-2 mb-1">
-              <Avatar username={r.author.username} avatarUrl={r.author.avatar} size={20} className="bg-[var(--accent-2)] text-[var(--text)]" />
-              <span className="text-xs font-semibold text-[var(--text)]">{truncateName(r.author.username)}</span>
-              <span className="text-xs text-[var(--muted)]">in #{r.channel.name}</span>
-              <span className="text-xs text-[var(--muted)] ml-auto">
-                {new Date(r.createdAt).toLocaleDateString()}
-              </span>
-            </div>
-            <p className="text-sm text-[var(--muted)] truncate">{r.content}</p>
-          </button>
-        ))}
+        {!searching && results.map((r) => {
+          const blocked = blockedUserIds?.has(r.author.id) ?? false;
+          return (
+            <BlockedMessageGate
+              key={`${r.id}:${blocked ? "blocked" : "visible"}`}
+              blocked={blocked}
+              className="border-b border-[var(--accent-2)]/10 px-3 py-2.5"
+            >
+              <button
+                onClick={() => onJumpToMessage?.(r.channel.id, r.id)}
+                className="w-full text-left px-3 py-2.5 border-b border-[var(--accent-2)]/10 hover:bg-[var(--panel-2)]/50 transition-colors"
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <Avatar username={r.author.username} avatarUrl={r.author.avatar} size={20} className="bg-[var(--accent-2)] text-[var(--text)]" />
+                  <span className="text-xs font-semibold text-[var(--text)]">{truncateName(r.author.username)}</span>
+                  <span className="text-xs text-[var(--muted)]">in #{r.channel.name}</span>
+                  <span className="text-xs text-[var(--muted)] ml-auto">
+                    {new Date(r.createdAt).toLocaleDateString()}
+                  </span>
+                </div>
+                <p className="text-sm text-[var(--muted)] truncate">{r.content}</p>
+              </button>
+            </BlockedMessageGate>
+          );
+        })}
 
         {!searching && !searched && (
           <div className="px-4 py-8 text-center text-sm text-[var(--muted)]">

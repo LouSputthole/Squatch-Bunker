@@ -1,9 +1,12 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getSession } from "@/lib/auth";
+import { getInviteAvailability } from "@/lib/invites";
+import { effectivePermissions } from "@/lib/permissions";
+import { getPermContext } from "@/lib/serverRoles";
 
 export async function GET(
-  request: Request,
+  _request: Request,
   { params }: { params: Promise<{ serverId: string }> }
 ) {
   const session = await getSession();
@@ -13,31 +16,43 @@ export async function GET(
 
   const { serverId } = await params;
 
-  // Verify membership
-  const membership = await prisma.serverMember.findUnique({
-    where: {
-      serverId_userId: { serverId, userId: session.userId },
-    },
-  });
-
-  if (!membership) {
+  const permissionContext = await getPermContext(serverId, session.userId);
+  if (!permissionContext.isMember) {
     return NextResponse.json({ error: "Not a server member" }, { status: 403 });
   }
 
-  const members = await prisma.serverMember.findMany({
-    where: { serverId },
-    include: {
-      user: { select: { id: true, username: true, avatar: true, statusMessage: true } },
-      memberRoles: { select: { roleId: true } },
-    },
-    orderBy: { createdAt: "asc" },
-  });
+  const currentUserPermissions = effectivePermissions(permissionContext);
 
-  // Get the server to include inviteCode for the owner
-  const server = await prisma.server.findUnique({
-    where: { id: serverId },
-    select: { ownerId: true, inviteCode: true },
-  });
+  const [members, server] = await Promise.all([
+    prisma.serverMember.findMany({
+      where: currentUserPermissions.has("BAN_MEMBERS")
+        ? { serverId }
+        : { serverId, banned: false },
+      include: {
+        user: {
+          select: {
+            id: true,
+            username: true,
+            avatar: true,
+            statusMessage: true,
+          },
+        },
+        memberRoles: { select: { roleId: true } },
+      },
+      orderBy: { createdAt: "asc" },
+    }),
+    prisma.server.findUnique({
+      where: { id: serverId },
+      select: {
+        ownerId: true,
+        inviteCode: true,
+        inviteExpiresAt: true,
+        inviteMaxUses: true,
+        inviteUseCount: true,
+        inviteRevokedAt: true,
+      },
+    }),
+  ]);
 
   return NextResponse.json({
     members: members.map((m) => ({
@@ -47,8 +62,13 @@ export async function GET(
       role: m.role,
       roleIds: m.memberRoles.map((mr) => mr.roleId),
       joinedAt: m.createdAt,
+      banned: m.banned,
       statusMessage: m.user.statusMessage,
     })),
+    currentUserPermissions: Array.from(currentUserPermissions).sort(),
     inviteCode: server?.inviteCode,
+    inviteAvailable: server
+      ? getInviteAvailability(server) === "active"
+      : false,
   });
 }

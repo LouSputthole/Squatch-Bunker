@@ -2,5 +2,15 @@ node_modules
 .next
 .git
 .env
-.env.local
+.env.*
 *.md
+
+data/
+public/uploads/
+public/avatars/
+desktop/.stage/
+desktop/dist/
+coverage/
+*.db
+*.db-*
+npm-debug.log*

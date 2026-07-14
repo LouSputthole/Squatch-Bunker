@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
+import { usersHaveBlock } from "@/lib/userBlocks";
 
 // GET — list all friendships (accepted, pending incoming, pending outgoing)
 export async function GET() {
@@ -74,6 +75,9 @@ export async function POST(request: Request) {
     if (target.id === session.userId) {
       return NextResponse.json({ error: "Cannot friend yourself" }, { status: 400 });
     }
+    if (await usersHaveBlock(session.userId, target.id)) {
+      return NextResponse.json({ error: "Cannot send request" }, { status: 403 });
+    }
 
     // Normalize the pair so the existence check covers either direction.
     const [u1, u2] = [session.userId, target.id].sort();
@@ -87,6 +91,21 @@ export async function POST(request: Request) {
     // sender/recipient so incoming vs outgoing display is preserved.
     const result = await prisma.$transaction(
       async (tx): Promise<{ status: number; body: Record<string, unknown> }> => {
+        // Recheck inside the write transaction so a block created between the
+        // initial lookup and this transaction cannot leave a new friendship.
+        const block = await tx.userBlock.findFirst({
+          where: {
+            OR: [
+              { blockerId: session.userId, blockedId: target.id },
+              { blockerId: target.id, blockedId: session.userId },
+            ],
+          },
+          select: { id: true },
+        });
+        if (block) {
+          return { status: 403, body: { error: "Cannot send request" } };
+        }
+
         const existing = await tx.friendship.findFirst({
           where: {
             OR: [

@@ -1,14 +1,8 @@
 import { NextResponse } from "next/server";
 import { hashPassword, createToken, setTokenCookie } from "@/lib/auth";
 import { checkRateLimit } from "@/lib/rateLimit";
-
-function clientIp(request: Request): string {
-  return (
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    request.headers.get("x-real-ip") ||
-    "unknown"
-  );
-}
+import { parseAccountCredentials } from "@/lib/accountCredentials";
+import { clientIp } from "@/lib/clientIp";
 
 export async function POST(request: Request) {
   const { allowed, remaining, resetAt } = checkRateLimit(`register:${clientIp(request)}`);
@@ -26,23 +20,20 @@ export async function POST(request: Request) {
     );
   }
 
+  let body: unknown;
   try {
-    const { email, username, password } = await request.json();
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
 
-    if (!email || !username || !password) {
-      return NextResponse.json(
-        { error: "Email, username, and password are required" },
-        { status: 400 }
-      );
-    }
+  const parsed = parseAccountCredentials(body);
+  if (!parsed.ok) {
+    return NextResponse.json({ error: parsed.error }, { status: 400 });
+  }
+  const { email, username, password } = parsed.value;
 
-    if (password.length < 6) {
-      return NextResponse.json(
-        { error: "Password must be at least 6 characters" },
-        { status: 400 }
-      );
-    }
-
+  try {
     const { prisma } = await import("@/lib/db");
 
     const existing = await prisma.user.findFirst({
@@ -69,6 +60,10 @@ export async function POST(request: Request) {
     setTokenCookie(response, token);
     return response;
   } catch (err) {
+    const code = err && typeof err === "object" && "code" in err ? err.code : null;
+    if (code === "P2002") {
+      return NextResponse.json({ error: "Email or username already taken" }, { status: 409 });
+    }
     console.error("[Campfire] Register error:", err);
     return NextResponse.json(
       { error: "Database not available. Try continuing as a guest." },

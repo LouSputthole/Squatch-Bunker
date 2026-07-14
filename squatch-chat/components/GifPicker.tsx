@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import Image from "next/image";
+import { useState, useRef, useEffect } from "react";
 
 interface Gif {
   id: string;
@@ -14,17 +15,82 @@ interface GifPickerProps {
   onClose: () => void;
 }
 
+
+async function requestGifs(query: string, signal: AbortSignal): Promise<Gif[]> {
+  const url = query
+    ? `/api/gifs?q=${encodeURIComponent(query)}`
+    : "/api/gifs";
+  const response = await fetch(url, { signal });
+  if (!response.ok) throw new Error("Failed to load GIFs");
+  const data = await response.json() as { gifs?: Gif[] };
+  return data.gifs || [];
+}
+
+function GifResult({ gif, onSelect, onClose }: {
+  gif: Gif;
+  onSelect: (gifUrl: string) => void;
+  onClose: () => void;
+}) {
+  const [hovered, setHovered] = useState(false);
+
+  return (
+    <button
+      onClick={() => {
+        onSelect(gif.url);
+        onClose();
+      }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      className="relative rounded-lg overflow-hidden aspect-square hover:ring-2 hover:ring-[var(--accent-2)] transition-all group"
+    >
+      <Image
+        src={hovered ? gif.url : gif.preview || gif.url}
+        alt={gif.title}
+        fill
+        sizes="9rem"
+        className="object-cover"
+        unoptimized
+      />
+      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors" />
+    </button>
+  );
+}
 export default function GifPicker({ onSelect, onClose }: GifPickerProps) {
   const [search, setSearch] = useState("");
   const [gifs, setGifs] = useState<Gif[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const ref = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const requestControllerRef = useRef<AbortController | null>(null);
+  const requestIdRef = useRef(0);
 
   useEffect(() => {
+    const controller = new AbortController();
+    const requestId = ++requestIdRef.current;
+    requestControllerRef.current = controller;
+
     searchRef.current?.focus();
-    fetchGifs("");
+    requestGifs("", controller.signal)
+      .then((results) => {
+        if (requestId === requestIdRef.current) setGifs(results);
+      })
+      .catch((error: unknown) => {
+        if (
+          requestId === requestIdRef.current
+          && !(error instanceof DOMException && error.name === "AbortError")
+        ) {
+          setGifs([]);
+        }
+      })
+      .finally(() => {
+        if (requestId === requestIdRef.current) setLoading(false);
+      });
+
+    return () => {
+      requestControllerRef.current?.abort();
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
   }, []);
 
   useEffect(() => {
@@ -42,26 +108,31 @@ export default function GifPicker({ onSelect, onClose }: GifPickerProps) {
     };
   }, [onClose]);
 
-  const fetchGifs = useCallback(async (query: string) => {
-    setLoading(true);
-    try {
-      const url = query
-        ? `/api/gifs?q=${encodeURIComponent(query)}`
-        : "/api/gifs";
-      const res = await fetch(url);
-      const data = await res.json();
-      setGifs(data.gifs || []);
-    } catch {
-      setGifs([]);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
   function handleSearchChange(value: string) {
     setSearch(value);
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => fetchGifs(value), 400);
+    debounceRef.current = setTimeout(() => {
+      requestControllerRef.current?.abort();
+      const controller = new AbortController();
+      const requestId = ++requestIdRef.current;
+      requestControllerRef.current = controller;
+      setLoading(true);
+      requestGifs(value, controller.signal)
+        .then((results) => {
+          if (requestId === requestIdRef.current) setGifs(results);
+        })
+        .catch((error: unknown) => {
+          if (
+            requestId === requestIdRef.current
+            && !(error instanceof DOMException && error.name === "AbortError")
+          ) {
+            setGifs([]);
+          }
+        })
+        .finally(() => {
+          if (requestId === requestIdRef.current) setLoading(false);
+        });
+    }, 400);
   }
 
   return (
@@ -96,21 +167,12 @@ export default function GifPicker({ onSelect, onClose }: GifPickerProps) {
         ) : (
           <div className="grid grid-cols-2 gap-1.5">
             {gifs.map((gif) => (
-              <button
+              <GifResult
                 key={gif.id}
-                onClick={() => { onSelect(gif.url); onClose(); }}
-                className="relative rounded-lg overflow-hidden aspect-square hover:ring-2 hover:ring-[var(--accent-2)] transition-all group"
-              >
-                <img
-                  src={gif.preview || gif.url}
-                  alt={gif.title}
-                  className="w-full h-full object-cover"
-                  loading="lazy"
-                  onMouseEnter={(e) => { (e.target as HTMLImageElement).src = gif.url; }}
-                  onMouseLeave={(e) => { if (gif.preview) (e.target as HTMLImageElement).src = gif.preview; }}
-                />
-                <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors" />
-              </button>
+                gif={gif}
+                onSelect={onSelect}
+                onClose={onClose}
+              />
             ))}
           </div>
         )}

@@ -26,6 +26,7 @@ interface CircleViewProps {
   localCameraStream?: MediaStream | null;
   remoteVideoStreams?: Map<string, MediaStream>;
   onContextMenu?: (e: React.MouseEvent, participant: Participant) => void;
+  highlightUserId?: string | null;
 }
 
 function SeatVideo({ stream, mirror }: { stream: MediaStream; mirror?: boolean }) {
@@ -73,6 +74,7 @@ export default function CircleView({
   localCameraStream,
   remoteVideoStreams,
   onContextMenu,
+  highlightUserId,
 }: CircleViewProps) {
   // "You" first → front seat.
   const ordered = [...participants].sort((a, b) => {
@@ -118,6 +120,7 @@ export default function CircleView({
         const y = seat.y;
         const isSelf = p.userId === currentUserId;
         const isSpeaking = p.speaking && !p.muted;
+        const isHighlighted = p.userId === highlightUserId;
         const stream = isSelf
           ? (cameraOn ? localCameraStream : null)
           : (remoteVideoStreams?.get(p.userId) || null);
@@ -127,7 +130,7 @@ export default function CircleView({
           <div
             key={p.userId}
             className="absolute flex flex-col items-center gap-1"
-            style={{ left: `${x}%`, top: `${y}%`, transform: "translate(-50%, -50%)", zIndex: isSpeaking ? 20 : 10 }}
+            style={{ left: `${x}%`, top: `${y}%`, transform: "translate(-50%, -50%)", zIndex: isSpeaking || isHighlighted ? 20 : 10 }}
             onContextMenu={(e) => { if (!isSelf && onContextMenu) { e.preventDefault(); onContextMenu(e, p); } }}
           >
             {isSpeaking && (
@@ -139,8 +142,8 @@ export default function CircleView({
 
             {hasVideo ? (
               <div
-                className={`relative rounded-xl overflow-hidden border-2 bg-black ${isSpeaking ? "border-amber-400" : isSelf ? "border-amber-500/60" : "border-black/60"}`}
-                style={{ width: VIDEO_W, height: VIDEO_H, boxShadow: isSpeaking ? "0 0 22px rgba(251,191,36,0.6)" : "0 6px 18px rgba(0,0,0,0.65)" }}
+                className={`relative rounded-xl overflow-hidden border-2 bg-black ${isHighlighted ? "border-yellow-200" : isSpeaking ? "border-amber-400" : isSelf ? "border-amber-500/60" : "border-black/60"}`}
+                style={{ width: VIDEO_W, height: VIDEO_H, boxShadow: isHighlighted ? "0 0 28px rgba(253,224,71,0.8)" : isSpeaking ? "0 0 22px rgba(251,191,36,0.6)" : "0 6px 18px rgba(0,0,0,0.65)" }}
               >
                 <SeatVideo stream={stream!} mirror={isSelf} />
                 {p.muted && (
@@ -152,8 +155,8 @@ export default function CircleView({
             ) : (
               <div className="relative">
                 <div
-                  className={`rounded-full ${isSpeaking ? "ring-2 ring-amber-400" : ""}`}
-                  style={{ boxShadow: isSpeaking ? "0 0 16px rgba(251,191,36,0.55)" : "0 3px 12px rgba(0,0,0,0.6)" }}
+                  className={`rounded-full ${isHighlighted ? "ring-4 ring-yellow-200" : isSpeaking ? "ring-2 ring-amber-400" : ""}`}
+                  style={{ boxShadow: isHighlighted ? "0 0 28px rgba(253,224,71,0.8)" : isSpeaking ? "0 0 16px rgba(251,191,36,0.55)" : "0 3px 12px rgba(0,0,0,0.6)" }}
                 >
                   <Avatar
                     username={p.username}
@@ -182,11 +185,14 @@ export default function CircleView({
 
             <span
               className={`px-1.5 rounded text-[11px] font-medium truncate max-w-[96px] text-center bg-black/50 ${
-                isSpeaking ? "text-amber-200" : isSelf ? "text-amber-300/90" : "text-white/85"
+                isHighlighted ? "text-yellow-100" : isSpeaking ? "text-amber-200" : isSelf ? "text-amber-300/90" : "text-white/85"
               }`}
             >
               {isSelf ? "You" : displayName(p.username)}
             </span>
+            {isHighlighted && (
+              <span className="text-[9px] uppercase tracking-widest text-yellow-100 bg-amber-950/80 px-2 py-0.5 rounded-full">Lantern</span>
+            )}
           </div>
         );
       })}

@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
+import { normalizeVoiceRoomConfig } from "@/lib/voiceRoomConfig";
+import {
+  removeUnreferencedPrivateUpload,
+  removeUnreferencedUpload,
+} from "@/lib/messageRetention";
+import { notifyRealtimeAuthorizationChange } from "@/lib/realtimeControl";
 
 export async function PATCH(
   req: NextRequest,
@@ -23,19 +29,12 @@ export async function PATCH(
       return NextResponse.json({ error: "Channel not found" }, { status: 404 });
     }
 
-    // Allow owner, admin, or mod to update channel topic/name/category
-    const membership = await prisma.serverMember.findUnique({
-      where: { serverId_userId: { serverId: channel.serverId, userId: session.userId } },
-    });
-    if (!membership) {
-      return NextResponse.json({ error: "Not a server member" }, { status: 403 });
-    }
-    const canEdit =
-      channel.server.ownerId === session.userId ||
-      membership.role === "admin" ||
-      membership.role === "mod";
-    if (!canEdit) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    const { memberHasPermission } = await import("@/lib/serverRoles");
+    if (!(await memberHasPermission(channel.serverId, session.userId, "MANAGE_CHANNELS"))) {
+      return NextResponse.json(
+        { error: "You need the Manage Channels permission to update channels" },
+        { status: 403 },
+      );
     }
 
     const body = await req.json();
@@ -48,9 +47,42 @@ export async function PATCH(
       name = body.name.trim().toLowerCase().replace(/\s+/g, "-");
     }
 
+
+    let roomConfig: ReturnType<typeof normalizeVoiceRoomConfig> | undefined;
+    if ("roomMode" in body || "roomScene" in body) {
+      if (channel.type !== "voice") {
+        return NextResponse.json({ error: "Room modes only apply to voice channels" }, { status: 400 });
+      }
+      roomConfig = normalizeVoiceRoomConfig({
+        mode: "roomMode" in body ? body.roomMode : channel.roomMode,
+        scene: "roomScene" in body ? body.roomScene : channel.roomScene,
+      });
+      if (!roomConfig) {
+        return NextResponse.json({ error: "Invalid voice-room mode or scene" }, { status: 400 });
+      }
+    }
+
+    let retentionDays: number | null | undefined;
+    if ("retentionDays" in body) {
+      if (channel.type === "voice") {
+        return NextResponse.json({ error: "Message retention only applies to text channels" }, { status: 400 });
+      }
+      if (body.retentionDays === null) {
+        retentionDays = null;
+      } else if (
+        typeof body.retentionDays === "number" &&
+        Number.isInteger(body.retentionDays) &&
+        [1, 7, 30].includes(body.retentionDays)
+      ) {
+        retentionDays = body.retentionDays;
+      } else {
+        return NextResponse.json({ error: "Retention must be forever, 1, 7, or 30 days" }, { status: 400 });
+      }
+    }
     const updated = await prisma.channel.update({
       where: { id: channelId },
       data: {
+
         topic: "topic" in body
           ? (typeof body.topic === "string" ? body.topic.trim() || null : null)
           : undefined,
@@ -58,6 +90,9 @@ export async function PATCH(
         category: "category" in body
           ? (typeof body.category === "string" && body.category.trim() ? body.category.trim() : null)
           : undefined,
+        roomMode: roomConfig?.roomMode,
+        roomScene: roomConfig?.roomScene,
+        retentionDays,
       },
     });
 
@@ -84,7 +119,10 @@ export async function DELETE(
 
     const channel = await prisma.channel.findUnique({
       where: { id: channelId },
-      select: { id: true, serverId: true },
+      select: {
+        id: true,
+        serverId: true,
+      },
     });
     if (!channel) {
       return NextResponse.json({ error: "Channel not found" }, { status: 404 });
@@ -105,12 +143,39 @@ export async function DELETE(
 
     // No DB-level cascade from Channel — clear dependents explicitly.
     // (Reactions/pins cascade off Message at the DB level.)
-    await prisma.$transaction([
-      prisma.scheduledMessage.deleteMany({ where: { channelId } }),
-      prisma.webhook.deleteMany({ where: { channelId } }),
-      prisma.message.deleteMany({ where: { channelId } }),
-      prisma.channel.delete({ where: { id: channelId } }),
+    const attachments = await prisma.$transaction(async (tx) => {
+      const messages = await tx.message.findMany({
+        where: { channelId },
+        select: { attachmentUrl: true, privateUploadId: true },
+      });
+      await tx.notificationPreference.deleteMany({ where: { channelId } });
+      await tx.scheduledMessage.deleteMany({ where: { channelId } });
+      await tx.webhook.deleteMany({ where: { channelId } });
+      await tx.message.deleteMany({ where: { channelId } });
+      await tx.channel.delete({ where: { id: channelId } });
+      return {
+        attachmentUrls: [...new Set(
+          messages
+            .map((message) => message.attachmentUrl)
+            .filter((url): url is string => Boolean(url)),
+        )],
+        privateUploadIds: [...new Set(
+          messages
+            .map((message) => message.privateUploadId)
+            .filter((id): id is string => Boolean(id)),
+        )],
+      };
+    });
+    const sideEffects = await Promise.allSettled([
+      notifyRealtimeAuthorizationChange({ scope: "channel", channelId }),
+      ...attachments.attachmentUrls.map(removeUnreferencedUpload),
+      ...attachments.privateUploadIds.map(removeUnreferencedPrivateUpload),
     ]);
+    for (const result of sideEffects) {
+      if (result.status === "rejected") {
+        console.error("[Campfire] Post-delete channel cleanup failed:", result.reason);
+      }
+    }
 
     return NextResponse.json({ ok: true });
   } catch (err) {

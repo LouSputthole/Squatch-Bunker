@@ -116,47 +116,37 @@ function loadCustomTheme(): Record<string, string> | null {
   } catch { return null; }
 }
 
+function loadInitialTheme(): Theme {
+  if (typeof window === "undefined") return "dark";
+  const savedTheme = localStorage.getItem("campfire-theme") as Theme | null;
+  if (savedTheme && THEMES[savedTheme]) return savedTheme;
+  return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+}
+
 export function useTheme() {
-  const [theme, setThemeState] = useState<Theme>("dark");
-  const [customColors, setCustomColorsState] = useState<Record<string, string>>(THEMES.custom);
+  const [theme, setThemeState] = useState<Theme>(loadInitialTheme);
+  const [customColors, setCustomColorsState] = useState<Record<string, string>>(() => {
+    const saved = loadCustomTheme();
+    if (saved) THEMES.custom = saved;
+    return saved ?? THEMES.custom;
+  });
 
   useEffect(() => {
-    // Load custom theme colors
-    const saved = loadCustomTheme();
-    if (saved) {
-      THEMES.custom = saved;
-      setCustomColorsState(saved);
-    }
-
-    // Detect system preference on first visit
-    const savedTheme = localStorage.getItem("campfire-theme") as Theme | null;
-    if (savedTheme && THEMES[savedTheme]) {
-      applyTheme(savedTheme);
-      setThemeState(savedTheme);
-    } else if (window.matchMedia("(prefers-color-scheme: light)").matches) {
-      applyTheme("light");
-      setThemeState("light");
-    }
-  }, []);
-
-  function applyTheme(t: Theme) {
-    const vars = t === "custom" ? customColors : THEMES[t];
+    const vars = theme === "custom" ? customColors : THEMES[theme];
     const root = document.documentElement;
     Object.entries(vars).forEach(([key, val]) => root.style.setProperty(key, val));
-    root.setAttribute("data-theme", t);
-    localStorage.setItem("campfire-theme", t);
-  }
+    root.setAttribute("data-theme", theme);
+    try { localStorage.setItem("campfire-theme", theme); } catch {}
+  }, [customColors, theme]);
 
   function setTheme(t: Theme) {
-    applyTheme(t);
     setThemeState(t);
   }
 
   function setCustomColors(colors: Record<string, string>) {
     THEMES.custom = colors;
     setCustomColorsState(colors);
-    localStorage.setItem("campfire-custom-theme", JSON.stringify(colors));
-    if (theme === "custom") applyTheme("custom");
+    try { localStorage.setItem("campfire-custom-theme", JSON.stringify(colors)); } catch {}
   }
 
   return {

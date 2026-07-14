@@ -4,9 +4,13 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     defaults:
       run:
@@ -29,21 +33,18 @@ jobs:
           cache: npm
           cache-dependency-path: squatch-chat/package-lock.json
 
-      # postinstall generates the Prisma client (SQLite) via `prisma db push`.
+      # postinstall generates both Prisma clients and synchronizes SQLite.
       - name: Install dependencies
         run: npm ci
 
-      # Explicit generate so the client is guaranteed present before typecheck
-      # and tests, independent of postinstall's push succeeding.
-      - name: Generate Prisma client
-        run: npx prisma generate
+      - name: Audit production dependencies
+        run: npm audit --audit-level=high
 
-      # Lint is non-blocking: the repo has pre-existing lint errors unrelated to
-      # CI wiring (e.g. react-hooks rules in hooks/useVoice.ts). Kept visible so
-      # the report is honest without failing the gate on legacy issues.
+      - name: Check SQLite and PostgreSQL schemas
+        run: npm run db:check
+
       - name: Lint
         run: npm run lint
-        continue-on-error: true
 
       - name: Typecheck
         run: npx tsc --noEmit

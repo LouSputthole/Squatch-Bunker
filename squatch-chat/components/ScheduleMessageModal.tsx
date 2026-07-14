@@ -18,15 +18,15 @@ export function ScheduleMessageModal({ channelId, pendingContent = "", onClose }
   const [error, setError] = useState("");
 
   useEffect(() => {
-    // Set default date/time to 1 hour from now
-    const d = new Date(Date.now() + 60 * 60 * 1000);
-    setDate(d.toISOString().slice(0, 10));
-    setTime(d.toTimeString().slice(0, 5));
-
-    // Load existing scheduled messages
-    fetch(`/api/channels/${channelId}/scheduled`)
-      .then(r => r.json())
-      .then(d => setScheduled(d.messages ?? []));
+    const timer = setTimeout(() => {
+      const d = new Date(Date.now() + 60 * 60 * 1000);
+      setDate(d.toISOString().slice(0, 10));
+      setTime(d.toTimeString().slice(0, 5));
+      fetch(`/api/channels/${channelId}/scheduled`)
+        .then(r => r.json())
+        .then(d => setScheduled(d.messages ?? []));
+    }, 0);
+    return () => clearTimeout(timer);
   }, [channelId]);
 
   async function handleSchedule(e: React.FormEvent) {

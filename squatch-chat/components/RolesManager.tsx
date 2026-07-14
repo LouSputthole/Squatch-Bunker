@@ -33,7 +33,10 @@ export default function RolesManager({ serverId }: { serverId: string }) {
     } catch { /* ignore */ }
   }, [serverId]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    const timer = setTimeout(() => { void load(); }, 0);
+    return () => clearTimeout(timer);
+  }, [load]);
 
   const role = roles.find((r) => r.id === selectedId) || null;
   let perms: PermKey[] = [];
@@ -148,7 +151,7 @@ export default function RolesManager({ serverId }: { serverId: string }) {
                 <button onClick={() => deleteRole(role.id)} className="text-xs px-2 py-1.5 text-red-400 hover:bg-red-500/10 rounded" title="Delete role">Delete</button>
               )}
             </div>
-            {role.isDefault && <p className="text-[10px] text-[var(--muted)]">This is the base role given to everyone — it can't be deleted.</p>}
+            {role.isDefault && <p className="text-[10px] text-[var(--muted)]">This is the base role given to everyone — it can&apos;t be deleted.</p>}
 
             <div>
               <p className="text-xs font-semibold text-[var(--muted)] mb-1.5 uppercase tracking-wide">Permissions</p>

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
+import { projectVisibleServerChannels } from "@/lib/channelAccess";
 
 export async function GET(request: Request) {
   const session = await getSession();
@@ -11,25 +12,37 @@ export async function GET(request: Request) {
   const query = searchParams.get("q")?.trim();
   const serverId = searchParams.get("serverId");
 
-  if (!query || !serverId) {
+  if (!query || query.length > 100 || !serverId) {
     return NextResponse.json({ error: "q and serverId are required" }, { status: 400 });
   }
 
   try {
     const { prisma } = await import("@/lib/db");
 
-    // Verify membership
-    const membership = await prisma.serverMember.findUnique({
-      where: { serverId_userId: { serverId, userId: session.userId } },
+    const server = await prisma.server.findUnique({
+      where: { id: serverId },
+      select: {
+        id: true,
+        channels: { select: { id: true } },
+      },
     });
-    if (!membership) {
+    if (!server) {
       return NextResponse.json({ error: "Not a server member" }, { status: 403 });
     }
+
+    const [visibleServer] = await projectVisibleServerChannels(
+      [server],
+      session.userId,
+    );
+    if (!visibleServer) {
+      return NextResponse.json({ error: "Not a server member" }, { status: 403 });
+    }
+    const visibleChannelIds = visibleServer.channels.map((channel) => channel.id);
 
     const messages = await prisma.message.findMany({
       where: {
         content: { contains: query },
-        channel: { serverId },
+        channelId: { in: visibleChannelIds },
       },
       include: {
         author: { select: { id: true, username: true, avatar: true } },

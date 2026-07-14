@@ -1,10 +1,16 @@
 "use client";
 
+import Image from "next/image";
 import { useState, useEffect, useMemo } from "react";
 import { getSocket } from "@/lib/socket";
 import { displayName } from "@/lib/utils";
 import { useMutedChannels } from "@/hooks/useMutedChannels";
 import InviteModal from "@/components/InviteModal";
+import {
+  VOICE_ROOM_MODES,
+  VOICE_ROOM_SCENES,
+  voiceRoomModeLabel,
+} from "@/lib/voiceRoomConfig";
 
 interface Channel {
   id: string;
@@ -13,6 +19,9 @@ interface Channel {
   category?: string | null;
   description?: string;
   position?: number;
+  roomMode?: string;
+  roomScene?: string;
+  retentionDays?: number | null;
 }
 
 interface VoiceParticipant {
@@ -23,6 +32,14 @@ interface VoiceParticipant {
   speaking?: boolean;
 }
 
+interface ManagedInvite {
+  inviteCode: string;
+  inviteExpiresAt: string | null;
+  inviteMaxUses: number | null;
+  inviteUseCount: number;
+  inviteRevokedAt: string | null;
+}
+
 interface ChannelListProps {
   serverName: string;
   serverBanner?: string | null;
@@ -31,10 +48,15 @@ interface ChannelListProps {
   activeChannelId?: string;
   serverId: string;
   inviteCode?: string;
+  inviteExpiresAt?: string | null;
+  inviteMaxUses?: number | null;
+  inviteUseCount?: number;
+  inviteRevokedAt?: string | null;
   memberCount?: number;
   unreadCounts?: Map<string, number>;
   currentUserId?: string;
   currentUserRole?: string;
+  canManageChannels?: boolean;
   activeVoiceChannelId?: string | null;
   viewingVoiceRoom?: boolean;
   voiceParticipants?: Map<string, VoiceParticipant[]>;
@@ -42,6 +64,7 @@ interface ChannelListProps {
   onChannelSelect: (channel: Channel) => void;
   onChannelCreated: (channel: Channel) => void;
   onChannelsUpdated?: (channels: Channel[]) => void;
+  onInviteUpdated?: (invite: ManagedInvite) => void;
   onChannelDeleted?: (channelId: string) => void;
   onVoiceJoin?: (channel: Channel) => void;
   onVoiceView?: (channel: Channel) => void;
@@ -97,10 +120,15 @@ export default function ChannelList({
   activeChannelId,
   serverId,
   inviteCode,
+  inviteExpiresAt,
+  inviteMaxUses,
+  inviteUseCount,
+  inviteRevokedAt,
   memberCount,
   unreadCounts,
   currentUserId,
   currentUserRole,
+  canManageChannels = false,
   activeVoiceChannelId,
   viewingVoiceRoom,
   voiceParticipants,
@@ -108,6 +136,7 @@ export default function ChannelList({
   onChannelSelect,
   onChannelCreated,
   onChannelsUpdated,
+  onInviteUpdated,
   onChannelDeleted,
   onVoiceJoin,
   onVoiceView,
@@ -117,6 +146,15 @@ export default function ChannelList({
   const [createLoading, setCreateLoading] = useState(false);
   const [newName, setNewName] = useState("");
   const [inviteOpen, setInviteOpen] = useState(false);
+  const [inviteState, setInviteState] = useState({
+    code: inviteCode,
+    expiresAt: inviteExpiresAt,
+    maxUses: inviteMaxUses,
+    useCount: inviteUseCount ?? 0,
+    revokedAt: inviteRevokedAt,
+  });
+  const [newRoomMode, setNewRoomMode] = useState("hangout");
+  const [newRoomScene, setNewRoomScene] = useState("campfire");
   const [newCategory, setNewCategory] = useState("");
   const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(() => {
     if (typeof window === "undefined") return new Set<string>();
@@ -128,25 +166,30 @@ export default function ChannelList({
     }
   });
   const [dragOverCategory, setDragOverCategory] = useState<string | null>(null);
-  const [localVoiceParticipants, setLocalVoiceParticipants] = useState<Map<string, VoiceParticipant[]>>(
-    voiceParticipants || new Map()
-  );
+  const [voiceParticipantState, setVoiceParticipantState] = useState(() => ({
+    source: voiceParticipants,
+    value: voiceParticipants || new Map<string, VoiceParticipant[]>(),
+  }));
+  const localVoiceParticipants = voiceParticipantState.source === voiceParticipants
+    ? voiceParticipantState.value
+    : voiceParticipants || new Map<string, VoiceParticipant[]>();
   const { toggleMute, isMuted } = useMutedChannels();
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
-  const [localChannels, setLocalChannels] = useState<Channel[]>(channels);
+  const [channelState, setChannelState] = useState(() => ({ source: channels, value: channels }));
+  const localChannels = channelState.source === channels ? channelState.value : channels;
   const [focusedChannelIndex, setFocusedChannelIndex] = useState<number>(-1);
   const [channelMenu, setChannelMenu] = useState<{ channel: Channel; x: number; y: number } | null>(null);
 
-  // Sync localChannels when parent channels prop changes
-  useEffect(() => {
-    setLocalChannels(channels);
-  }, [channels]);
-
-  // Sync with parent prop
-  useEffect(() => {
-    if (voiceParticipants) setLocalVoiceParticipants(voiceParticipants);
-  }, [voiceParticipants]);
+  function setLocalChannels(update: React.SetStateAction<Channel[]>) {
+    setChannelState((current) => {
+      const value = current.source === channels ? current.value : channels;
+      return {
+        source: channels,
+        value: typeof update === "function" ? update(value) : update,
+      };
+    });
+  }
 
   // Listen for voice participant updates for all voice channels in this server
   useEffect(() => {
@@ -155,20 +198,23 @@ export default function ChannelList({
 
     function handleVoiceUpdate(data: { channelId: string; participants: VoiceParticipant[] }) {
       if (!voiceChannels.some((c) => c.id === data.channelId)) return;
-      setLocalVoiceParticipants((prev) => {
-        const next = new Map(prev);
+      setVoiceParticipantState((current) => {
+        const value = current.source === voiceParticipants
+          ? current.value
+          : voiceParticipants || new Map<string, VoiceParticipant[]>();
+        const next = new Map(value);
         if (data.participants.length > 0) {
           next.set(data.channelId, data.participants);
         } else {
           next.delete(data.channelId);
         }
-        return next;
+        return { source: voiceParticipants, value: next };
       });
     }
 
     socket.on("voice:participants-update", handleVoiceUpdate);
     return () => { socket.off("voice:participants-update", handleVoiceUpdate); };
-  }, [channels]);
+  }, [channels, voiceParticipants]);
 
   // Speaking indicators for the sidebar rows (only broadcast to members of the voice room)
   const [speakingIds, setSpeakingIds] = useState<Set<string>>(new Set());
@@ -188,6 +234,11 @@ export default function ChannelList({
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
+    if (!canManageChannels) {
+      alert("You do not have permission to manage channels");
+      setCreating(null);
+      return;
+    }
     if (!newName.trim() || !creating || createLoading) return;
     setCreateLoading(true);
 
@@ -195,18 +246,31 @@ export default function ChannelList({
       const res = await fetch("/api/channels", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ serverId, name: newName.trim(), type: creating, category: newCategory.trim() || undefined }),
+        body: JSON.stringify({
+          serverId,
+          name: newName.trim(),
+          type: creating,
+          category: newCategory.trim() || undefined,
+          roomMode: creating === "voice" ? newRoomMode : undefined,
+          roomScene: creating === "voice" ? newRoomScene : undefined,
+        }),
       });
 
-      if (res.ok) {
-        const { channel } = await res.json();
-        onChannelCreated(channel);
-        setNewName("");
-        setNewCategory("");
-        setCreating(null);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(data.error || "Failed to create channel");
+        return;
       }
+      onChannelCreated(data.channel);
+      setNewName("");
+      setNewCategory("");
+      setCreating(null);
+    } catch {
+      alert("Failed to create channel");
     } finally {
       setCreateLoading(false);
+      setNewRoomMode("hangout");
+      setNewRoomScene("campfire");
     }
   }
 
@@ -222,11 +286,11 @@ export default function ChannelList({
   }
 
   async function handleCategoryRename(cat: string, channels: Channel[]) {
-    if (currentUserRole !== "owner") return;
+    if (!canManageChannels) return;
     const newCat = window.prompt(`Rename category "${cat === "General" ? "General" : cat}" to:`, cat === "General" ? "" : cat);
     if (newCat === null) return; // cancelled
     const normalizedNew = newCat.trim() || null;
-    await Promise.all(
+    const responses = await Promise.all(
       channels.map((ch) =>
         fetch(`/api/channels/${ch.id}`, {
           method: "PATCH",
@@ -235,10 +299,17 @@ export default function ChannelList({
         })
       )
     );
+    const failed = responses.find((response) => !response.ok);
+    if (failed) {
+      const data = await failed.json().catch(() => ({}));
+      alert(data.error || "Failed to rename category");
+      return;
+    }
     onChannelsUpdated?.(channels.map((ch) => ({ ...ch, category: normalizedNew })));
   }
 
   async function handleDropOnCategory(targetCat: string) {
+    if (!canManageChannels) return;
     if (!draggingId) return;
     const ch = localChannels.find((c) => c.id === draggingId);
     if (!ch) return;
@@ -253,10 +324,17 @@ export default function ChannelList({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ category: newCat }),
     });
-    if (res.ok) onChannelsUpdated?.([{ ...ch, category: newCat }]);
+    if (res.ok) {
+      onChannelsUpdated?.([{ ...ch, category: newCat }]);
+    } else {
+      setLocalChannels(localChannels);
+      const data = await res.json().catch(() => ({}));
+      alert(data.error || "Failed to move channel");
+    }
   }
 
   async function handleRenameChannel(channel: Channel) {
+    if (!canManageChannels) return;
     const entered = window.prompt(`Rename ${channel.type === "voice" ? "" : "#"}${channel.name} to:`, channel.name);
     if (entered === null || !entered.trim() || entered.trim() === channel.name) return;
     const res = await fetch(`/api/channels/${channel.id}`, {
@@ -273,7 +351,79 @@ export default function ChannelList({
     }
   }
 
+
+  async function handleConfigureVoiceRoom(channel: Channel) {
+    if (!canManageChannels) return;
+    const modeIds = VOICE_ROOM_MODES.map((mode) => mode.id).join(", ");
+    const enteredMode = window.prompt(
+      `Room purpose (${modeIds}):`,
+      channel.roomMode || "hangout",
+    );
+    if (enteredMode === null) return;
+    const mode = VOICE_ROOM_MODES.find((candidate) => candidate.id === enteredMode.trim());
+    if (!mode) {
+      alert("Unknown room purpose");
+      return;
+    }
+
+    const sceneIds = VOICE_ROOM_SCENES.map((scene) => scene.id).join(", ");
+    const enteredScene = window.prompt(
+      `Shared scene (${sceneIds}):`,
+      channel.roomScene || mode.defaultScene,
+    );
+    if (enteredScene === null) return;
+    const scene = VOICE_ROOM_SCENES.find((candidate) => candidate.id === enteredScene.trim());
+    if (!scene) {
+      alert("Unknown room scene");
+      return;
+    }
+
+    const res = await fetch(`/api/channels/${channel.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ roomMode: mode.id, roomScene: scene.id }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      alert(data.error || "Failed to update voice room");
+      return;
+    }
+    const { channel: updated } = await res.json();
+    onChannelsUpdated?.([{ ...channel, ...updated }]);
+  }
+
+  async function handleConfigureRetention(channel: Channel) {
+    if (!canManageChannels) return;
+    const entered = window.prompt(
+      "Leave-no-trace retention (forever, 1, 7, or 30 days):",
+      channel.retentionDays ? String(channel.retentionDays) : "forever",
+    );
+    if (entered === null) return;
+    const normalized = entered.trim().toLowerCase();
+    const retentionDays = normalized === "forever" || normalized === "none"
+      ? null
+      : Number(normalized);
+    if (retentionDays !== null && ![1, 7, 30].includes(retentionDays)) {
+      alert("Choose forever, 1, 7, or 30 days");
+      return;
+    }
+
+    const response = await fetch(`/api/channels/${channel.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ retentionDays }),
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      alert(data.error || "Failed to update retention");
+      return;
+    }
+    const { channel: updated } = await response.json();
+    onChannelsUpdated?.([{ ...channel, ...updated }]);
+  }
+
   async function handleDeleteChannel(channel: Channel) {
+    if (!canManageChannels) return;
     if (!confirm(`Delete ${channel.type === "voice" ? "" : "#"}${channel.name}? All its messages will be permanently deleted.`)) return;
     const res = await fetch(`/api/channels/${channel.id}`, { method: "DELETE" });
     if (res.ok) {
@@ -284,9 +434,13 @@ export default function ChannelList({
     }
   }
 
-  const isAdminOrOwner = currentUserRole === "owner" || currentUserRole === "admin";
+  const canOpenServerSettings =
+    currentUserRole === "owner" || currentUserRole === "admin";
 
-  const sortedLocalChannels = [...localChannels].sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
+  const sortedLocalChannels = useMemo(
+    () => [...localChannels].sort((a, b) => (a.position ?? 0) - (b.position ?? 0)),
+    [localChannels],
+  );
   const voiceChannels = sortedLocalChannels.filter((c) => c.type === "voice");
 
   // Group text channels by category using useMemo
@@ -304,7 +458,7 @@ export default function ChannelList({
       return a.localeCompare(b);
     });
     return { categoryMap: map, sortedCategories: cats };
-  }, [localChannels]);
+  }, [sortedLocalChannels]);
 
   // Flat list of navigable channels for keyboard nav (visible text channels first, then voice)
   const navigableChannels: Channel[] = [
@@ -342,6 +496,7 @@ export default function ChannelList({
   }
 
   async function handleChannelDrop(targetChannelId: string) {
+    if (!canManageChannels) return;
     if (!draggingId || draggingId === targetChannelId) return;
     const currentOrder = sortedLocalChannels.map((c) => c.id);
     const fromIdx = currentOrder.indexOf(draggingId);
@@ -359,7 +514,13 @@ export default function ChannelList({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ channelIds: newOrder, serverId }),
     });
-    if (res.ok) onChannelsUpdated?.(reordered);
+    if (res.ok) {
+      onChannelsUpdated?.(reordered);
+    } else {
+      setLocalChannels(localChannels);
+      const data = await res.json().catch(() => ({}));
+      alert(data.error || "Failed to reorder channels");
+    }
   }
 
   return (
@@ -371,13 +532,20 @@ export default function ChannelList({
       aria-label="Channel list"
     >
       {serverBanner && (
-        <div className="h-16 overflow-hidden shrink-0">
-          <img src={serverBanner} alt="Server banner" className="w-full h-full object-cover" />
+        <div className="relative h-16 overflow-hidden shrink-0">
+          <Image
+            src={serverBanner}
+            alt="Server banner"
+            fill
+            sizes="15rem"
+            className="object-cover"
+            unoptimized
+          />
         </div>
       )}
       <div className="h-12 px-4 flex items-center border-b border-[var(--accent-2)]/30 group/header">
         <h2 className="font-bold text-[var(--text)] truncate flex-1">{serverName}</h2>
-        {inviteCode && (
+        {inviteState.code && (
           <button
             onClick={() => setInviteOpen(true)}
             className="text-[var(--muted)] hover:text-[var(--text)] opacity-0 group-hover/header:opacity-100 transition-opacity shrink-0 ml-1"
@@ -391,7 +559,7 @@ export default function ChannelList({
             </svg>
           </button>
         )}
-        {isAdminOrOwner && (
+        {canOpenServerSettings && (
           <button
             onClick={() => onOpenServerSettings?.()}
             className="text-[var(--muted)] hover:text-[var(--text)] opacity-0 group-hover/header:opacity-100 transition-opacity shrink-0 ml-1"
@@ -418,15 +586,15 @@ export default function ChannelList({
               {/* Category header */}
               <div
                 className={`px-2 mb-0.5 flex items-center justify-between mt-2 rounded ${isDragTarget ? "border border-[var(--accent-2)] bg-[var(--panel-2)]/40" : "border border-transparent"}`}
-                onDragOver={isAdminOrOwner ? (e) => { e.preventDefault(); setDragOverCategory(cat); } : undefined}
-                onDragLeave={isAdminOrOwner ? () => setDragOverCategory(null) : undefined}
-                onDrop={isAdminOrOwner ? () => handleDropOnCategory(cat) : undefined}
+                onDragOver={canManageChannels ? (e) => { e.preventDefault(); setDragOverCategory(cat); } : undefined}
+                onDragLeave={canManageChannels ? () => setDragOverCategory(null) : undefined}
+                onDrop={canManageChannels ? () => handleDropOnCategory(cat) : undefined}
               >
                 <button
                   onClick={() => toggleCategory(cat)}
-                  onContextMenu={currentUserRole === "owner" ? (e) => { e.preventDefault(); handleCategoryRename(cat, catChannels); } : undefined}
+                  onContextMenu={canManageChannels ? (e) => { e.preventDefault(); handleCategoryRename(cat, catChannels); } : undefined}
                   className="flex items-center gap-1 text-xs uppercase tracking-wide font-semibold text-[var(--muted)] hover:text-[var(--text)] transition-colors flex-1 min-w-0"
-                  title={currentUserRole === "owner" ? "Right-click to rename category" : undefined}
+                  title={canManageChannels ? "Right-click to rename category" : undefined}
                   aria-expanded={!isCollapsed}
                   aria-label={`${isCollapsed ? "Expand" : "Collapse"} ${label} category`}
                 >
@@ -446,14 +614,16 @@ export default function ChannelList({
                   <span className="truncate">{cat}</span>
                   <span className="ml-1 font-normal opacity-60">({catChannels.length})</span>
                 </button>
-                <button
-                  onClick={() => setCreating("text")}
-                  className="text-[var(--muted)] hover:text-[var(--text)] text-lg leading-none shrink-0 ml-1"
-                  title="Create Text Channel"
-                  aria-label="Create channel"
-                >
-                  +
-                </button>
+                {canManageChannels && (
+                  <button
+                    onClick={() => setCreating("text")}
+                    className="text-[var(--muted)] hover:text-[var(--text)] text-lg leading-none shrink-0 ml-1"
+                    title="Create Text Channel"
+                    aria-label="Create channel"
+                  >
+                    +
+                  </button>
+                )}
               </div>
 
               {!isCollapsed && (
@@ -473,11 +643,11 @@ export default function ChannelList({
                           title={channel.description || undefined}
                           aria-label={`#${channel.name}${unread > 0 && !muted ? `, ${unread} unread` : ""}${muted ? ", muted" : ""}`}
                           aria-current={activeChannelId === channel.id ? "page" : undefined}
-                          draggable={isAdminOrOwner}
-                          onDragStart={isAdminOrOwner ? () => setDraggingId(channel.id) : undefined}
-                          onDragOver={isAdminOrOwner ? (e) => { e.preventDefault(); setDragOverId(channel.id); } : undefined}
-                          onDragEnd={isAdminOrOwner ? () => { setDraggingId(null); setDragOverId(null); } : undefined}
-                          onDrop={isAdminOrOwner ? () => handleChannelDrop(channel.id) : undefined}
+                          draggable={canManageChannels}
+                          onDragStart={canManageChannels ? () => setDraggingId(channel.id) : undefined}
+                          onDragOver={canManageChannels ? (e) => { e.preventDefault(); setDragOverId(channel.id); } : undefined}
+                          onDragEnd={canManageChannels ? () => { setDraggingId(null); setDragOverId(null); } : undefined}
+                          onDrop={canManageChannels ? () => handleChannelDrop(channel.id) : undefined}
                           className={`w-full text-left px-2 py-1 rounded text-sm flex items-center gap-1.5 ${
                             activeChannelId === channel.id
                               ? "bg-[var(--panel-2)] text-[var(--text)]"
@@ -488,6 +658,11 @@ export default function ChannelList({
                         >
                           <HashIcon />
                           <span className="flex-1 truncate">{channel.name}</span>
+                          {channel.retentionDays && (
+                            <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-violet-500/15 text-violet-300" title={`Messages disappear after ${channel.retentionDays} day(s)`}>
+                              {channel.retentionDays === 1 ? "24h" : `${channel.retentionDays}d`}
+                            </span>
+                          )}
                           {muted && <MuteIcon />}
                           {showBadge && (
                             <span className="ml-auto bg-[var(--accent)] text-[var(--bg)] text-xs font-bold rounded-full min-w-[1.25rem] h-5 flex items-center justify-center px-1" aria-label={`${unread} unread messages`}>
@@ -505,7 +680,7 @@ export default function ChannelList({
         })}
 
         {/* Add channel button (when no text channels at all yet) */}
-        {sortedCategories.length === 0 && (
+        {sortedCategories.length === 0 && canManageChannels && (
           <div className="px-2 mb-1 flex items-center justify-between mt-1">
             <span className="text-xs font-semibold text-[var(--muted)] uppercase tracking-wide">General</span>
             <button
@@ -519,7 +694,7 @@ export default function ChannelList({
           </div>
         )}
 
-        {creating === "text" && (
+        {canManageChannels && creating === "text" && (
           <form onSubmit={handleCreate} className="px-2 mb-1 space-y-1" aria-label="Create text channel">
             <label htmlFor="new-text-channel-name" className="sr-only">Channel name</label>
             <input
@@ -554,17 +729,19 @@ export default function ChannelList({
           <span className="text-xs font-semibold text-[var(--muted)] uppercase tracking-wide">
             Voice Channels
           </span>
-          <button
-            onClick={() => setCreating("voice")}
-            className="text-[var(--muted)] hover:text-[var(--text)] text-lg leading-none"
-            title="Create Voice Channel"
-            aria-label="Create voice channel"
-          >
-            +
-          </button>
+          {canManageChannels && (
+            <button
+              onClick={() => setCreating("voice")}
+              className="text-[var(--muted)] hover:text-[var(--text)] text-lg leading-none"
+              title="Create Voice Channel"
+              aria-label="Create voice channel"
+            >
+              +
+            </button>
+          )}
         </div>
 
-        {creating === "voice" && (
+        {canManageChannels && creating === "voice" && (
           <form onSubmit={handleCreate} className="px-2 mb-1 space-y-1" aria-label="Create voice channel">
             <label htmlFor="new-voice-channel-name" className="sr-only">Voice channel name</label>
             <input
@@ -577,6 +754,38 @@ export default function ChannelList({
               autoFocus
               onKeyDown={(e) => { if (e.key === "Escape") setCreating(null); }}
             />
+            <label className="block text-[10px] uppercase tracking-wide text-[var(--muted)]">
+              Purpose
+              <select
+                value={newRoomMode}
+                onChange={(event) => {
+                  const mode = VOICE_ROOM_MODES.find((candidate) => candidate.id === event.target.value);
+                  if (!mode) return;
+                  setNewRoomMode(mode.id);
+                  setNewRoomScene(mode.defaultScene);
+                }}
+                className="mt-0.5 w-full text-xs px-2 py-1 bg-[var(--panel-2)] text-[var(--text)] border border-[var(--accent-2)]/50 rounded"
+              >
+                {VOICE_ROOM_MODES.map((mode) => (
+                  <option key={mode.id} value={mode.id}>{mode.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="block text-[10px] uppercase tracking-wide text-[var(--muted)]">
+              Shared scene
+              <select
+                value={newRoomScene}
+                onChange={(event) => setNewRoomScene(event.target.value)}
+                className="mt-0.5 w-full text-xs px-2 py-1 bg-[var(--panel-2)] text-[var(--text)] border border-[var(--accent-2)]/50 rounded"
+              >
+                {VOICE_ROOM_SCENES.map((scene) => (
+                  <option key={scene.id} value={scene.id}>{scene.label}</option>
+                ))}
+              </select>
+            </label>
+            <p className="text-[10px] text-[var(--muted)] leading-tight">
+              {VOICE_ROOM_MODES.find((mode) => mode.id === newRoomMode)?.description}
+            </p>
             <div className="flex gap-1">
               <button type="submit" disabled={!newName.trim() || createLoading} className="flex-1 text-xs py-1 bg-amber-600/30 text-amber-300 rounded hover:bg-amber-600/40 disabled:opacity-30 transition-colors">Create</button>
               <button type="button" onClick={() => setCreating(null)} className="text-xs py-1 px-2 text-[var(--muted)] hover:text-[var(--text)]">Cancel</button>
@@ -605,7 +814,7 @@ export default function ChannelList({
                       onVoiceJoin?.(channel);
                     }
                   }}
-                  onContextMenu={isAdminOrOwner ? (e) => {
+                  onContextMenu={canManageChannels ? (e) => {
                     e.preventDefault();
                     setChannelMenu({ channel, x: e.clientX, y: e.clientY });
                   } : undefined}
@@ -618,7 +827,10 @@ export default function ChannelList({
                   }`}
                 >
                   <SpeakerIcon />
-                  <span className="flex-1 truncate">{channel.name}</span>
+                  <span className="flex-1 min-w-0">
+                    <span className="block truncate">{channel.name}</span>
+                    <span className="block text-[9px] opacity-60 truncate">{voiceRoomModeLabel(channel.roomMode)}</span>
+                  </span>
                   {participants.length > 0 && (
                     <span className="text-xs text-[var(--muted)]" aria-label={`${participants.length} participants`}>{participants.length}</span>
                   )}
@@ -686,8 +898,24 @@ export default function ChannelList({
                 {isMuted(channelMenu.channel.id) ? "Unmute Channel" : "Mute Channel"}
               </button>
             )}
-            {isAdminOrOwner && (
+            {canManageChannels && (
               <>
+                {channelMenu.channel.type === "voice" && (
+                  <button
+                    onClick={() => { const c = channelMenu.channel; setChannelMenu(null); void handleConfigureVoiceRoom(c); }}
+                    className="w-full text-left px-3 py-1.5 text-xs text-[var(--text)] hover:bg-[var(--panel-2)]"
+                  >
+                    Room Purpose &amp; Scene
+                  </button>
+                )}
+                {(!channelMenu.channel.type || channelMenu.channel.type === "text") && (
+                  <button
+                    onClick={() => { const c = channelMenu.channel; setChannelMenu(null); void handleConfigureRetention(c); }}
+                    className="w-full text-left px-3 py-1.5 text-xs text-[var(--text)] hover:bg-[var(--panel-2)]"
+                  >
+                    Leave-no-trace Retention
+                  </button>
+                )}
                 <button
                   onClick={() => { const c = channelMenu.channel; setChannelMenu(null); handleRenameChannel(c); }}
                   className="w-full text-left px-3 py-1.5 text-xs text-[var(--text)] hover:bg-[var(--panel-2)]"
@@ -706,14 +934,28 @@ export default function ChannelList({
         </>
       )}
 
-      {inviteOpen && inviteCode && (
+      {inviteOpen && inviteState.code && (
         <InviteModal
           serverName={serverName}
           serverIcon={serverIcon}
           memberCount={memberCount ?? 0}
           serverId={serverId}
-          inviteCode={inviteCode}
+          inviteCode={inviteState.code}
+          inviteExpiresAt={inviteState.expiresAt}
+          inviteMaxUses={inviteState.maxUses}
+          inviteUseCount={inviteState.useCount}
+          inviteRevokedAt={inviteState.revokedAt}
           isOwner={currentUserRole === "owner"}
+          onInviteUpdated={(invite) => {
+            setInviteState({
+              code: invite.inviteCode,
+              expiresAt: invite.inviteExpiresAt,
+              maxUses: invite.inviteMaxUses,
+              useCount: invite.inviteUseCount,
+              revokedAt: invite.inviteRevokedAt,
+            });
+            onInviteUpdated?.(invite);
+          }}
           onClose={() => setInviteOpen(false)}
         />
       )}

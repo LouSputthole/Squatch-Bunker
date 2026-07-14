@@ -41,13 +41,14 @@ export async function getPermContext(serverId: string, userId: string): Promise<
   const isOwner = !!server && server.ownerId === userId;
   const member = await prisma.serverMember.findUnique({
     where: { serverId_userId: { serverId, userId } },
-    select: { role: true, memberRoles: { select: { role: { select: { permissions: true } } } } },
+    select: { banned: true, role: true, memberRoles: { select: { role: { select: { permissions: true } } } } },
   });
+  const activeMember = member?.banned ? null : member;
   return {
     isOwner,
-    isMember: isOwner || !!member,
-    tier: member?.role,
-    rolePermissionJsons: member?.memberRoles.map((mr) => mr.role.permissions) ?? [],
+    isMember: isOwner || !!activeMember,
+    tier: activeMember?.role,
+    rolePermissionJsons: activeMember?.memberRoles.map((mr) => mr.role.permissions) ?? [],
   };
 }
 

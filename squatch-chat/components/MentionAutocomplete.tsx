@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
+import Avatar from "@/components/Avatar";
 
 interface MentionUser {
   id: string;
@@ -16,23 +17,30 @@ interface MentionAutocompleteProps {
 }
 
 export default function MentionAutocomplete({ query, members, onSelect, onClose }: MentionAutocompleteProps) {
-  const [selectedIdx, setSelectedIdx] = useState(0);
+  const [selection, setSelection] = useState({ query, index: 0 });
+  const selectedIdx = selection.query === query ? selection.index : 0;
 
   const filtered = useMemo(() => {
     const q = query.toLowerCase();
     return members.filter((m) => m.username.toLowerCase().includes(q)).slice(0, 8);
   }, [query, members]);
 
-  useEffect(() => { setSelectedIdx(0); }, [query]);
-
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === "ArrowDown") {
+        if (filtered.length === 0) return;
         e.preventDefault();
-        setSelectedIdx((prev) => (prev + 1) % filtered.length);
+        setSelection((previous) => ({
+          query,
+          index: ((previous.query === query ? previous.index : 0) + 1) % filtered.length,
+        }));
       } else if (e.key === "ArrowUp") {
+        if (filtered.length === 0) return;
         e.preventDefault();
-        setSelectedIdx((prev) => (prev - 1 + filtered.length) % filtered.length);
+        setSelection((previous) => ({
+          query,
+          index: ((previous.query === query ? previous.index : 0) - 1 + filtered.length) % filtered.length,
+        }));
       } else if (e.key === "Tab" || e.key === "Enter") {
         if (filtered.length > 0) {
           e.preventDefault();
@@ -45,7 +53,7 @@ export default function MentionAutocomplete({ query, members, onSelect, onClose 
     }
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [filtered, selectedIdx, onSelect, onClose]);
+  }, [filtered, selectedIdx, onSelect, onClose, query]);
 
   if (filtered.length === 0) return null;
 
@@ -61,7 +69,7 @@ export default function MentionAutocomplete({ query, members, onSelect, onClose 
           }`}
         >
           {user.avatar ? (
-            <img src={user.avatar} alt="" className="w-5 h-5 rounded-full object-cover" />
+            <Avatar username={user.username} avatarUrl={user.avatar} size={20} />
           ) : (
             <div className="w-5 h-5 rounded-full bg-[var(--accent-2)] flex items-center justify-center text-[10px] font-bold text-[var(--text)]">
               {user.username.charAt(0).toUpperCase()}

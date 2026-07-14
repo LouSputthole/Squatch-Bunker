@@ -3,6 +3,7 @@ import { getSession } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { checkWeightedLimit } from "@/lib/rateLimit";
 
+import { resolveChannelAccess } from "@/lib/channelAccess";
 const MAX_REASON = 1000;
 const MIN_REASON = 10;
 const REPORTS_PER_HOUR = 5;
@@ -47,18 +48,42 @@ export async function POST(req: Request) {
     );
   }
 
-  const target = await prisma.user.findUnique({ where: { id: targetUserId }, select: { id: true } });
-  if (!target) {
-    return NextResponse.json({ error: "User not found" }, { status: 404 });
-  }
-
   if (messageId) {
     const message = await prisma.message.findUnique({
       where: { id: messageId },
-      select: { authorId: true },
+      select: { authorId: true, channelId: true },
     });
     if (!message || message.authorId !== targetUserId) {
       return NextResponse.json({ error: "Message not found for that user" }, { status: 404 });
+    }
+    const access = await resolveChannelAccess(message.channelId, session.userId);
+    if (!access?.canView) {
+      return NextResponse.json({ error: "Message not found for that user" }, { status: 404 });
+    }
+  } else {
+    // User-level reports must stay inside a community shared by both people.
+    // This also avoids turning the endpoint into a global user-ID oracle.
+    const sharedServer = await prisma.server.findFirst({
+      where: {
+        AND: [
+          {
+            OR: [
+              { ownerId: session.userId },
+              { members: { some: { userId: session.userId, banned: false } } },
+            ],
+          },
+          {
+            OR: [
+              { ownerId: targetUserId },
+              { members: { some: { userId: targetUserId, banned: false } } },
+            ],
+          },
+        ],
+      },
+      select: { id: true },
+    });
+    if (!sharedServer) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
   }
 

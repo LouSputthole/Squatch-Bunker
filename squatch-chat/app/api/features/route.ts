@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { getTier, getFeatures, FEATURES, TIER_INFO } from "@/lib/features";
+import { billingConfiguration, getEdition } from "@/lib/edition";
 
 export async function GET() {
   const session = await getSession();
@@ -20,6 +21,8 @@ export async function GET() {
   const features = getFeatures(tier);
 
   return NextResponse.json({
+    edition: getEdition(),
+    billingEnabled: billingConfiguration().enabled,
     tier,
     tierInfo: TIER_INFO[tier],
     features,

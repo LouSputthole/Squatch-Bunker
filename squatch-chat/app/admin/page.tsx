@@ -1,5 +1,12 @@
-import { redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 import { getSession } from "@/lib/auth";
+import { isInstanceAdmin } from "@/lib/instanceAdmin";
+
+const DAY_IN_MS = 24 * 60 * 60 * 1000;
+
+async function getDashboardNow(): Promise<Date> {
+  return new Date();
+}
 
 function BarChart({
   data,
@@ -70,11 +77,13 @@ function BarChart({
 
 export default async function AdminPage() {
   const session = await getSession();
-  if (!session) redirect("/");
+  if (!session || !isInstanceAdmin(session.userId)) notFound();
 
   const { prisma } = await import("@/lib/db");
 
-  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  const now = await getDashboardNow();
+  const nowMs = now.getTime();
+  const sevenDaysAgo = new Date(nowMs - 7 * DAY_IN_MS);
 
   const [totalUsers, totalServers, totalMessages, recentMessages, topServers, topChannels] =
     await Promise.all([
@@ -100,7 +109,7 @@ export default async function AdminPage() {
   // Group messages by day
   const dayCounts: Record<string, number> = {};
   for (let i = 6; i >= 0; i--) {
-    const d = new Date(Date.now() - i * 24 * 60 * 60 * 1000);
+    const d = new Date(nowMs - i * DAY_IN_MS);
     const key = d.toISOString().slice(0, 10);
     dayCounts[key] = 0;
   }

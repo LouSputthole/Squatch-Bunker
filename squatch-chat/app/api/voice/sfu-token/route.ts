@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { assertFeature } from "@/lib/features";
-import { requireChannelMembership } from "@/lib/membership";
+import { resolveChannelAccess } from "@/lib/channelAccess";
 import { sfuConfigured, mintSfuToken } from "@/lib/sfu";
 
 /**
@@ -38,7 +38,8 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Upgrade required" }, { status: 403 });
   }
 
-  if (!(await requireChannelMembership(channelId, session.userId))) {
+  const access = await resolveChannelAccess(channelId, session.userId);
+  if (!access?.canView) {
     return NextResponse.json({ error: "Not a member of this channel" }, { status: 403 });
   }
 

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
+import { memberHasPermission } from "@/lib/serverRoles";
 
 export async function GET(
   req: NextRequest,
@@ -17,11 +18,7 @@ export async function GET(
   try {
     const { prisma } = await import("@/lib/db");
 
-    // Verify membership and admin role
-    const member = await prisma.serverMember.findUnique({
-      where: { serverId_userId: { serverId, userId: session.userId } },
-    });
-    if (!member || !["owner", "admin"].includes(member.role)) {
+    if (!(await memberHasPermission(serverId, session.userId, "VIEW_AUDIT_LOG"))) {
       return NextResponse.json({ error: "Admin access required" }, { status: 403 });
     }
 
@@ -61,39 +58,6 @@ export async function GET(
     return NextResponse.json({ entries, total, page, pages: Math.ceil(total / limit) });
   } catch (err) {
     console.error("[Campfire] Audit log error:", err);
-    return NextResponse.json({ error: "Database error" }, { status: 503 });
-  }
-}
-
-export async function POST(
-  req: Request,
-  { params }: { params: Promise<{ serverId: string }> }
-) {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  const { serverId } = await params;
-  const { action, targetId, detail } = await req.json();
-
-  if (!action) return NextResponse.json({ error: "Action required" }, { status: 400 });
-
-  try {
-    const { prisma } = await import("@/lib/db");
-
-    const member = await prisma.serverMember.findUnique({
-      where: { serverId_userId: { serverId, userId: session.userId } },
-    });
-    if (!member || !["owner", "admin", "mod"].includes(member.role)) {
-      return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
-    }
-
-    const log = await prisma.auditLog.create({
-      data: { serverId, actorId: session.userId, targetId, action, detail },
-    });
-
-    return NextResponse.json({ log });
-  } catch (err) {
-    console.error("[Campfire] Audit log create error:", err);
     return NextResponse.json({ error: "Database error" }, { status: 503 });
   }
 }

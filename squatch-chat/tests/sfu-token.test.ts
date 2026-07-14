@@ -13,8 +13,8 @@ vi.mock("@/lib/auth", () => authMock);
 const featuresMock = vi.hoisted(() => ({ assertFeature: vi.fn() }));
 vi.mock("@/lib/features", () => featuresMock);
 
-const membershipMock = vi.hoisted(() => ({ requireChannelMembership: vi.fn() }));
-vi.mock("@/lib/membership", () => membershipMock);
+const channelAccessMock = vi.hoisted(() => ({ resolveChannelAccess: vi.fn() }));
+vi.mock("@/lib/channelAccess", () => channelAccessMock);
 
 import { POST } from "@/app/api/voice/sfu-token/route";
 import { sfuConfigured, mintSfuToken } from "@/lib/sfu";
@@ -43,9 +43,11 @@ beforeEach(() => {
   vi.stubEnv("LIVEKIT_API_SECRET", "");
   authMock.getSession.mockResolvedValue(SESSION);
   featuresMock.assertFeature.mockResolvedValue(true);
-  membershipMock.requireChannelMembership.mockResolvedValue({
+  channelAccessMock.resolveChannelAccess.mockResolvedValue({
     membership: { role: "member" },
     serverId: "srv_1",
+    canView: true,
+    canSend: true,
   });
 });
 
@@ -85,7 +87,18 @@ describe("POST /api/voice/sfu-token", () => {
 
   it("403 when not a member of the channel's server", async () => {
     configureSfu();
-    membershipMock.requireChannelMembership.mockResolvedValue(null);
+    channelAccessMock.resolveChannelAccess.mockResolvedValue(null);
+    expect((await post()).status).toBe(403);
+  });
+
+  it("403 when the member cannot view the voice channel", async () => {
+    configureSfu();
+    channelAccessMock.resolveChannelAccess.mockResolvedValue({
+      membership: { role: "member" },
+      serverId: "srv_1",
+      canView: false,
+      canSend: false,
+    });
     expect((await post()).status).toBe(403);
   });
 

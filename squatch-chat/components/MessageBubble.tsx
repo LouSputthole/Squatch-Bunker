@@ -1,15 +1,24 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Image from "next/image";
 import { displayName, truncateName } from "@/lib/utils";
 import Avatar from "@/components/Avatar";
 import ProfileCard from "@/components/ProfileCard";
 import ImageLightbox from "@/components/ImageLightbox";
 import { LinkPreview } from "@/components/LinkPreview";
 import MessageContextMenu from "@/components/MessageContextMenu";
+import PollCard, { type PollData } from "@/components/PollCard";
+import BlockedMessageGate from "@/components/BlockedMessageGate";
+import { VOICE_NOTE_LABEL } from "@/lib/uploadPolicy";
+
+function isCampfireVoiceNote(name: string): boolean {
+  return name.toLowerCase().startsWith(VOICE_NOTE_LABEL.toLowerCase());
+}
 
 function getFileType(name: string): "image" | "video" | "audio" | "file" {
   const ext = name.split(".").pop()?.toLowerCase() || "";
+  if (isCampfireVoiceNote(name) && ["webm", "ogg", "m4a"].includes(ext)) return "audio";
   if (["jpg","jpeg","png","gif","webp","svg"].includes(ext)) return "image";
   if (["mp4","webm","mov","avi"].includes(ext)) return "video";
   if (["mp3","wav","ogg","m4a","flac"].includes(ext)) return "audio";
@@ -322,6 +331,7 @@ interface MessageBubbleProps {
     author: { id: string; username: string; avatar?: string | null };
     reactions?: Record<string, ReactionGroup>;
     replyTo?: ReplySnippet | null;
+    poll?: PollData | null;
     isSystem?: boolean;
   };
   isOwn: boolean;
@@ -336,22 +346,28 @@ interface MessageBubbleProps {
   onPin?: (messageId: string, pinned: boolean) => void;
   onThread?: (messageId: string, author: { id: string; username: string }) => void;
   onBookmark?: (messageId: string, bookmarked: boolean) => void;
+  onJournal?: (messageId: string) => void;
   onTranslate?: (messageId: string, text: string) => void;
   translatedText?: string | null;
   isBookmarked?: boolean;
   highlighted?: boolean;
+  blocked?: boolean;
+  replyAuthorBlocked?: boolean;
 }
 
-export default function MessageBubble({ message, isOwn, currentUserId, authorColor, canPin, onEdit, onDelete, onReact, onReply, onScrollToMessage, onPin, onThread, onBookmark, onTranslate, translatedText, isBookmarked, highlighted }: MessageBubbleProps) {
+export default function MessageBubble({ message, isOwn, currentUserId, authorColor, canPin, onEdit, onDelete, onReact, onReply, onScrollToMessage, onPin, onThread, onBookmark, onJournal, onTranslate, translatedText, isBookmarked, highlighted, blocked = false, replyAuthorBlocked = false }: MessageBubbleProps) {
   const [editing, setEditing] = useState(false);
   const [glowing, setGlowing] = useState(false);
 
   useEffect(() => {
-    if (highlighted) {
-      setGlowing(true);
-      const t = setTimeout(() => setGlowing(false), 2000);
-      return () => clearTimeout(t);
-    }
+    const showTimer = setTimeout(() => setGlowing(Boolean(highlighted)), 0);
+    const hideTimer = highlighted
+      ? setTimeout(() => setGlowing(false), 2000)
+      : undefined;
+    return () => {
+      clearTimeout(showTimer);
+      if (hideTimer) clearTimeout(hideTimer);
+    };
   }, [highlighted]);
 
   const [editContent, setEditContent] = useState(message.content);
@@ -425,16 +441,19 @@ export default function MessageBubble({ message, isOwn, currentUserId, authorCol
 
   if (message.isSystem) {
     return (
-      <div className="flex items-center gap-3 py-1 px-2 my-1">
-        <div className="flex-1 h-px bg-[var(--accent-2)]/20" />
-        <span className="text-xs text-[var(--muted)] italic shrink-0">{message.content}</span>
-        <div className="flex-1 h-px bg-[var(--accent-2)]/20" />
-      </div>
+      <BlockedMessageGate blocked={blocked}>
+        <div className="flex items-center gap-3 py-1 px-2 my-1">
+          <div className="flex-1 h-px bg-[var(--accent-2)]/20" />
+          <span className="text-xs text-[var(--muted)] italic shrink-0">{message.content}</span>
+          <div className="flex-1 h-px bg-[var(--accent-2)]/20" />
+        </div>
+      </BlockedMessageGate>
     );
   }
 
   return (
-    <div
+    <BlockedMessageGate blocked={blocked}>
+      <div
       className={`flex gap-3 py-1 group hover:bg-[var(--panel)]/30 px-1 rounded relative ${glowing ? "animate-search-highlight" : ""}`}
       onMouseEnter={() => setShowActions(true)}
       onMouseLeave={() => { setShowActions(false); setShowEmojiPicker(false); setEmojiSearch(""); }}
@@ -475,11 +494,17 @@ export default function MessageBubble({ message, isOwn, currentUserId, authorCol
             className="flex items-start gap-1.5 mb-1 pl-2 border-l-2 border-[var(--accent-2)] text-left hover:border-[var(--accent)] transition-colors group/reply"
           >
             <span className="text-xs text-[var(--muted)] group-hover/reply:text-[var(--text)] transition-colors truncate max-w-[320px]">
-              <span className="font-medium text-[var(--accent-2)] group-hover/reply:text-[var(--accent)]">
-                {displayName(message.replyTo.author.username)}
-              </span>
-              {" "}
-              {message.replyTo.content ? message.replyTo.content.slice(0, 80) + (message.replyTo.content.length > 80 ? "…" : "") : "attachment"}
+              {replyAuthorBlocked ? (
+                <span className="italic">Blocked message</span>
+              ) : (
+                <>
+                  <span className="font-medium text-[var(--accent-2)] group-hover/reply:text-[var(--accent)]">
+                    {displayName(message.replyTo.author.username)}
+                  </span>
+                  {" "}
+                  {message.replyTo.content ? message.replyTo.content.slice(0, 80) + (message.replyTo.content.length > 80 ? "…" : "") : "attachment"}
+                </>
+              )}
             </span>
           </button>
         )}
@@ -523,6 +548,13 @@ export default function MessageBubble({ message, isOwn, currentUserId, authorCol
                     .filter(Boolean);
                   setLightbox({ src, allSrcs: all.length > 0 ? all : [src] });
                 }}
+              />
+            )}
+            {message.poll && (
+              <PollCard
+                initialPoll={message.poll}
+                currentUserId={currentUserId}
+                canClose={isOwn || canPin}
               />
             )}
             {translated && (
@@ -734,6 +766,7 @@ export default function MessageBubble({ message, isOwn, currentUserId, authorCol
           onReact={(emoji) => onReact?.(message.id, emoji)}
           onCopyText={() => { navigator.clipboard.writeText(message.content).catch(() => {}); }}
           onBookmark={() => onBookmark?.(message.id, !isBookmarked)}
+          onJournal={onJournal ? () => onJournal(message.id) : undefined}
           onTranslate={onTranslate ? () => onTranslate(message.id, message.content) : undefined}
           onClose={() => setContextMenu(null)}
         />
@@ -756,7 +789,8 @@ export default function MessageBubble({ message, isOwn, currentUserId, authorCol
           onNavigate={(src) => setLightbox((prev) => prev ? { ...prev, src } : null)}
         />
       )}
-    </div>
+      </div>
+    </BlockedMessageGate>
   );
 }
 
@@ -771,11 +805,14 @@ function AttachmentPreview({ url, name, onOpenLightbox }: { url: string; name?: 
         onClick={() => onOpenLightbox(url)}
         className="block mt-1 text-left cursor-pointer"
       >
-        <img
+        <Image
           src={url}
           alt={fileName}
+          width={400}
+          height={300}
+          unoptimized
           data-lightbox-src={url}
-          style={{ maxHeight: 300, maxWidth: 400 }}
+          style={{ maxHeight: 300, maxWidth: 400, width: "auto", height: "auto" }}
           className="rounded-lg border border-[var(--accent-2)]/30 object-cover hover:opacity-80 transition-opacity cursor-pointer"
         />
       </button>
@@ -796,9 +833,16 @@ function AttachmentPreview({ url, name, onOpenLightbox }: { url: string; name?: 
 
   if (fileType === "audio") {
     return (
-      <audio controls className="w-full max-w-xs mt-1">
-        <source src={url} />
-      </audio>
+      <div className="mt-1 w-full max-w-xs rounded-lg border border-[var(--accent-2)]/30 bg-[var(--panel)] px-3 py-2">
+        {isCampfireVoiceNote(fileName) && (
+          <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--accent-2)]">
+            🔥 {VOICE_NOTE_LABEL}
+          </div>
+        )}
+        <audio controls preload="metadata" className="w-full">
+          <source src={url} />
+        </audio>
+      </div>
     );
   }
 

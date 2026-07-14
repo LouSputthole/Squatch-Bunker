@@ -8,3 +8,7 @@ process.env.JWT_SECRET ||= "test-jwt-secret-please-ignore-0123456789-abcdef";
 
 // Tests are hermetic: always point at the throwaway SQLite file, never a real DB.
 process.env.DATABASE_URL = TEST_DB_URL;
+
+// Route tests use distinct, documentation-only client addresses to isolate the
+// in-memory limiter. Production keeps forwarding headers untrusted by default.
+process.env.CAMPFIRE_TRUST_PROXY_HOPS ||= "1";

@@ -1,13 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { requireChannelMembership } from "@/lib/membership";
+import { resolveChannelAccess } from "@/lib/channelAccess";
 import { assertFeature } from "@/lib/features";
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ channelId: string }> }) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { channelId } = await params;
+  const access = await resolveChannelAccess(channelId, session.userId);
+  if (!access?.canView) {
+    return NextResponse.json({ error: "No access to this channel" }, { status: 403 });
+  }
+
 
   const messages = await prisma.scheduledMessage.findMany({
     where: { channelId, authorId: session.userId, sent: false },
@@ -21,9 +26,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ cha
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { channelId } = await params;
 
-  // Must be an active member of the channel's server to schedule into it.
-  const access = await requireChannelMembership(channelId, session.userId);
-  if (!access) {
+  // Scheduling is deferred publication, so it requires the same effective
+  // channel send permission as an immediate message.
+  const access = await resolveChannelAccess(channelId, session.userId);
+  if (!access?.canSend) {
     return NextResponse.json({ error: "No access to this channel" }, { status: 403 });
   }
 
@@ -49,7 +55,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ cha
   return NextResponse.json({ message: msg });
 }
 
-export async function DELETE(req: NextRequest, { params }: { params: Promise<{ channelId: string }> }) {
+export async function DELETE(req: NextRequest) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 

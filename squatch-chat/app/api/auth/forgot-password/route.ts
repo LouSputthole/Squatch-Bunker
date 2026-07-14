@@ -1,14 +1,14 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { checkRateLimit } from "@/lib/rateLimit";
+import { sendPasswordResetEmail } from "@/lib/email";
+import { createPasswordResetToken } from "@/lib/passwordReset";
+import { MAX_EMAIL_LENGTH } from "@/lib/accountCredentials";
+import { clientIp } from "@/lib/clientIp";
 
-function clientIp(request: Request): string {
-  return (
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    request.headers.get("x-real-ip") ||
-    "unknown"
-  );
-}
+const GENERIC_RESPONSE = {
+  message: "If that email exists, a reset link has been sent.",
+};
 
 export async function POST(request: Request) {
   const rl = checkRateLimit(`forgot:${clientIp(request)}`);
@@ -27,36 +27,60 @@ export async function POST(request: Request) {
   }
 
   try {
-    const { email } = await request.json();
-
-    if (!email) {
-      return NextResponse.json(
-        { message: "If that email exists, a reset link has been sent." }
-      );
+    const body: unknown = await request.json();
+    const email = body && typeof body === "object" && "email" in body
+      ? body.email
+      : null;
+    if (typeof email !== "string" || !email.trim()) {
+      return NextResponse.json(GENERIC_RESPONSE);
     }
 
-    const user = await prisma.user.findUnique({ where: { email } });
+    const enteredEmail = email.trim();
+    if (enteredEmail.length > MAX_EMAIL_LENGTH) {
+      return NextResponse.json(GENERIC_RESPONSE);
+    }
+    const normalizedEmail = enteredEmail.toLowerCase();
+    const user = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { email: enteredEmail },
+          ...(normalizedEmail === enteredEmail ? [] : [{ email: normalizedEmail }]),
+        ],
+      },
+    });
 
-    if (user) {
-      const token = crypto.randomUUID();
-      const expiry = new Date(Date.now() + 60 * 60 * 1000); // 1 hour from now
-
+    if (user && !user.isGuest) {
+      const reset = createPasswordResetToken();
       await prisma.user.update({
         where: { id: user.id },
         data: {
-          resetToken: token,
-          resetExpiry: expiry,
+          resetToken: reset.digest,
+          resetExpiry: reset.expiresAt,
         },
       });
+      try {
+        const delivery = await sendPasswordResetEmail({
+          to: user.email,
+          username: user.username,
+          token: reset.token,
+        });
+        if (!delivery.delivered) {
+          throw new Error("Password reset email is not configured");
+        }
+      } catch (deliveryError) {
+        await prisma.user.updateMany({
+          where: { id: user.id, resetToken: reset.digest },
+          data: { resetToken: null, resetExpiry: null },
+        });
+        console.error("[Campfire] Password reset delivery failed:", deliveryError);
+      }
     }
 
-    return NextResponse.json({
-      message: "If that email exists, a reset link has been sent.",
-    });
+    return NextResponse.json(GENERIC_RESPONSE);
   } catch (err) {
     console.error("[Campfire] Forgot password error:", err);
     return NextResponse.json(
-      { message: "If that email exists, a reset link has been sent." }
+      GENERIC_RESPONSE
     );
   }
 }

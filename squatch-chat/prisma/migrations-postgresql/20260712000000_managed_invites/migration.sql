@@ -1,0 +1,5 @@
+ALTER TABLE "Server"
+ADD COLUMN "inviteExpiresAt" TIMESTAMP(3),
+ADD COLUMN "inviteMaxUses" INTEGER,
+ADD COLUMN "inviteUseCount" INTEGER NOT NULL DEFAULT 0,
+ADD COLUMN "inviteRevokedAt" TIMESTAMP(3);

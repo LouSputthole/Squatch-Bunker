@@ -3,11 +3,21 @@ export interface Channel {
   name: string;
   type?: string;
   topic?: string | null;
+  roomMode?: string;
+  roomScene?: string;
+  retentionDays?: number | null;
 }
 
 export interface Server {
   id: string;
   name: string;
+  icon?: string | null;
+  banner?: string | null;
+  inviteCode?: string;
+  inviteExpiresAt?: string | null;
+  inviteMaxUses?: number | null;
+  inviteUseCount?: number;
+  inviteRevokedAt?: string | null;
   channels: Channel[];
   _count: { members: number };
 }

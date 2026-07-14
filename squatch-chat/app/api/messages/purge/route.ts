@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
+import { resolveChannelAccess } from "@/lib/channelAccess";
+import {
+  removeUnreferencedPrivateUpload,
+  removeUnreferencedUpload,
+} from "@/lib/messageRetention";
+import { memberHasPermission } from "@/lib/serverRoles";
 
 export async function POST(req: NextRequest) {
   const session = await getSession();
@@ -19,48 +25,81 @@ export async function POST(req: NextRequest) {
       select: { serverId: true },
     });
     if (!channel) return NextResponse.json({ error: "Channel not found" }, { status: 404 });
-
-    // Check admin/mod permissions
-    const member = await prisma.serverMember.findUnique({
-      where: { serverId_userId: { serverId: channel.serverId, userId: session.userId } },
-    });
-    if (!member || !["owner", "admin", "mod"].includes(member.role)) {
+    const access = await resolveChannelAccess(channelId, session.userId);
+    if (!access?.canView) {
       return NextResponse.json({ error: "Mod access required" }, { status: 403 });
     }
 
-    // Find messages to delete
+
+    if (!(await memberHasPermission(access.serverId, session.userId, "MANAGE_MESSAGES"))) {
+      return NextResponse.json({ error: "Mod access required" }, { status: 403 });
+    }
+
     const where: { channelId: string; authorId?: string } = { channelId };
     if (filterUserId) where.authorId = filterUserId;
 
-    const messages = await prisma.message.findMany({
-      where,
-      orderBy: { createdAt: "desc" },
-      take: deleteCount,
-      select: { id: true },
+    const deletion = await prisma.$transaction(async (tx) => {
+      const messages = await tx.message.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+        take: deleteCount,
+        select: { id: true, attachmentUrl: true, privateUploadId: true },
+      });
+
+      if (messages.length === 0) {
+        return {
+          deleted: 0,
+          messageIds: [] as string[],
+          attachmentUrls: [] as string[],
+          privateUploadIds: [] as string[],
+        };
+      }
+
+      const messageIds = messages.map((message) => message.id);
+      await Promise.all([
+        tx.reaction.deleteMany({ where: { messageId: { in: messageIds } } }),
+        tx.bookmark.deleteMany({ where: { messageId: { in: messageIds } } }),
+      ]);
+      const result = await tx.message.deleteMany({
+        where: { id: { in: messageIds }, channelId },
+      });
+      await tx.auditLog.create({
+        data: {
+          serverId: channel.serverId,
+          actorId: session.userId,
+          action: "message_purge",
+          detail: `Purged ${result.count} messages in channel ${channelId}${filterUserId ? ` (user: ${filterUserId})` : ""}`,
+        },
+      });
+
+      return {
+        deleted: result.count,
+        messageIds,
+        attachmentUrls: [
+          ...new Set(
+            messages
+              .map((message) => message.attachmentUrl)
+              .filter((url): url is string => !!url),
+          ),
+        ],
+        privateUploadIds: [
+          ...new Set(
+            messages
+              .map((message) => message.privateUploadId)
+              .filter((id): id is string => Boolean(id)),
+          ),
+        ],
+      };
     });
 
-    if (messages.length === 0) {
-      return NextResponse.json({ deleted: 0 });
-    }
-
-    const ids = messages.map((m) => m.id);
-
-    // Delete reactions first, then messages
-    await prisma.reaction.deleteMany({ where: { messageId: { in: ids } } });
-    await prisma.bookmark.deleteMany({ where: { messageId: { in: ids } } });
-    const result = await prisma.message.deleteMany({ where: { id: { in: ids } } });
-
-    // Audit log
-    await prisma.auditLog.create({
-      data: {
-        serverId: channel.serverId,
-        actorId: session.userId,
-        action: "message_purge",
-        detail: `Purged ${result.count} messages in channel ${channelId}${filterUserId ? ` (user: ${filterUserId})` : ""}`,
-      },
+    await Promise.all([
+      ...deletion.attachmentUrls.map(removeUnreferencedUpload),
+      ...deletion.privateUploadIds.map(removeUnreferencedPrivateUpload),
+    ]);
+    return NextResponse.json({
+      deleted: deletion.deleted,
+      messageIds: deletion.messageIds,
     });
-
-    return NextResponse.json({ deleted: result.count, messageIds: ids });
   } catch (err) {
     console.error("[Campfire] Purge error:", err);
     return NextResponse.json({ error: "Database error" }, { status: 503 });

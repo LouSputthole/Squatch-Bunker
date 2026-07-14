@@ -5,7 +5,8 @@ import { displayName } from "@/lib/utils";
 import Avatar from "@/components/Avatar";
 import CircleView, { DEFAULT_SEATS } from "@/components/CircleView";
 import EmberReactions from "@/components/EmberReactions";
-import ConnectionQualityIcon from "@/components/ConnectionQualityIcon";
+import { getSocket } from "@/lib/socket";
+import { voiceRoomModeLabel } from "@/lib/voiceRoomConfig";
 import AmbientSounds from "@/components/AmbientSounds";
 import SoundBoard from "@/components/SoundBoard";
 import type { ScreenShareInfo } from "@/components/VoicePanel";
@@ -26,13 +27,43 @@ interface VoiceChannel {
   name: string;
   type?: string;
 }
+interface LanternRoomState {
+  channelId: string;
+  active: boolean;
+  hostId: string | null;
+  holderId: string | null;
+  queue: { userId: string; username: string }[];
+}
+interface OffshootRoomSummary {
+  id: string;
+  name: string;
+  creatorId: string;
+  members: { userId: string; username: string }[];
+}
+interface OffshootState {
+  channelId: string;
+  offshoots: OffshootRoomSummary[];
+  limits: {
+    maxOffshoots: number;
+    maxMembers: number;
+  };
+}
+interface OffshootError {
+  channelId: string;
+  message: string;
+}
+const EMPTY_OFFSHOOTS: OffshootRoomSummary[] = [];
+
 
 interface VoiceRoomProps {
   channelId: string;
   channelName: string;
+  roomMode?: string;
+  roomScene?: string;
   participants: VoiceParticipant[];
   currentUserId: string;
   currentUserRole?: string;
+  canManageChannels?: boolean;
   muted: boolean;
   deafened: boolean;
   pttMode?: boolean;
@@ -41,6 +72,7 @@ interface VoiceRoomProps {
   onTogglePTT?: () => void;
   onDisconnect: () => void;
   onUserVolumeChange?: (userId: string, volume: number) => void;
+  onUserRoutingMuted?: (userId: string, muted: boolean) => void;
   onServerMute?: (channelId: string, targetUserId: string, muted: boolean) => void;
   onServerDeafen?: (channelId: string, targetUserId: string, deafened: boolean) => void;
   onKickFromVoice?: (channelId: string, targetUserId: string) => void;
@@ -105,28 +137,6 @@ function PhoneOffIcon() {
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-3.33-2.67m-2.67-3.34a19.79 19.79 0 0 1-3.07-8.63A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91" />
       <line x1="23" y1="1" x2="1" y2="23" />
-    </svg>
-  );
-}
-
-function MicOffSmall() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-red-400">
-      <line x1="1" y1="1" x2="23" y2="23" />
-      <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6" />
-      <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2c0 .76-.13 1.49-.35 2.17" />
-      <line x1="12" y1="19" x2="12" y2="23" /><line x1="8" y1="23" x2="16" y2="23" />
-    </svg>
-  );
-}
-
-function DeafSmall() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-red-400">
-      <line x1="1" y1="1" x2="23" y2="23" />
-      <path d="M3 18v-6a9 9 0 0 1 14.12-7.41" /><path d="M21 12v6" />
-      <path d="M3 18a3 3 0 0 0 3 3h0a3 3 0 0 0 3-3v-1" />
-      <path d="M15 17v1a3 3 0 0 0 3 3h0a3 3 0 0 0 3-3" />
     </svg>
   );
 }
@@ -312,8 +322,11 @@ export default function VoiceRoom({
   channelId,
   channelName,
   participants,
+  roomMode,
+  roomScene,
   currentUserId,
   currentUserRole,
+  canManageChannels = false,
   muted,
   deafened,
   pttMode,
@@ -322,6 +335,7 @@ export default function VoiceRoom({
   onTogglePTT,
   onDisconnect,
   onUserVolumeChange,
+  onUserRoutingMuted,
   onServerMute,
   onServerDeafen,
   onKickFromVoice,
@@ -344,29 +358,167 @@ export default function VoiceRoom({
   const [modMenu, setModMenu] = useState<{ userId: string; username: string; x: number; y: number; muted: boolean; deafened?: boolean } | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [viewMode, setViewMode] = useState<"campfire" | "grid">("campfire");
-  const [roomThemeId, setRoomThemeId] = useState("campfire");
+  const [roomThemeId, setRoomThemeId] = useState(() => ROOM_THEMES.some((theme) => theme.id === roomScene) ? roomScene! : "campfire");
   const [themePickerOpen, setThemePickerOpen] = useState(false);
+  const [lantern, setLantern] = useState<LanternRoomState | null>(null);
+  const [offshootState, setOffshootState] = useState<OffshootState | null>(null);
+  const [offshootError, setOffshootError] = useState<string | null>(null);
+  const [roomConfigError, setRoomConfigError] = useState<string | null>(null);
+  const automaticallyMutedRef = useRef(new Set<string>());
   const prevParticipantsRef = useRef<VoiceParticipant[]>([]);
   const toastCounterRef = useRef(0);
   const isFirstRenderRef = useRef(true);
 
-  const canMod = currentUserRole === "owner" || currentUserRole === "admin" || currentUserRole === "mod";
+  const canModerateVoice =
+    currentUserRole === "owner" ||
+    currentUserRole === "admin" ||
+    currentUserRole === "mod";
   const otherVoiceChannels = voiceChannels?.filter((c) => c.id !== channelId && c.type === "voice") || [];
   const roomTheme = ROOM_THEMES.find((t) => t.id === roomThemeId) || ROOM_THEMES[0];
+  const activeLantern = lantern?.channelId === channelId && lantern.active ? lantern : null;
+  const lanternHolder = participants.find((participant) => participant.userId === activeLantern?.holderId);
+  const isLanternHolder = activeLantern?.holderId === currentUserId;
+  const isLanternQueued = activeLantern?.queue.some((entry) => entry.userId === currentUserId) ?? false;
+  const canStopLantern =
+    !!activeLantern &&
+    (activeLantern.hostId === currentUserId || canModerateVoice);
+  const nextLanternCamper = activeLantern?.queue[0];
+  const activeOffshootState = offshootState?.channelId === channelId ? offshootState : null;
+  const offshoots = activeOffshootState?.offshoots ?? EMPTY_OFFSHOOTS;
+  const currentOffshoot = offshoots.find((room) => room.members.some((member) => member.userId === currentUserId));
+  const offshootMemberIds = new Set(offshoots.flatMap((room) => room.members.map((member) => member.userId)));
+  const mainCampParticipants = participants.filter((participant) => !offshootMemberIds.has(participant.userId));
+  const maxOffshoots = activeOffshootState?.limits.maxOffshoots ?? 3;
 
-  useEffect(() => {
+
+  async function pickTheme(id: string) {
+    if (
+      !canManageChannels ||
+      !ROOM_THEMES.some((theme) => theme.id === id)
+    ) {
+      return;
+    }
+    setRoomConfigError(null);
     try {
-      const t = localStorage.getItem("campfire:roomTheme");
-      if (t && ROOM_THEMES.some((r) => r.id === t)) setRoomThemeId(t);
-    } catch { /* ignore */ }
-  }, []);
-
-  function pickTheme(id: string) {
-    setRoomThemeId(id);
-    setThemePickerOpen(false);
-    try { localStorage.setItem("campfire:roomTheme", id); } catch { /* ignore */ }
+      const response = await fetch(`/api/channels/${channelId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ roomScene: id }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setRoomConfigError(
+          data.error || "Failed to update the shared scene.",
+        );
+        return;
+      }
+      const updatedScene = data.channel?.roomScene || id;
+      setRoomThemeId(updatedScene);
+      setThemePickerOpen(false);
+      if (serverId) {
+        getSocket().emit("channels:updated", { serverId, channelIds: [channelId] });
+      }
+    } catch {
+      setRoomConfigError("Failed to update the shared scene.");
+    }
   }
 
+
+  useEffect(() => {
+    const socket = getSocket();
+    function handleLanternUpdate(state: LanternRoomState) {
+      if (state.channelId !== channelId) return;
+      setLantern(state.active ? state : null);
+    }
+    function handleOffshootUpdate(state: OffshootState) {
+      if (state.channelId !== channelId) return;
+      setOffshootState(state);
+      setOffshootError(null);
+    }
+    function handleOffshootError(error: OffshootError) {
+      if (error.channelId !== channelId) return;
+      setOffshootError(error.message);
+    }
+
+    socket.on("lantern:update", handleLanternUpdate);
+    socket.on("offshoot:update", handleOffshootUpdate);
+    socket.on("offshoot:error", handleOffshootError);
+    socket.emit("lantern:state", channelId);
+    socket.emit("offshoot:state", channelId);
+    return () => {
+      socket.off("lantern:update", handleLanternUpdate);
+      socket.off("offshoot:update", handleOffshootUpdate);
+      socket.off("offshoot:error", handleOffshootError);
+    };
+  }, [channelId]);
+
+  function startLantern() {
+    getSocket().emit("lantern:start", channelId);
+  }
+
+  function requestLantern() {
+    getSocket().emit("lantern:request", channelId);
+  }
+
+  function releaseLantern() {
+    getSocket().emit("lantern:release", channelId);
+  }
+
+  function passLantern(targetUserId: string) {
+    getSocket().emit("lantern:pass", { channelId, targetUserId });
+  }
+  function createOffshoot() {
+    getSocket().emit("offshoot:create", { channelId });
+  }
+
+  function joinOffshoot(offshootId: string) {
+    getSocket().emit("offshoot:join", { channelId, offshootId });
+  }
+
+  function rejoinMainCamp() {
+    getSocket().emit("offshoot:leave", { channelId });
+  }
+
+  function closeOffshoot(offshootId: string) {
+    getSocket().emit("offshoot:close", { channelId, offshootId });
+  }
+
+  useEffect(() => {
+    if (!onUserRoutingMuted) return;
+    const nextMuted = new Set<string>();
+    const myOffshootId = currentOffshoot?.id ?? null;
+
+    if (activeOffshootState) {
+      for (const participant of participants) {
+        if (participant.userId === currentUserId) continue;
+        const participantOffshootId = offshoots.find((room) =>
+          room.members.some((member) => member.userId === participant.userId)
+        )?.id ?? null;
+        if (participantOffshootId !== myOffshootId) {
+          nextMuted.add(participant.userId);
+        }
+      }
+    }
+
+    for (const userId of automaticallyMutedRef.current) {
+      if (!nextMuted.has(userId)) {
+        onUserRoutingMuted(userId, false);
+      }
+    }
+    for (const userId of nextMuted) {
+      if (!automaticallyMutedRef.current.has(userId)) {
+        onUserRoutingMuted(userId, true);
+      }
+    }
+    automaticallyMutedRef.current = nextMuted;
+  }, [activeOffshootState, currentOffshoot?.id, currentUserId, offshoots, onUserRoutingMuted, participants]);
+
+  useEffect(() => () => {
+    for (const userId of automaticallyMutedRef.current) {
+      onUserRoutingMuted?.(userId, false);
+    }
+    automaticallyMutedRef.current.clear();
+  }, [onUserRoutingMuted]);
   useEffect(() => {
     if (isFirstRenderRef.current) {
       isFirstRenderRef.current = false;
@@ -404,6 +556,9 @@ export default function VoiceRoom({
           <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" /><path d="M15.54 8.46a5 5 0 0 1 0 7.07" /><path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
         </svg>
         <h3 className="font-bold text-amber-100">{channelName}</h3>
+        <span className="ml-2 px-2 py-0.5 rounded-full bg-amber-500/10 text-[10px] uppercase tracking-wider text-amber-200/80">
+          {voiceRoomModeLabel(roomMode)}
+        </span>
         {reconnecting ? (
           <span className="ml-2 text-xs text-yellow-400 animate-pulse">
             Reconnecting...
@@ -419,12 +574,13 @@ export default function VoiceRoom({
             <div className="relative">
               <button
                 onClick={() => setThemePickerOpen((o) => !o)}
+                disabled={!canManageChannels}
                 className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-md bg-[var(--panel-2)] text-[var(--muted)] hover:text-amber-200 transition-colors"
-                title="Change room theme"
+                title={canManageChannels ? "Change the shared room scene" : "Only channel managers can change the shared scene"}
               >
                 <span>{roomTheme.icon}</span> {roomTheme.name}
               </button>
-              {themePickerOpen && (
+              {themePickerOpen && canManageChannels && (
                 <>
                   <div className="fixed inset-0 z-40" onClick={() => setThemePickerOpen(false)} />
                   <div className="absolute right-0 top-9 z-50 w-60 bg-[var(--panel)] border border-[var(--accent-2)]/30 rounded-xl shadow-2xl p-2 grid grid-cols-2 gap-1.5">
@@ -466,11 +622,164 @@ export default function VoiceRoom({
         </div>
       </div>
 
+      {roomConfigError && (
+        <div
+          className="flex items-center justify-center gap-2 border-b border-red-500/25 bg-red-500/10 px-4 py-2 text-xs text-red-200"
+          role="alert"
+        >
+          <span>{roomConfigError}</span>
+          <button
+            type="button"
+            onClick={() => setRoomConfigError(null)}
+            className="text-red-100/60 hover:text-red-100"
+            aria-label="Dismiss scene error"
+          >
+            &times;
+          </button>
+        </div>
+      )}
+
       {/* Reconnecting banner */}
       {reconnecting && (
         <div className="flex items-center justify-center gap-2 px-4 py-2 bg-yellow-500/15 border-b border-yellow-500/30 text-yellow-300 text-sm font-medium shrink-0">
           <span>&#9889;</span>
           <span>Reconnecting to voice...</span>
+        </div>
+      )}
+      {/* Temporary side conversations that stay attached to this parent room. */}
+      <div className="shrink-0 border-b border-emerald-500/15 bg-emerald-950/10 px-3 py-2">
+        <div className="flex flex-wrap items-stretch justify-center gap-2 text-xs">
+          <span className="self-center font-semibold uppercase tracking-wider text-emerald-200/70">
+            Offshoots
+          </span>
+          <button
+            type="button"
+            onClick={rejoinMainCamp}
+            disabled={!currentOffshoot}
+            className={`min-w-36 rounded-lg border px-3 py-1.5 text-left transition-colors ${
+              currentOffshoot
+                ? "border-white/10 bg-white/5 text-white/75 hover:bg-white/10"
+                : "border-amber-400/40 bg-amber-500/15 text-amber-100"
+            }`}
+            title={currentOffshoot ? "Leave this side fire and rejoin everyone at the main camp" : "You are at the main camp"}
+          >
+            <span className="block font-semibold">{currentOffshoot ? "Rejoin main" : "Main camp"}</span>
+            <span className="block max-w-52 truncate text-[10px] opacity-65">
+              Main camp: {mainCampParticipants.map((participant) => displayName(participant.username)).join(", ") || "Empty"}
+            </span>
+          </button>
+
+          {offshoots.map((room) => {
+            const isCurrent = room.id === currentOffshoot?.id;
+            const isFull = room.members.length >= (activeOffshootState?.limits.maxMembers ?? 4);
+            const canClose =
+              room.creatorId === currentUserId || canModerateVoice;
+            return (
+              <div
+                key={room.id}
+                className={`flex min-w-40 items-stretch overflow-hidden rounded-lg border ${
+                  isCurrent ? "border-emerald-400/60 bg-emerald-500/15" : "border-emerald-500/20 bg-black/10"
+                }`}
+              >
+                <button
+                  type="button"
+                  onClick={() => joinOffshoot(room.id)}
+                  disabled={isCurrent || isFull}
+                  className="flex-1 px-3 py-1.5 text-left text-emerald-50 transition-colors hover:bg-emerald-500/10 disabled:cursor-default disabled:hover:bg-transparent"
+                  title={isCurrent ? `You are in ${room.name}` : isFull ? `${room.name} is full` : `Join ${room.name}`}
+                >
+                  <span className="block font-semibold">
+                    {room.name} <span className="font-normal opacity-60">{room.members.length}/{activeOffshootState?.limits.maxMembers ?? 4}</span>
+                  </span>
+                  <span className="block max-w-44 truncate text-[10px] opacity-65">
+                    {isCurrent ? "You are here: " : `${room.name}: `}
+                    {room.members.map((member) => displayName(member.username)).join(", ")}
+                  </span>
+                </button>
+                {canClose && (
+                  <button
+                    type="button"
+                    onClick={() => closeOffshoot(room.id)}
+                    className="border-l border-emerald-500/20 px-2 text-emerald-100/55 hover:bg-red-500/15 hover:text-red-300"
+                    aria-label={`Close ${room.name}`}
+                    title="Close side fire"
+                  >
+                    &times;
+                  </button>
+                )}
+              </div>
+            );
+          })}
+
+          {!currentOffshoot && offshoots.length < maxOffshoots && (
+            <button
+              type="button"
+              onClick={createOffshoot}
+              disabled={!activeOffshootState}
+              className="rounded-lg border border-dashed border-emerald-400/30 px-3 py-1.5 font-semibold text-emerald-200/80 hover:border-emerald-400/60 hover:bg-emerald-500/10 disabled:opacity-40"
+              title="Start a temporary side voice conversation"
+            >
+              + Start side fire
+            </button>
+          )}
+        </div>
+        {offshootError && (
+          <div className="mt-1 text-center text-[11px] text-red-300" role="status">
+            {offshootError}
+            <button type="button" onClick={() => setOffshootError(null)} className="ml-2 text-red-100/60 hover:text-red-100" aria-label="Dismiss">
+              &times;
+            </button>
+          </div>
+        )}
+      </div>
+
+      {!activeLantern ? (
+        <div className="flex items-center justify-center gap-2 px-4 py-1.5 bg-amber-950/20 border-b border-amber-600/10 text-xs shrink-0">
+          <span className="text-amber-200/80">Taking turns for a story or recap?</span>
+          <button
+            onClick={startLantern}
+            className="px-2.5 py-1 rounded-full bg-amber-500/15 text-amber-200 hover:bg-amber-500/25 transition-colors"
+          >
+            Pass the Lantern
+          </button>
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-center justify-center gap-2 px-4 py-2 bg-amber-500/10 border-b border-amber-500/25 text-xs shrink-0">
+          <span aria-hidden="true">&#128293;</span>
+          <span className="font-semibold text-amber-200">
+            Lantern: {lanternHolder ? displayName(lanternHolder.username) : "open floor"}
+          </span>
+          {activeLantern.queue.length > 0 && (
+            <span className="text-amber-100/60">
+              Up next: {activeLantern.queue.map((entry) => displayName(entry.username)).join(", ")}
+            </span>
+          )}
+          {isLanternHolder ? (
+            <>
+              {nextLanternCamper && (
+                <button
+                  onClick={() => passLantern(nextLanternCamper.userId)}
+                  className="px-2.5 py-1 rounded-full bg-amber-500 text-amber-950 font-semibold hover:bg-amber-400"
+                >
+                  Pass to {displayName(nextLanternCamper.username)}
+                </button>
+              )}
+              <button onClick={releaseLantern} className="px-2.5 py-1 rounded-full bg-white/5 text-amber-100 hover:bg-white/10">
+                Release
+              </button>
+            </>
+          ) : isLanternQueued ? (
+            <span className="px-2.5 py-1 rounded-full bg-white/5 text-amber-100/70">You are in line</span>
+          ) : (
+            <button onClick={requestLantern} className="px-2.5 py-1 rounded-full bg-amber-500/20 text-amber-100 hover:bg-amber-500/30">
+              Raise hand
+            </button>
+          )}
+          {canStopLantern && (
+            <button onClick={() => getSocket().emit("lantern:stop", channelId)} className="text-amber-100/60 hover:text-amber-100">
+              End
+            </button>
+          )}
         </div>
       )}
 
@@ -481,7 +790,7 @@ export default function VoiceRoom({
       {(() => {
         const screenActive = !!(incomingScreenShares && incomingScreenShares.length > 0);
         const handleCtx = (e: React.MouseEvent, p: VoiceParticipant) => {
-          if (canMod) {
+          if (canModerateVoice) {
             setModMenu({ userId: p.userId, username: p.username, x: e.clientX, y: e.clientY, muted: p.muted, deafened: p.deafened });
             setVolumePopup(null);
           } else if (p.userId !== currentUserId) {
@@ -526,6 +835,7 @@ export default function VoiceRoom({
               localCameraStream={localCameraStream}
               remoteVideoStreams={remoteVideoStreams}
               onContextMenu={handleCtx}
+              highlightUserId={activeLantern?.holderId}
             />
           );
         }
@@ -538,11 +848,12 @@ export default function VoiceRoom({
                 const isSelf = p.userId === currentUserId;
                 const stream = isSelf ? (cameraOn ? localCameraStream : null) : (remoteVideoStreams?.get(p.userId) || null);
                 const isSpeaking = p.speaking && !p.muted;
+                const holdsLantern = activeLantern?.holderId === p.userId;
                 return (
                   <div
                     key={p.userId}
                     onContextMenu={(e) => { if (p.userId !== currentUserId) { e.preventDefault(); handleCtx(e, p); } }}
-                    className="aspect-video"
+                    className={`aspect-video relative rounded-xl ${holdsLantern ? "ring-4 ring-yellow-200 shadow-[0_0_28px_rgba(253,224,71,0.65)]" : ""}`}
                   >
                     {stream ? (
                       <VideoTile stream={stream} label={isSelf ? "You" : displayName(p.username)} isSelf={isSelf} speaking={isSpeaking} />
@@ -555,6 +866,9 @@ export default function VoiceRoom({
                           {isSelf ? "You" : displayName(p.username)}
                         </span>
                       </div>
+                    )}
+                    {holdsLantern && (
+                      <span className="absolute top-2 left-2 text-[9px] uppercase tracking-widest text-yellow-100 bg-amber-950/90 px-2 py-1 rounded-full">Lantern</span>
                     )}
                   </div>
                 );

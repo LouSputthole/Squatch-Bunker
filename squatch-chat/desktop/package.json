@@ -1,0 +1,9 @@
+{
+  "name": "campfire-desktop",
+  "version": "0.0.3",
+  "private": true,
+  "description": "Campfire desktop application",
+  "author": "Squatch Bunker",
+  "license": "AGPL-3.0-only",
+  "main": "main.cjs"
+}

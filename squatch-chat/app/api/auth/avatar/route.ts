@@ -2,11 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { writeFile, mkdir, unlink } from "fs/promises";
 import path from "path";
+import { getUserMediaRoot } from "@/lib/userMedia";
 
 // Avatars are written under public/ so Next serves them at /avatars/*. The
 // desktop build sets CAMPFIRE_UPLOAD_DIR to a writable data dir (the app
 // folder is read-only when installed) and serves /avatars/* from there.
-const AVATAR_BASE = process.env.CAMPFIRE_UPLOAD_DIR || path.join(process.cwd(), "public");
+const AVATAR_BASE = getUserMediaRoot();
 const AVATAR_DIR = path.join(AVATAR_BASE, "avatars");
 const MAX_SIZE = 2 * 1024 * 1024; // 2MB
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp"];

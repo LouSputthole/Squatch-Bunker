@@ -10,13 +10,17 @@ export default function ConnectionStatusBar({ status, queuedCount = 0 }: Connect
   const [show, setShow] = useState(false);
 
   useEffect(() => {
-    if (status === "connected") {
+    let hideTimer: ReturnType<typeof setTimeout> | undefined;
+    const showTimer = setTimeout(() => {
       setShow(true);
-      const t = setTimeout(() => setShow(false), 2000);
-      return () => clearTimeout(t);
-    } else {
-      setShow(true);
-    }
+      if (status === "connected") {
+        hideTimer = setTimeout(() => setShow(false), 2000);
+      }
+    }, 0);
+    return () => {
+      clearTimeout(showTimer);
+      if (hideTimer) clearTimeout(hideTimer);
+    };
   }, [status]);
 
   const colors = {

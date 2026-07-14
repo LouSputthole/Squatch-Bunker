@@ -62,14 +62,11 @@ export function useRuntimeConfig(): RuntimeConfig | null {
   const [config, setConfig] = useState<RuntimeConfig | null>(cachedConfig);
 
   useEffect(() => {
-    if (cachedConfig) {
-      setConfig(cachedConfig);
-      return;
-    }
-    if (!fetchPromise) {
-      fetchPromise = fetchConfig();
-    }
-    fetchPromise.then((c) => setConfig(c));
+    let active = true;
+    void ensureRuntimeConfig().then((nextConfig) => {
+      if (active) setConfig(nextConfig);
+    });
+    return () => { active = false; };
   }, []);
 
   return config;

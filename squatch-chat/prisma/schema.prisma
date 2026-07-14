@@ -8,26 +8,28 @@ datasource db {
 }
 
 model User {
-  id                   String    @id @default(uuid())
-  email                String    @unique
-  username             String    @unique
-  passwordHash         String
-  avatar               String?
-  banner               String?
-  bio                  String?
-  statusMessage        String?
-  isGuest              Boolean   @default(false)
-  guestExpiresAt       DateTime?
-  tier                 String    @default("free")
-  tierExpiresAt        DateTime?
-  tokenVersion         Int       @default(0)
-  stripeCustomerId     String?
-  stripeSubscriptionId String?
-  subscriptionStatus   String?
-  resetToken           String?
-  resetExpiry          DateTime?
-  createdAt            DateTime  @default(now())
-  updatedAt            DateTime  @updatedAt
+  id                       String    @id @default(uuid())
+  email                    String    @unique
+  username                 String    @unique
+  passwordHash             String
+  avatar                   String?
+  banner                   String?
+  bio                      String?
+  statusMessage            String?
+  isGuest                  Boolean   @default(false)
+  guestExpiresAt           DateTime?
+  tier                     String    @default("free")
+  tierExpiresAt            DateTime?
+  tokenVersion             Int       @default(0)
+  stripeCustomerId         String?   @unique
+  stripeSubscriptionId     String?   @unique
+  subscriptionStatus       String?
+  billingCheckoutPendingAt DateTime?
+  billingEventAt           DateTime?
+  resetToken               String?
+  resetExpiry              DateTime?
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
 
   memberships             ServerMember[]
   messages                Message[]
@@ -47,6 +49,51 @@ model User {
   targetedNotes           UserNote[]               @relation("NoteTarget")
   reportsFiled            Report[]                 @relation("ReportsFiled")
   reportsAgainst          Report[]                 @relation("ReportsAgainst")
+  blocksCreated           UserBlock[]              @relation("Blocker")
+  blocksReceived          UserBlock[]              @relation("Blocked")
+  journalEntries          JournalEntry[]
+  createdPolls            Poll[]
+  pollVotes               PollVote[]
+  createdGatherings       Gathering[]
+  gatheringRsvps          GatheringRsvp[]
+  privateUploads          PrivateUpload[]
+
+  @@index([billingCheckoutPendingAt])
+}
+
+model PrivateUpload {
+  id           String    @id @default(uuid())
+  ownerId      String
+  storageKey   String    @unique
+  originalName String
+  contentType  String
+  byteSize     Int
+  state        String    @default("pending")
+  claimKind    String?
+  claimId      String?
+  createdAt    DateTime  @default(now())
+  claimedAt    DateTime?
+
+  owner          User            @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  message        Message?        @relation("MessagePrivateUpload")
+  directMessage  DirectMessage?  @relation("DirectMessagePrivateUpload")
+  journalEntries JournalEntry[]  @relation("JournalPrivateUpload")
+
+  @@unique([claimKind, claimId])
+  @@index([ownerId, state, createdAt])
+}
+
+model UserBlock {
+  id        String   @id @default(uuid())
+  blockerId String
+  blockedId String
+  createdAt DateTime @default(now())
+
+  blocker User @relation("Blocker", fields: [blockerId], references: [id], onDelete: Cascade)
+  blocked User @relation("Blocked", fields: [blockedId], references: [id], onDelete: Cascade)
+
+  @@unique([blockerId, blockedId])
+  @@index([blockedId])
 }
 
 model OAuthAccount {
@@ -62,14 +109,18 @@ model OAuthAccount {
 }
 
 model Server {
-  id                String   @id @default(uuid())
+  id                String    @id @default(uuid())
   name              String
   icon              String?
   banner            String?
   ownerId           String
-  createdAt         DateTime @default(now())
-  inviteCode        String   @unique @default(uuid())
-  isPublic          Boolean  @default(false)
+  createdAt         DateTime  @default(now())
+  inviteCode        String    @unique @default(uuid())
+  inviteExpiresAt   DateTime?
+  inviteMaxUses     Int?
+  inviteUseCount    Int       @default(0)
+  inviteRevokedAt   DateTime?
+  isPublic          Boolean   @default(false)
   description       String?
   welcomeMessage    String?
   welcomeChannelIds String?
@@ -83,7 +134,10 @@ model Server {
   roles        Role[]
   sounds       Sound[]
 
-  soundscape String?
+  journalEntries JournalEntry[]
+  polls          Poll[]
+  gatherings     Gathering[]
+  soundscape     String?
 }
 
 model Sound {
@@ -149,13 +203,18 @@ model Channel {
   topic           String?
   slowModeSeconds Int      @default(0)
   position        Int      @default(0)
+  roomMode        String   @default("hangout")
+  roomScene       String   @default("campfire")
   createdAt       DateTime @default(now())
 
+  retentionDays     Int?
   server            Server              @relation(fields: [serverId], references: [id])
   messages          Message[]
   permissions       ChannelPermission[]
   webhooks          Webhook[]
   scheduledMessages ScheduledMessage[]
+  polls             Poll[]
+  gatherings        Gathering[]
 }
 
 model Message {
@@ -165,6 +224,7 @@ model Message {
   content         String
   attachmentUrl   String?
   attachmentName  String?
+  privateUploadId String?   @unique
   replyToId       String?
   pinned          Boolean   @default(false)
   parentMessageId String?
@@ -173,14 +233,17 @@ model Message {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
-  channel   Channel    @relation(fields: [channelId], references: [id])
-  author    User       @relation(fields: [authorId], references: [id])
-  replyTo   Message?   @relation("MessageReplies", fields: [replyToId], references: [id])
-  replies   Message[]  @relation("MessageReplies")
-  reactions Reaction[]
-  bookmarks Bookmark[]
-  parent    Message?   @relation("thread", fields: [parentMessageId], references: [id])
-  children  Message[]  @relation("thread")
+  channel        Channel        @relation(fields: [channelId], references: [id])
+  author         User           @relation(fields: [authorId], references: [id])
+  replyTo        Message?       @relation("MessageReplies", fields: [replyToId], references: [id])
+  replies        Message[]      @relation("MessageReplies")
+  reactions      Reaction[]
+  bookmarks      Bookmark[]
+  parent         Message?       @relation("thread", fields: [parentMessageId], references: [id])
+  children       Message[]      @relation("thread")
+  poll           Poll?
+  journalEntries JournalEntry[]
+  privateUpload  PrivateUpload? @relation("MessagePrivateUpload", fields: [privateUploadId], references: [id], onDelete: SetNull)
 
   @@index([channelId])
 }
@@ -231,12 +294,14 @@ model DirectMessage {
   content        String
   attachmentUrl  String?
   attachmentName String?
+  privateUploadId String?  @unique
   readAt         DateTime?
   createdAt      DateTime  @default(now())
 
   conversation Conversation            @relation(fields: [conversationId], references: [id])
   author       User                    @relation(fields: [authorId], references: [id])
   reactions    DirectMessageReaction[]
+  privateUpload PrivateUpload?         @relation("DirectMessagePrivateUpload", fields: [privateUploadId], references: [id], onDelete: SetNull)
 
   @@index([conversationId])
 }
@@ -387,4 +452,109 @@ model Report {
 
   @@index([targetUserId, status])
   @@index([reporterId])
+}
+
+model JournalEntry {
+  id              String   @id @default(uuid())
+  serverId        String
+  authorId        String
+  sourceMessageId String?
+  content         String
+  attachmentUrl   String?
+  attachmentName  String?
+  privateUploadId String?
+  note            String?
+  createdAt       DateTime @default(now())
+
+  server        Server   @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  author        User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  sourceMessage Message? @relation(fields: [sourceMessageId], references: [id], onDelete: SetNull)
+  privateUpload PrivateUpload? @relation("JournalPrivateUpload", fields: [privateUploadId], references: [id], onDelete: SetNull)
+
+  @@index([serverId, createdAt])
+  @@index([privateUploadId])
+}
+
+model Poll {
+  id            String    @id @default(uuid())
+  serverId      String
+  channelId     String
+  messageId     String    @unique
+  creatorId     String
+  question      String
+  allowMultiple Boolean   @default(false)
+  closesAt      DateTime?
+  closedAt      DateTime?
+  createdAt     DateTime  @default(now())
+
+  server  Server       @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  channel Channel      @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  message Message      @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  creator User         @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  options PollOption[]
+  votes   PollVote[]
+
+  @@index([channelId, createdAt])
+}
+
+model PollOption {
+  id       String @id @default(uuid())
+  pollId   String
+  text     String
+  position Int    @default(0)
+
+  poll  Poll       @relation(fields: [pollId], references: [id], onDelete: Cascade)
+  votes PollVote[]
+
+  @@index([pollId, position])
+}
+
+model PollVote {
+  id        String   @id @default(uuid())
+  pollId    String
+  optionId  String
+  userId    String
+  createdAt DateTime @default(now())
+
+  poll   Poll       @relation(fields: [pollId], references: [id], onDelete: Cascade)
+  option PollOption @relation(fields: [optionId], references: [id], onDelete: Cascade)
+  user   User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([optionId, userId])
+  @@index([pollId, userId])
+}
+
+model Gathering {
+  id              String   @id @default(uuid())
+  serverId        String
+  channelId       String?
+  creatorId       String
+  title           String
+  description     String?
+  startsAt        DateTime
+  durationMinutes Int      @default(60)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  server  Server          @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  channel Channel?        @relation(fields: [channelId], references: [id], onDelete: SetNull)
+  creator User            @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  rsvps   GatheringRsvp[]
+
+  @@index([serverId, startsAt])
+}
+
+model GatheringRsvp {
+  id          String   @id @default(uuid())
+  gatheringId String
+  userId      String
+  status      String   @default("going")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  gathering Gathering @relation(fields: [gatheringId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([gatheringId, userId])
+  @@index([userId, status])
 }

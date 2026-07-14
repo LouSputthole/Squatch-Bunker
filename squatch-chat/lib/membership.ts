@@ -1,4 +1,10 @@
 import { prisma } from "@/lib/db";
+import type { Prisma } from "@/generated/prisma/client";
+
+export type MembershipDatabase = Pick<
+  Prisma.TransactionClient,
+  "channel" | "serverMember"
+>;
 
 /**
  * A server membership row, including the legacy `role` string and ban state.
@@ -19,8 +25,9 @@ export type ServerMember = NonNullable<
 export async function requireMembership(
   serverId: string,
   userId: string,
+  database: MembershipDatabase = prisma,
 ): Promise<ServerMember | null> {
-  const member = await prisma.serverMember.findUnique({
+  const member = await database.serverMember.findUnique({
     where: { serverId_userId: { serverId, userId } },
   });
   if (!member) return null;
@@ -38,14 +45,15 @@ export async function requireMembership(
 export async function requireChannelMembership(
   channelId: string,
   userId: string,
+  database: MembershipDatabase = prisma,
 ): Promise<{ membership: ServerMember; serverId: string } | null> {
-  const channel = await prisma.channel.findUnique({
+  const channel = await database.channel.findUnique({
     where: { id: channelId },
     select: { serverId: true },
   });
   if (!channel) return null;
 
-  const membership = await requireMembership(channel.serverId, userId);
+  const membership = await requireMembership(channel.serverId, userId, database);
   if (!membership) return null;
 
   return { membership, serverId: channel.serverId };

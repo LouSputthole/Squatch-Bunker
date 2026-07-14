@@ -24,7 +24,7 @@ fi
 # 2. Install dependencies if needed
 if [ ! -d node_modules ]; then
   echo "  [..] Installing dependencies..."
-  pnpm install
+  npm install
 fi
 
 # 3. Start database
@@ -35,15 +35,15 @@ node scripts/db-up.mjs
 echo "  [..] Waiting for database..."
 node scripts/db-wait.mjs
 
-# 5. Generate Prisma client
-echo "  [..] Generating Prisma client..."
-npx prisma generate
+# 5. Generate both provider-specific Prisma clients
+echo "  [..] Generating Prisma clients..."
+npm run db:generate
 
-# 6. Run migrations
+# 6. Run the explicit PostgreSQL migration track
 echo "  [..] Running migrations..."
-npx dotenv -e .env -- npx prisma migrate deploy 2>/dev/null || {
+npm run db:migrate 2>/dev/null || {
   echo "  [..] No migrations applied yet, running initial migration..."
-  npx dotenv -e .env -- npx prisma migrate dev --name init
+  npm run db:migrate:dev
 }
 
 echo ""

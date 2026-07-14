@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
+import { usersHaveBlock } from "@/lib/userBlocks";
 
 // GET /api/dm — list conversations for current user
 export async function GET() {
@@ -55,6 +56,13 @@ export async function POST(request: Request) {
 
   try {
     const { prisma } = await import("@/lib/db");
+
+    if (await usersHaveBlock(session.userId, targetUserId)) {
+      return NextResponse.json(
+        { error: "Direct messages are unavailable between these users" },
+        { status: 403 },
+      );
+    }
 
     // Ensure consistent ordering so unique constraint works
     const [u1, u2] = [session.userId, targetUserId].sort();

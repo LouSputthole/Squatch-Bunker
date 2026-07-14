@@ -63,6 +63,7 @@ export default function ImageLightbox({ src, allSrcs, onClose, onNavigate }: Ima
       )}
 
       {/* Image */}
+      {/* eslint-disable-next-line @next/next/no-img-element -- message images may be user-hosted, data, or blob URLs */}
       <img
         src={src}
         alt=""

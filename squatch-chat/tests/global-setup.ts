@@ -19,7 +19,7 @@ export default function setup() {
   removeDbFiles();
   // DATABASE_URL is passed via env (never interpolated into the command) so the
   // temp DB path can't influence the shell. Mirrors the app's postinstall push.
-  execSync("npx prisma db push --accept-data-loss", {
+  execSync("npx prisma db push --config prisma.config.ts --accept-data-loss", {
     stdio: "inherit",
     env: { ...process.env, DATABASE_URL: TEST_DB_URL },
   });

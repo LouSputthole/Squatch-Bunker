@@ -1,7 +1,5 @@
 "use client";
 
-import { initials } from "@/lib/utils";
-
 interface AvatarProps {
   username: string;
   avatarUrl?: string | null;
@@ -10,9 +8,8 @@ interface AvatarProps {
 }
 
 export default function Avatar({ username, avatarUrl, size = 40, className = "" }: AvatarProps) {
-  const sizeClass = size <= 24 ? "text-[10px]" : size <= 32 ? "text-xs" : size <= 48 ? "text-sm" : "text-xl";
-
   return (
+    // eslint-disable-next-line @next/next/no-img-element -- avatar URLs may be user-hosted, data, or blob URLs
     <img
       src={avatarUrl || "/Default-Avatar.png"}
       alt={username}

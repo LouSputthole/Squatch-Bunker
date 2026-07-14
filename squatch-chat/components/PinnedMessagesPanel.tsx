@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Avatar from "./Avatar";
+import BlockedMessageGate from "./BlockedMessageGate";
 
 interface PinnedMessage {
   id: string;
@@ -18,6 +19,7 @@ interface PinnedMessagesPanelProps {
   onClose: () => void;
   onJumpToMessage: (messageId: string) => void;
   onUnpin: (messageId: string) => void;
+  blockedUserIds?: ReadonlySet<string>;
 }
 
 function formatTime(isoString: string): string {
@@ -43,19 +45,23 @@ export default function PinnedMessagesPanel({
   onClose,
   onJumpToMessage,
   onUnpin,
+  blockedUserIds,
 }: PinnedMessagesPanelProps) {
   const [pinnedMessages, setPinnedMessages] = useState<PinnedMessage[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    setLoading(true);
-    fetch(`/api/messages?channelId=${channelId}&pinned=true`)
-      .then((res) => res.json())
-      .then((data) => {
-        setPinnedMessages(data.messages || []);
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
+    const timer = setTimeout(() => {
+      setLoading(true);
+      fetch(`/api/messages?channelId=${channelId}&pinned=true`)
+        .then((res) => res.json())
+        .then((data) => {
+          setPinnedMessages(data.messages || []);
+          setLoading(false);
+        })
+        .catch(() => setLoading(false));
+    }, 0);
+    return () => clearTimeout(timer);
   }, [channelId]);
 
   function handleUnpin(messageId: string) {
@@ -96,6 +102,7 @@ export default function PinnedMessagesPanel({
         ) : (
           <ul className="divide-y divide-[var(--accent-2)]/10">
             {pinnedMessages.map((msg) => {
+              const blocked = blockedUserIds?.has(msg.author.id) ?? false;
               const preview = msg.content
                 ? msg.content.length > 150
                   ? msg.content.slice(0, 150) + "..."
@@ -106,9 +113,10 @@ export default function PinnedMessagesPanel({
 
               return (
                 <li
-                  key={msg.id}
+                  key={`${msg.id}:${blocked ? "blocked" : "visible"}`}
                   className="px-3 py-2.5 hover:bg-[var(--panel-2)]/50 transition-colors"
                 >
+                  <BlockedMessageGate blocked={blocked} className="py-1">
                   {/* Author row */}
                   <div className="flex items-center gap-1.5 mb-1">
                     <Avatar
@@ -146,6 +154,7 @@ export default function PinnedMessagesPanel({
                       </button>
                     )}
                   </div>
+                  </BlockedMessageGate>
                 </li>
               );
             })}

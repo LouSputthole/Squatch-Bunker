@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { memberHasPermission } from "@/lib/serverRoles";
 
 export async function PATCH(req: NextRequest) {
   const session = await getSession();
@@ -12,13 +13,7 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: "channelIds array and serverId required" }, { status: 400 });
   }
 
-  // Verify the user is owner or admin of this server
-  const server = await prisma.server.findUnique({ where: { id: serverId } });
-  const membership = await prisma.serverMember.findUnique({
-    where: { serverId_userId: { serverId, userId: session.userId } },
-  });
-
-  if (server?.ownerId !== session.userId && membership?.role !== "admin") {
+  if (!(await memberHasPermission(serverId, session.userId, "MANAGE_CHANNELS"))) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 

@@ -22,17 +22,19 @@ export default function AutoModSettings({ serverId, open, onClose }: AutoModSett
 
   useEffect(() => {
     if (!open) return;
-    // Load from localStorage (per-server)
-    const key = `campfire-automod-${serverId}`;
-    try {
-      const saved = localStorage.getItem(key);
-      if (saved) {
-        const data = JSON.parse(saved);
-        setEnabled(data.enabled ?? false);
-        setWords(data.words ?? []);
-        setAction(data.action ?? "delete");
-      }
-    } catch { /* ignore */ }
+    const timer = setTimeout(() => {
+      const key = `campfire-automod-${serverId}`;
+      try {
+        const saved = localStorage.getItem(key);
+        if (saved) {
+          const data = JSON.parse(saved);
+          setEnabled(data.enabled ?? false);
+          setWords(data.words ?? []);
+          setAction(data.action ?? "delete");
+        }
+      } catch { /* ignore */ }
+    }, 0);
+    return () => clearTimeout(timer);
   }, [open, serverId]);
 
   function save() {

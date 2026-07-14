@@ -1,478 +1,208 @@
-# Campfire Voice Product Roadmap
-
-> "Five products wearing one trench coat: a real-time media system, a chat system, a room/presence system, a moderation/admin system, and a social hangout layer."
-
----
-
-## Status Legend
-
-- [x] Built
-- [~] Partially built
-- [ ] Not started
-
----
-
-## P0: Must Have for a Real Product
-
-### 1. Persistent Voice Rooms [~]
-
-**What exists:**
-- [x] Voice channels persist in DB (Channel model with type="voice")
-- [x] Voice channel list in UI with create button
-- [x] Occupancy indicators (participant count badge)
-- [x] Instant join button (click channel to join)
-- [x] Real-time roster updates via Socket.IO
-- [x] Presence state: who is in room, muted, deafened
-
-**Still needed:**
-- [ ] Room model enhancements: member capacity, permissions, type variants (stage, private)
-- [x] Speaking indicator (voice activity detection)
-- [ ] Streaming/video presence states
-- [x] Session lifecycle: reconnect after drop, server-side stale session cleanup
-- [x] Heartbeats to detect disconnects (15s interval, 45s timeout)
-- [ ] Join target: under 1-2 seconds
-- [x] Dropped clients disappear after timeout (heartbeat-based)
-- [ ] Reconnect returns to prior room
-
-### 2. Real-Time Voice Transport [~]
-
-**What exists:**
-- [x] WebRTC peer-to-peer audio transport
-- [x] Signaling service via Socket.IO (SDP exchange, ICE candidates)
-- [x] STUN servers (Google public STUN)
-- [x] Mic capture with echo cancellation, noise suppression, AGC
-- [x] Playback handling via HTMLAudioElement
-
-**Still needed:**
-- [ ] TURN fallback for hard NAT cases (self-hosted or service)
-- [ ] SFU for multi-user scalability (current P2P mesh won't scale past ~6 users)
-- [ ] Codec strategy / bitrate adaptation
-- [ ] Jitter buffer / packet loss concealment
-- [ ] Metrics: RTT, jitter, packet loss, bitrate, reconnect frequency
-- [ ] Device switching without restart
-- [x] Push-to-talk support (Space bar)
-
-### 3. Low-Friction Join/Leave [~]
-
-**What exists:**
-- [x] One-click join (click voice channel)
-- [x] Fast leave (disconnect button)
-- [x] Clear UI states: connecting, connected
-- [x] No modal spam
-
-**Still needed:**
-- [ ] Silent join option
-- [ ] Move user between channels
-- [ ] Return to previous room after reconnect
-- [ ] Race condition handling: double join, join while reconnecting, fast room switching
-- [ ] Join/leave state machine (formal)
-- [x] Reconnecting state in UI
-- [ ] Preserve room context while app minimized
-- [x] Prevent user in two voice rooms at once (server-side enforcement)
-
-### 4. Audio Controls [~]
-
-**What exists:**
-- [x] Mute / unmute with SVG icon
-- [x] Deafen with SVG icon
-- [x] Device selection (input + output) in Settings modal
-- [x] Input/output volume sliders
-- [x] Mic test with real-time level meter
-- [x] Output test tone
-- [x] Settings persist to localStorage
-- [x] Echo cancellation, noise suppression, AGC (browser defaults)
-
-**Still needed:**
-- [x] Push-to-talk with hotkey support (Space bar)
-- [x] Voice activity detection (speaking indicator)
-- [x] Per-user volume control (right-click participant → volume slider)
-- [x] Input sensitivity slider (Settings → Audio)
-- [x] Hotkey support for mute toggle (Ctrl+M)
-- [ ] Debug panel: mic detected? input level? output routed? permission denied?
-- [x] Speaking indicator animation (green glow ring)
-- [ ] Push-to-talk while app backgrounded
-
-### 5. Permissions and Roles [~]
-
-**What exists:**
-- [x] Role model (owner, admin, mod, member) on ServerMember
-- [x] Permission hierarchy with level-based checks
-- [x] Role badges with color coding in member list
-- [x] Right-click context menu for role assignment
-- [x] Kick member (admin+)
-- [x] Permission guards on API routes
-- [x] Server creator auto-assigned owner role
-
-**Still needed:**
-- [ ] Custom roles
-- [ ] Permission inheritance
-- [ ] Channel overrides
-- [ ] Special perms: connect, speak, mute members, move members, manage channel, stream, video, priority speaker, stage speaker
-- [ ] Cached permission resolution
-- [ ] Audit log for mod actions
-- [ ] Channel-specific permission UI
-
-### 6. Moderation Basics [~]
-
-**What exists:**
-- [x] Right-click user actions (context menu)
-- [x] Mod badges / role indicators
-- [x] Kick member from server
-
-**Still needed:**
-- [x] Server mute (mod forces mute on user)
-- [x] Server deafen
-- [x] Kick from voice
-- [x] Move between rooms
-- [ ] Temporary speaking suppression
-- [ ] Block screen share / camera
-- [ ] Report abuse flow
-- [x] Clear UI state when user is force-muted
-
-### 7. Reconnect / Reliability [~]
-
-**What exists:**
-- [x] Reconnect flow (Socket.IO auto-reconnect + voice room rejoin)
-- [x] ICE restart / media renegotiation (auto-detect failed peers, restart ICE)
-- [x] Reconnecting UI state (yellow "Reconnecting..." banner)
-- [x] Silent recovery when possible (re-syncs mute/deafen state on reconnect)
-- [x] Retry backoff (Socket.IO exponential backoff 1s-10s, 10 attempts)
-
-**Still needed:**
-- [ ] Resume session token
-- [ ] Channel fallback on server failure
-- [ ] Grace period for transient disconnects (server-side)
-- [ ] Health checks / heartbeats
-- [ ] Fallback to audio-only if video dies
-
-### 8. Mobile-Capable Audio [ ]
-
-**Still needed:**
-- [ ] Responsive/touch-friendly voice controls
-- [ ] Background audio behavior
-- [ ] Bluetooth routing
-- [ ] Speaker/earpiece handling
-- [ ] OS permission flow
-- [ ] Battery-conscious media strategy
-- [ ] Reduced UI complexity for mobile
-- [ ] Lock-screen controls
-- [ ] Graceful downgrade from video to audio
-
-### 9. Presence / Roster [~]
-
-**What exists:**
-- [x] Online/offline member list per server
-- [x] Voice participants shown in channel list
-- [x] Mute/deafen indicators per participant
-
-**Still needed:**
-- [x] Presence statuses: online, idle, DND, invisible (with auto-idle after 5min)
-- [x] Speaking indicator
-- [ ] Fine-grained notification settings
-- [ ] Friends online indicator
-- [ ] Presence in server/channel list
-
-### 10. Basic Observability [ ]
-
-**Still needed:**
-- [ ] Product analytics: room join rate, time-to-join, session duration, drop rate
-- [ ] Media telemetry: packet loss, RTT, jitter, bitrate
-- [ ] Admin dashboard: active rooms, occupancy, failed joins
-- [ ] Client diagnostic panel
-- [ ] Logging and tracing
-- [ ] Alerting
-
----
-
-## P1: Makes It Competitive
-
-### 11. In-Room Text Chat [~]
-- [ ] Text thread bound to voice room ID
-- [ ] Message persistence
-- [x] Reactions
-- [x] Attachments (file/image uploads)
-- [x] Mentions (@username highlighting), clickable link rendering
-- [ ] Split-pane or tabbed UI
-- [ ] Unread indicators inside voice room
-
-### 12. Screen Share / App Streaming [~]
-
-**What exists:**
-- [x] Screen capture pipeline (getDisplayMedia)
-- [x] Window/tab/screen capture
-- [x] Audio capture for shared content
-- [x] Stream start/stop
-- [x] Viewer with pinned layout
-- [x] Fullscreen mode
-- [x] Multiple share tabs
-
-**Still needed:**
-- [ ] SFU support for screen video tracks
-- [ ] Pause/resume
-
-### 13. Camera / Video [~]
-
-**What exists:**
-- [x] Video track publishing (via existing voice peer connections)
-- [x] Grid layout (auto-fit responsive grid)
-- [x] Camera toggle button
-- [x] Self-view (mirrored)
-- [x] Camera state synced to server
-
-**Still needed:**
-- [ ] Webcam device selection (Settings)
-- [ ] Speaker/pinned layout modes
-- [ ] Low-bandwidth mode
-- [ ] Per-user video subscriptions
-
-### 14. Noise Suppression Tuning [ ]
-- [ ] Presets: Standard, Low Latency, High Suppression
-- [ ] Ability to disable processing
-- [ ] Background voice isolation option
-- [ ] Clipping/suppression metrics
-
-### 15. Region / Bitrate Controls [ ]
-- [ ] Region selection or auto-region
-- [ ] Bitrate tiers
-- [ ] Bandwidth estimation
-- [ ] Audio priority over video/screen share
-- [ ] Network health indicator
-
-### 16. Invite / Social Flows [~]
-**What exists:**
-- [x] Server invite codes
-- [x] Join by invite code
-- [x] Copy invite button
-
-**Still needed:**
-- [ ] User profiles
-- [ ] Friend relationships
-- [ ] Voice-specific status
-- [ ] Follow friend into room
-- [ ] Hover/profile cards
-- [ ] Blocked-user behavior
-
-### 17. Stage / Event Mode [ ]
-- [ ] Room type: stage
-- [ ] Speaker/listener roles
-- [ ] Request-to-speak queue
-- [ ] Bring-to-stage action
-- [ ] Suppressed audience mic
-- [ ] Distinct UI from normal voice rooms
-
----
-
-## P2: Makes It Sticky and Differentiated
-
-### 18. Shared Activities / Watch Together [ ]
-- [ ] Activity launcher
-- [ ] Session binding to room
-- [ ] Shared state sync
-- [ ] Playback sync
-- [ ] Embedded app framework
-
-### 19. Safety / Abuse / Privacy [~]
-**What exists:**
-- [x] JWT auth (prevents spoofing)
-
-**Still needed:**
-- [ ] Block user
-- [ ] Ignore user
-- [ ] Report user
-- [ ] Room privacy options
-- [ ] Invite-only/private rooms
-- [ ] Consent handling for recording
-- [ ] Safety escalation tooling
-
-### 20. Core UX Polish [~]
-**What exists:**
-- [x] Muted/deafened icons
-- [x] Join/leave sounds
-- [x] Clear connecting state
-- [x] Keyboard shortcuts (Ctrl+K search, Ctrl+M mute, Ctrl+D deafen, Esc close)
-- [x] Message search
-- [x] Logo/branding integration
-
-**Still needed:**
-- [x] Speaking indicators (green glow)
-- [ ] Drag-and-drop user move for mods
-- [ ] Idle-in-room behavior
-- [ ] Lightweight overlays / mini controls
-- [ ] No surprise device switching
-- [ ] Good empty states for rooms
-
-### 21. Advanced Admin Tooling [ ]
-- [ ] Rich diagnostics
-- [ ] Advanced layout and stream controls
-- [ ] Soundboards / voice messages
-
----
-
-## Campfire Identity — What Makes Us Different
-
-> This is the flag in the dirt. Without the circle, Campfire risks being "Discord but moodier." With it, we have a real identity.
-
-### C1. The Circle [ ]
-**Priority: HIGHEST — Phase 1**
-
-Circular seat layout around a warm central glow. Users occupy seats, not list items. Speaking brightens your seat. Joining is sitting down.
-
-- [ ] Circle layout with seat positions (SVG/CSS)
-- [ ] Central ember glow focal point
-- [ ] Active speaker glow radiates from seat
-- [ ] Auto-seat on join, drag to reorder
-- [ ] Muted/away/listening micro-status per seat
-- [ ] Shared object slot in center (screen share, music, emblem)
-- [ ] Scales gracefully: 2 people → 12 people
-
-### C2. Arrival / Departure Animations [ ]
-**Priority: Phase 1**
-
-- [ ] Empty seat fills with fade-in + ember pulse on join
-- [ ] Seat cools + empties on leave
-- [ ] Subtle in active rooms, more visible in quiet rooms
-- [ ] "Stepped away" state for disconnects (may return)
-- [ ] Reconnect feels like sitting back down
-
-### C3. Ember Reactions [ ]
-**Priority: Phase 1**
-
-Quick ambient reactions that dissolve, not stack. Rise softly toward center, flicker near reacting user's seat.
-
-- [ ] Reaction set: laugh, applause, agree, wow, skull, clink, nod
-- [ ] Soft rise animation toward center
-- [ ] Spark trail + quick fade
-- [ ] Rate limit spam, cluster duplicates
-- [ ] User toggle to tone down
-- [ ] Works in voice, watch parties, passive hangouts
-
-### C4. Room Types [ ]
-**Priority: Phase 1**
-
-Rooms have a purpose — not just generic channels with labels.
-
-- [ ] Hangout: circle-first, low pressure
-- [ ] Game Night: party tools, lobby codes
-- [ ] Watch Together: shared video in center, circle wraps
-- [ ] Workshop: screen share, whiteboard, queue to speak
-- [ ] Quiet Room: minimal notifications, subdued visuals
-- [ ] Story Time: lantern built in, speaking queue
-- [ ] Room type selector on create
-- [ ] UI shifts per type (layout, glow, animation level)
-
-### C5. Leave-No-Trace Rooms [ ]
-**Priority: Phase 1**
-
-- [ ] Messages auto-delete: 24h / 7d / 30d configurable
-- [ ] Voice never recorded by default
-- [ ] Uploads expire unless pinned
-- [ ] Side trails auto-expire
-- [ ] Privacy labels visible: "Fades in 24h", "Voice is live only"
-- [ ] Pair with camp journal (save what matters)
-
-### C6. Offshoots (Side Conversations) [ ]
-**Priority: Phase 2**
-
-Temporary branch from main room. Two people peel off into side audio bubble.
-
-- [ ] "Step aside" action from circle
-- [ ] Mini-circle or attached card UI
-- [ ] Easy to start, easy to rejoin
-- [ ] Temporary by default (expire in 24h unless saved)
-- [ ] Visually attached to parent room
-
-### C7. Pass the Lantern [ ]
-**Priority: Phase 2**
-
-Lightweight floor-control. Holder gets brighter seat + optional background ducking.
-
-- [ ] Lantern visual on active speaker seat
-- [ ] Pass directly, drop to reopen floor
-- [ ] "Lean in" to request next
-- [ ] Loose mode (interruptions softened) vs strict mode
-- [ ] Host can enable/disable
-
-### C8. Shared Object Slot [ ]
-**Priority: Phase 2**
-
-Central focal point can hold: screen share, music player, video, room emblem.
-
-- [ ] Object appears in circle center
-- [ ] Watch Together: video synced for all
-- [ ] Music: shared playback in center
-- [ ] Screen share: central with circle wrapping
-
-### C9. Camp Journal [ ]
-**Priority: Phase 2**
-
-Save system for ephemeral rooms. "This room fades by default. Save what matters."
-
-- [ ] Pin messages to journal
-- [ ] Journal per server / per room
-- [ ] Pinned items look like tucked notes / postcards
-
-### C10. Ambient Sound Themes [ ]
-**Priority: Phase 3**
-
-Ultra-low-key room tone. Off by default, auto-ducks under voices.
-
-- [ ] Fire crackle, distant rain, porch night, cabin wind, café, vinyl hiss
-- [ ] Very low mix, user-level toggle
-- [ ] Short curated list (not 400 fantasy presets)
-- [ ] Auto-duck under speech
-- [ ] Per-room theme setting
-
-### Design Language
-
-| Element | Style |
+# Campfire product and engineering roadmap
+
+Updated: 2026-07-13
+
+Campfire’s direction is **Discord-shaped community infrastructure with a warmer, more intentional social layer**. The goal is not to copy every Discord surface at once. The sequence is: make the current product trustworthy for small communities, prove operations, scale media, then deepen both parity and Campfire’s own identity.
+
+Status notation:
+
+- **Complete in worktree** — source and focused tests exist; still subject to release gates.
+- **Next** — required before a self-hosted beta.
+- **Later** — valuable after the operating foundation is proven.
+
+## Product decisions
+
+1. Campfire is the canonical product line; release work should stabilize this application rather than revive the earlier in-memory prototype.
+2. The free self-hosted edition remains AGPL and feature-unlocked. Managed hosting sells operations and scale, not a crippled community edition.
+3. The custom unified Node server is part of the product. Socket.IO and background workers make `npm run host` the production entry point.
+4. SQLite serves small single-instance communities. PostgreSQL is the expected managed and multi-instance database.
+5. Peer-to-peer WebRTC remains a simple small-room option. Larger-room claims wait for a completed, measured SFU path.
+6. “Private” features must name their trust boundary. Client-side Offshoot routing is not a cryptographic or server-enforced private room.
+
+## Complete in the current worktree
+
+### Ten-feature Campfire wave
+
+1. **Managed invites** — rotation, revocation, expiry, use limits, safe preview, and atomic use consumption.
+2. **Personal block/ignore** — directional blocks, block-list UI, friendship removal, and DM/friend enforcement.
+3. **Campfire voice notes** — microphone recording, preview/cancel, upload/send, and playback.
+4. **Purpose-driven voice rooms and shared scenes** — five room modes, validated scenes, and circle/grid presentation.
+5. **Pass the Lantern** — realtime holder, queue, pass/release, host/moderator control, and disconnect cleanup.
+6. **Leave-no-trace rooms** — 1/7/30-day retention with a custom-server expiry worker and upload cleanup.
+7. **Camp Journal** — personal message snapshots, optional notes, attachment metadata, list, and delete.
+8. **Camp Votes** — channel polls, single/multiple choice, optional closing time, and creator/moderator close.
+9. **Camp Gatherings** — schedule/edit/delete, linked channel, RSVP counts, reminders, and active join.
+10. **Offshoots** — ephemeral side bubbles with membership/capacity rules, creator/moderator close, and return to main camp.
+
+### Stabilization and security wave
+
+- Clean-install Prisma generation.
+- Shared HTTP/realtime channel-access resolution.
+- Session-authoritative Socket.IO and database-authoritative channel/DM broadcasts.
+- Authenticated, atomic scheduled-message delivery through the custom server.
+- SSRF-aware bounded link previews.
+- Same-channel reply/thread reference enforcement.
+- Banned-member and role-authorization hardening.
+- Deny-by-default instance administration by immutable user ID.
+- Password recovery with generic anti-enumeration responses, digested reset tokens, Resend delivery, atomic single-use consumption, and session revocation.
+- Narrow invite preview endpoint.
+- PostgreSQL-only production Compose wiring for secrets, persistent database/media volumes, dependency health, migrations, and a database-aware application health check.
+- Next.js, Stripe dependency, and Turbopack compatibility fixes.
+- Explicit fail-safe Community versus Cloud edition selection and production Cloud configuration validation.
+- Stripe checkout and entitlement hardening: guest rejection, Customer reuse, checkout claims, approved price/status validation, Stripe v22 item-period handling, stale-event rejection, invoice/cancellation transitions, unique Stripe IDs, and handler-level regression tests.
+
+These lists describe implementation scope, not a public release. The authoritative boundaries are in [docs/GAP_ANALYSIS.md](./docs/GAP_ANALYSIS.md).
+
+## Milestone 0 — release-candidate evidence
+
+Priority: **Next / blocking**
+
+- Freeze a candidate commit and remove unrelated worktree drift.
+- Pass clean `npm ci`, `npm run db:check`, full tests, lint, typecheck, and production build on Node 22.
+- Repeat desktop staging, native-module probing, packaging, and packaged-runtime smoke tests against the frozen candidate; attach exact artifact evidence.
+- Prove fresh and upgrade paths for SQLite sync and the history-preserving PostgreSQL migration track.
+- Run authorization regressions across HTTP and Socket.IO.
+- Complete the ten-feature acceptance pass on real browsers.
+- Publish migrations, breaking changes, operator actions, limitations, and rollback notes.
+- Verify the production container from empty volumes through restart and restore.
+- Complete every applicable gate in [docs/RELEASE_CHECKLIST.md](./docs/RELEASE_CHECKLIST.md).
+
+Exit: a reproducible candidate with attached evidence, known issues, and a rollback plan.
+
+## Milestone 1 — invited self-hosted alpha
+
+Priority: **Next**
+
+- Operate one real HTTPS deployment with strict CORS, PostgreSQL or backed-up SQLite, TURN, persistent uploads, monitoring, and alerts.
+- Perform a database-plus-uploads backup and clean restore drill.
+- Invite a small set of communities; cap and communicate peer-to-peer room size.
+- Measure registration/join success, time to first message, time to voice, reconnect rate, TURN usage, media failures, worker failures, and support load.
+- Validate leave-no-trace expectations, Offshoot trust copy, moderator workflows, and block behavior with real users.
+- Fix accessibility, empty-state, responsive-layout, and browser compatibility blockers discovered in alpha.
+
+Exit: multiple communities can operate for several weeks without data loss or unresolved critical authorization/media failures.
+
+## Milestone 2 — self-hosted beta and desktop distribution
+
+Priority: **Next after alpha**
+
+- Turn backup/restore, update, rollback, and log collection into repeatable operator procedures.
+- Publish a support matrix for operating systems, browsers, SQLite/PostgreSQL, reverse proxies, and TURN.
+- Make the current portable and NSIS candidate generation reproducible on a clean release builder, with versioned evidence and rollback notes.
+- Keep the Electron 43 `better-sqlite3` rebuild covered on every supported builder; prove installer state under `%APPDATA%\Campfire`, portable state under adjacent `CampfireData`, and writable/served media outside packaged resources.
+- Test install, upgrade, rollback, move-portable, and uninstall-with-data-retained behavior without data loss.
+- Add code signing, checksums, clean-machine artifact smoke tests, and published known issues.
+- Improve mobile-web navigation, touch targets, media permissions, accessibility, and reduced-motion behavior.
+- Add product-facing diagnostics for microphone, speaker, WebRTC connection, TURN, Socket.IO, database, and worker health.
+
+Exit: a documented self-hosted beta plus signed desktop candidates that pass the artifact checklist. Native mobile apps remain out of scope for this milestone.
+
+## Milestone 3 — managed hosted beta
+
+Priority: **After self-host operations are proven**
+
+- Publish Terms of Service, Privacy Policy, acceptable-use, retention/deletion, AGPL source offer, and support/escalation policies.
+- Verify Community versus Cloud remains explicit and fails closed when hosted billing or password-recovery configuration is incomplete.
+- Preserve the implemented Stripe entitlement invariants with production-database and end-to-end tests that exercise the real checkout and webhook handlers.
+- Verify the Resend sending domain, delivery/bounce handling, reset-link base URL, rate limits, and account-recovery monitoring in the managed environment.
+- Prove live webhook signatures, replay/idempotency, checkout, portal, upgrade/downgrade, cancellation, failed payment, refund, and access-expiry flows.
+- Automate encrypted PostgreSQL/upload backups and attach repeatable restore evidence.
+- Launch monitoring, alerting, status page, incident ownership, abuse response, support, and staged rollout/rollback.
+- Complete tenant-isolation tests for APIs, realtime rooms, uploads, admin analytics, and billing data.
+
+Exit: invited tenants can be billed without entitlement ambiguity, with documented support and recovery. No public SLA is promised until operating data supports it.
+
+## Milestone 4 — scalable voice, video, and realtime
+
+Priority: **Required for large-community claims**
+
+- Complete LiveKit/SFU browser integration, room selection, moderation, failure fallback, and deployment.
+- Replace static TURN credentials with short-lived credentials and capacity/abuse controls.
+- Add region selection or routing, adaptive subscriptions, audio priority, media quality indicators, and device hot-swap.
+- Measure join time, RTT, jitter, loss, bitrate, reconnects, CPU, and outbound bandwidth.
+- Move Lantern/Offshoot state from one process into a shared realtime state design before horizontal app replicas.
+- If Offshoots promise private side audio, route media at the SFU rather than relying on client volume controls.
+- Load-test large voice rooms, screen share, camera grids, and failover with explicit supported limits.
+
+Exit: Campfire can publish measured room-size and availability claims rather than inheriting Discord-scale expectations.
+
+## Milestone 5 — account safety and community parity
+
+Priority: **After release reliability**
+
+- 2FA, SSO, session/device management, recovery-event notifications, and administrative recovery controls.
+- Report queues, abuse evidence, rate-limit administration, suspension/appeal, and moderator case history.
+- Fine-grained notification settings, cross-device push, mobile background behavior, and do-not-disturb schedules.
+- Stage/listener rooms, request-to-speak moderation, forum-style channels, and richer event workflows.
+- Server discovery governance, onboarding questions, membership screening, rule acceptance, and anti-raid controls.
+- Bot/app API, webhooks, OAuth installation, permission scopes, auditability, and a safe extension model.
+- Large-history search, export/import, server transfer, and formal data deletion tooling.
+
+Exit: Campfire covers the high-value Discord workflows its target communities actually use, with safety and operator costs measured before adding breadth.
+
+## Next five build-outs
+
+These are the ranked follow-on features after the current ten-feature wave:
+
+1. **Ranger Desk** — a moderation case inbox with evidence, assignment, action history, escalation, and appeals.
+2. **Fireside Stage** — listener/speaker voice rooms with a request-to-speak queue, host promotion, moderation, and capacity rules.
+3. **Trail Boards** — forum-style channels with tags, searchable posts, resolved/archived states, and durable topic ownership.
+4. **Ember Inbox** — a persistent notification center with unread state, per-space policy, push/digest delivery, and quiet hours.
+5. **Gathering Seasons** — recurring Gatherings with external calendar links, host controls, capacity, waitlists, and reminder policy.
+
+Treat these as planned work, not shipped capability. Ranger Desk and Ember Inbox come first because safety and reliable attention management are prerequisites for larger public communities.
+
+## Milestone 6 — deepen Campfire’s own flare
+
+Priority: **Continuous, after foundations**
+
+- Give each purpose-driven room behavioral defaults for layout, notification tone, privacy, queueing, and moderation.
+- Persist or explicitly expire Lantern/Offshoot state and show that lifecycle to participants.
+- Add recurring Gatherings, external calendar links, host controls, waitlists, and push reminders.
+- Add Journal search, export, collections, and an opt-in shared community journal.
+- Expand Camp Votes with quorum, anonymous-community mode where safe, reminders, and result exports.
+- Make the Circle, arrival/departure motion, ember reactions, ambient scenes, and shared-object slot coherent and accessible rather than decorative clutter.
+- Explore watch-together, collaborative workshop objects, story circles, and quiet co-presence only after media and moderation foundations support them.
+
+Exit: a community can explain why it prefers Campfire without saying only “it is open-source Discord.”
+
+## Explicit remaining gaps
+
+The following are not “basically done”:
+
+- native iOS/Android apps and reliable background/lock-screen audio;
+- a production SFU and Discord-scale voice/video capacity;
+- automated managed backups with published and proven recovery targets;
+- production-ready 2FA/SSO;
+- live billing/recovery operations and a commercially ready hosted service;
+- mature trust-and-safety operations, notifications, stages/forums, and app ecosystem;
+- end-to-end encryption for stored text or DMs;
+- signed, upgrade-tested desktop artifacts.
+
+## Product health signals
+
+Before adding broad feature parity, track:
+
+| Area | Signal |
 |---|---|
-| Background | Deep charcoal |
-| Highlights | Warm amber |
-| Activity | Burnt orange accents |
-| Idle | Cooler muted tones |
-| Gradients | Soft, not neon |
-| Geometry | Rounded, mature proportions |
-| Motion | Heat and breath, not RGB seizure |
-| Unread | Embers |
-| Active room | Warms up visually |
-| Idle room | Cools and dims |
-| Typing | Spark drift |
-| Pinned | Tucked notes / postcards |
-| Privacy | Blunt, readable labels |
+| Activation | Create/join success, time to first message, time to first voice join |
+| Reliability | API/socket error rate, reconnect success, worker failures, failed uploads |
+| Voice | Join time, TURN usage, RTT/jitter/loss, drop rate, room size, CPU/bandwidth |
+| Safety | Reports, block rate, moderation actions, repeat abuse, response time |
+| Data | Backup success, restore duration, migration failures, retention sweep results |
+| Product | Weekly active communities, returning voice rooms, Gatherings attendance, Journal/Vote use |
+| Operations | Incidents, support volume, cost per active community, rollback frequency |
 
----
+## Definition of done
 
-## Engineering Epics
+A roadmap item is complete only when:
 
-1. **Identity, membership, and room model**
-2. **Presence and real-time event infrastructure**
-3. **Voice media transport**
-4. **Audio device and processing layer**
-5. **Permissions and moderation**
-6. **Screen share and video**
-7. **In-room text and shared context**
-8. **Stage/events mode**
-9. **Mobile experience**
-10. **Observability and support tooling**
-11. **Safety and abuse systems**
-12. **Social features and activities**
+1. authorization and validation rules are explicit;
+2. data lifecycle and privacy boundaries are documented;
+3. focused tests and relevant regression tests pass;
+4. realtime and HTTP behavior agree where both apply;
+5. UI covers loading, empty, error, unauthorized, mobile, keyboard, and reduced-motion states;
+6. operators know the configuration, monitoring, backup, upgrade, and rollback impact; and
+7. the release checklist proves the behavior on the distributed artifact.
 
----
-
-## Current Architecture
-
-- **Frontend**: Next.js 16 App Router + React 19 + Tailwind CSS
-- **Realtime**: Socket.IO (port 3001) for signaling + presence
-- **Voice**: WebRTC P2P mesh (works for small groups, needs SFU for scale)
-- **Database**: PostgreSQL + Prisma v7
-- **Auth**: JWT in HttpOnly cookies, bcrypt passwords
-- **Deployment**: Docker + docker-compose.prod.yml
-
-## Version History
-
-- v0.0.1 — Initial chat app: servers, channels, messages, guest login
-- v0.0.2 — Message edit/delete, optimistic sends, URL routing, unread badges
-- v0.0.3 — Separate voice/text channels, WebRTC voice, mute/deafen icons, settings modal, notification sounds, Docker hosting
-- v0.0.4 — Profile pictures, emoji reactions, file/image uploads, message search, keyboard shortcuts, logo integration
-- v0.0.5 — Roles & permissions (owner/admin/mod/member), speaking indicators (VAD), push-to-talk, role management UI
-- v0.0.6 — Voice moderation (server mute/deafen, kick from voice, move between rooms), screen share with fullscreen viewer, camera/video with grid layout
+See [docs/EDITIONS.md](./docs/EDITIONS.md) for edition promises and [docs/RELEASE_CHECKLIST.md](./docs/RELEASE_CHECKLIST.md) for the actual ship gate.
