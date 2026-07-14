@@ -174,6 +174,11 @@ describe("TURN deployment configuration", () => {
       .toEqual({ mode: "disabled" });
     expect(assertTurnConfiguration({
       NODE_ENV: "production",
+      TURN_CREDENTIAL_TTL_SECONDS: "",
+    })).toEqual({ mode: "disabled" });
+
+    expect(assertTurnConfiguration({
+      NODE_ENV: "production",
       TURN_URL: "turn:turn.campfire.test:3478",
       TURN_ALLOW_LEGACY_STATIC_CREDENTIALS: "1",
       TURN_USERNAME: "legacy-user",

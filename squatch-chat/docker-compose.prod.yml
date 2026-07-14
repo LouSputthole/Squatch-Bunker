@@ -65,7 +65,7 @@ services:
       # Public-beta TURN REST contract; TURN_AUTH_SECRET stays server-only.
       TURN_URLS: "${TURN_URLS:-}"
       TURN_AUTH_SECRET: "${TURN_AUTH_SECRET:-}"
-      TURN_CREDENTIAL_TTL_SECONDS: "${TURN_CREDENTIAL_TTL_SECONDS:-900}"
+      TURN_CREDENTIAL_TTL_SECONDS: "${TURN_CREDENTIAL_TTL_SECONDS:-}"
       TURN_ALLOW_LEGACY_STATIC_CREDENTIALS: "${TURN_ALLOW_LEGACY_STATIC_CREDENTIALS:-0}"
       # Non-beta static-credential compatibility; ignored unless toggle is 1.
       TURN_URL: "${TURN_URL:-}"

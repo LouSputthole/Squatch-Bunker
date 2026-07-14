@@ -137,7 +137,7 @@ describe("hosted deployment safety", () => {
     expect(envExample).toContain("TURN_ALLOW_LEGACY_STATIC_CREDENTIALS");
 
     expect(compose).toContain(
-      'TURN_CREDENTIAL_TTL_SECONDS: "${TURN_CREDENTIAL_TTL_SECONDS:-900}"',
+      'TURN_CREDENTIAL_TTL_SECONDS: "${TURN_CREDENTIAL_TTL_SECONDS:-}"',
     );
     expect(compose).toContain(
       'TURN_ALLOW_LEGACY_STATIC_CREDENTIALS: "${TURN_ALLOW_LEGACY_STATIC_CREDENTIALS:-0}"',
