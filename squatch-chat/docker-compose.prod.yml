@@ -38,6 +38,7 @@ services:
       DATABASE_URL: "postgresql://${DB_USER:-postgres}:${DB_PASSWORD:?Set DB_PASSWORD to a strong random value}@db:5432/${DB_NAME:-campfire}?schema=public"
       JWT_SECRET: "${JWT_SECRET:?Set JWT_SECRET to at least 32 random characters}"
       COOKIE_NAME: "${COOKIE_NAME:-squatch-token}"
+      CAMPFIRE_BETA_ACCESS_CODE: "${CAMPFIRE_BETA_ACCESS_CODE:-}"
       INSTANCE_ADMIN_USER_IDS: "${INSTANCE_ADMIN_USER_IDS:-}"
       NEXT_PUBLIC_APP_URL: "${NEXT_PUBLIC_APP_URL:-}"
       STRICT_CORS: "${STRICT_CORS:-false}"
@@ -61,11 +62,17 @@ services:
       STRIPE_WEBHOOK_SECRET: "${STRIPE_WEBHOOK_SECRET:-}"
       STRIPE_PRICE_MONTHLY: "${STRIPE_PRICE_MONTHLY:-}"
       STRIPE_PRICE_YEARLY: "${STRIPE_PRICE_YEARLY:-}"
+      # Public-beta TURN REST contract; TURN_AUTH_SECRET stays server-only.
+      TURN_URLS: "${TURN_URLS:-}"
+      TURN_AUTH_SECRET: "${TURN_AUTH_SECRET:-}"
+      TURN_CREDENTIAL_TTL_SECONDS: "${TURN_CREDENTIAL_TTL_SECONDS:-}"
+      TURN_ALLOW_LEGACY_STATIC_CREDENTIALS: "${TURN_ALLOW_LEGACY_STATIC_CREDENTIALS:-0}"
+      # Non-beta static-credential compatibility; ignored unless toggle is 1.
       TURN_URL: "${TURN_URL:-}"
-      RESEND_API_KEY: "${RESEND_API_KEY:-}"
-      CAMPFIRE_EMAIL_FROM: "${CAMPFIRE_EMAIL_FROM:-}"
       TURN_USERNAME: "${TURN_USERNAME:-}"
       TURN_CREDENTIAL: "${TURN_CREDENTIAL:-}"
+      RESEND_API_KEY: "${RESEND_API_KEY:-}"
+      CAMPFIRE_EMAIL_FROM: "${CAMPFIRE_EMAIL_FROM:-}"
       PORT: 3000
     volumes:
       - campfire-uploads:/app/media/uploads

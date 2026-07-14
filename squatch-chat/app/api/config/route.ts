@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { sfuConfigured } from "@/lib/sfu";
 import { billingConfiguration, getEdition } from "@/lib/edition";
+import {
+  assertTurnConfiguration,
+  mintTurnCredentials,
+} from "@/lib/turnCredentials";
 
 /**
  * Runtime config endpoint. Returns connection URLs derived from the request.
@@ -26,19 +30,43 @@ export async function GET(request: Request) {
   const socketPath = process.env.NEXT_PUBLIC_SOCKET_PATH || "/api/socketio";
 
   const session = await getSession();
-  const turnUrl = (session && process.env.TURN_URL) || "";
-  const turnUsername = (session && process.env.TURN_USERNAME) || "";
-  const turnCredential = (session && process.env.TURN_CREDENTIAL) || "";
+  let turnUrls: string[] = [];
+  let turnUrl = "";
+  let turnUsername = "";
+  let turnCredential = "";
+  let turnExpiresAt: number | null = null;
 
-  return NextResponse.json({
+  const turnConfiguration = assertTurnConfiguration();
+  if (session && turnConfiguration.mode === "ephemeral") {
+    const credentials = mintTurnCredentials(turnConfiguration.authSecret, session.userId, {
+      ttlSeconds: turnConfiguration.ttlSeconds,
+    });
+    turnUrls = turnConfiguration.urls;
+    turnUrl = turnUrls[0] || "";
+    turnUsername = credentials.username;
+    turnCredential = credentials.credential;
+    turnExpiresAt = credentials.expiresAt;
+  } else if (session && turnConfiguration.mode === "legacy") {
+    turnUrls = turnConfiguration.urls;
+    turnUrl = turnUrls[0] || "";
+    turnUsername = turnConfiguration.username;
+    turnCredential = turnConfiguration.credential;
+  }
+
+  const response = NextResponse.json({
     edition: getEdition(),
     billingEnabled: billingConfiguration().enabled,
     appUrl,
     socketUrl,
     socketPath,
+    turnUrls,
     turnUrl,
     turnUsername,
     turnCredential,
+    turnExpiresAt,
     sfuAvailable: sfuConfigured(),
   });
+  response.headers.set("Cache-Control", "private, no-store");
+  response.headers.set("Vary", "Cookie");
+  return response;
 }

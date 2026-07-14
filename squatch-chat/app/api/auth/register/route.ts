@@ -3,6 +3,7 @@ import { hashPassword, createToken, setTokenCookie } from "@/lib/auth";
 import { checkRateLimit } from "@/lib/rateLimit";
 import { parseAccountCredentials } from "@/lib/accountCredentials";
 import { clientIp } from "@/lib/clientIp";
+import { betaAccessAllowed } from "@/lib/betaAccess";
 
 export async function POST(request: Request) {
   const { allowed, remaining, resetAt } = checkRateLimit(`register:${clientIp(request)}`);
@@ -25,6 +26,17 @@ export async function POST(request: Request) {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  const betaAccessCode =
+    typeof body === "object" && body !== null && "betaAccessCode" in body
+      ? (body as Record<string, unknown>).betaAccessCode
+      : undefined;
+  if (!betaAccessAllowed(betaAccessCode)) {
+    return NextResponse.json(
+      { error: "Access denied" },
+      { status: 403 },
+    );
   }
 
   const parsed = parseAccountCredentials(body);

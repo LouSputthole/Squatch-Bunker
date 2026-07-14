@@ -3,6 +3,7 @@ import jwt from "jsonwebtoken";
 import { config } from "@/lib/config";
 import { checkRateLimit } from "@/lib/rateLimit";
 import { clientIp } from "@/lib/clientIp";
+import { betaAccessAllowed } from "@/lib/betaAccess";
 
 const JWT_SECRET = config.jwtSecret;
 const COOKIE_NAME = config.cookieName;
@@ -24,9 +25,20 @@ export async function POST(request: Request) {
   }
 
   try {
-    const { username } = await request.json();
+    const parsedBody: unknown = await request.json();
+    const body = typeof parsedBody === "object" && parsedBody !== null
+      ? parsedBody as Record<string, unknown>
+      : {};
+    const username = body.username;
 
-    if (!username || !username.trim()) {
+    if (!betaAccessAllowed(body.betaAccessCode)) {
+      return NextResponse.json(
+        { error: "Access denied" },
+        { status: 403 },
+      );
+    }
+
+    if (typeof username !== "string" || !username.trim()) {
       return NextResponse.json(
         { error: "Username is required" },
         { status: 400 }
@@ -45,9 +57,8 @@ export async function POST(request: Request) {
     // Generate a unique guest ID
     const guestId = Math.random().toString(36).slice(2, 10);
     const guestUsername = `${cleanUsername}#${guestId}`;
-    const guestUserId = `guest-${crypto.randomUUID()}`;
-
-    // Try to persist the guest in the database if available
+    // Every authenticated guest must map to a revocable database record.
+    // Fail closed instead of issuing a phantom identity when persistence fails.
     let persistedUser = null;
     try {
       const { prisma } = await import("@/lib/db");
@@ -65,10 +76,20 @@ export async function POST(request: Request) {
         },
       });
     } catch (dbErr) {
-      console.log("[Campfire] Guest DB fallback:", dbErr instanceof Error ? dbErr.message : dbErr);
+      const errorCode =
+        typeof dbErr === "object" && dbErr !== null && "code" in dbErr
+          ? String((dbErr as { code?: unknown }).code ?? "")
+          : "";
+      console.error(
+        `[Campfire] Guest database persistence failed${errorCode ? ` (${errorCode})` : ""}.`,
+      );
+      return NextResponse.json(
+        { error: "Guest sessions are temporarily unavailable" },
+        { status: 503 },
+      );
     }
 
-    const userId = persistedUser?.id || guestUserId;
+    const userId = persistedUser.id;
     const token = jwt.sign({ userId, username: guestUsername }, JWT_SECRET, { expiresIn: "7d" });
 
     const response = NextResponse.json(

@@ -39,7 +39,8 @@
     "desktop:portable": "npm run desktop:stage && electron-builder --config packaging/electron-builder.json --win portable --x64",
     "desktop:installer": "npm run desktop:stage && electron-builder --config packaging/electron-builder.json --win nsis --x64",
     "desktop:dist": "npm run desktop:stage && electron-builder --config packaging/electron-builder.json --win portable nsis --x64",
-    "runtime:verify:realtime": "tsx scripts/verify-realtime.ts"
+    "runtime:verify:realtime": "tsx scripts/verify-realtime.ts",
+    "staging:verify": "tsx scripts/verify-public-staging.ts"
   },
   "dependencies": {
     "@prisma/adapter-better-sqlite3": "7.8.0",

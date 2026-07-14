@@ -94,7 +94,16 @@ export default function BillingPage() {
               All shipped code features are unlocked on this self-hosted instance. Billing is intentionally disabled.
             </p>
             <p className="mt-3 text-xs text-[var(--muted)]">
-              Licensed AGPL-3.0-only. You control the database, uploads, domain, backups, and updates.
+              Licensed AGPL-3.0-only. You control the database, uploads, domain, backups, and updates.{" "}
+              <a
+                href="https://github.com/LouSputthole/Squatch-Bunker"
+                target="_blank"
+                rel="noreferrer"
+                className="text-[var(--accent-2)] underline-offset-2 hover:underline"
+              >
+                View the corresponding source
+              </a>
+              .
             </p>
           </section>
         ) : policy ? (

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => {
   const transactionUser = {
@@ -24,13 +24,19 @@ const mocks = vi.hoisted(() => {
       createToken: vi.fn(() => "setup-token"),
       setTokenCookie: vi.fn(),
     },
+    rateLimit: {
+      checkRateLimit: vi.fn(),
+    },
   };
 });
 
 vi.mock("@/lib/db", () => ({ prisma: mocks.prisma }));
 vi.mock("@/lib/auth", () => mocks.auth);
+vi.mock("@/lib/rateLimit", () => mocks.rateLimit);
 
 import { GET, POST } from "@/app/api/setup/route";
+
+const originalBetaAccessCode = process.env.CAMPFIRE_BETA_ACCESS_CODE;
 
 function setup(body: unknown, raw = false) {
   return POST(new Request("http://test.local/api/setup", {
@@ -42,6 +48,12 @@ function setup(body: unknown, raw = false) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  delete process.env.CAMPFIRE_BETA_ACCESS_CODE;
+  mocks.rateLimit.checkRateLimit.mockReturnValue({
+    allowed: true,
+    remaining: 29,
+    resetAt: Date.now() + 60_000,
+  });
   mocks.prisma.user.count.mockResolvedValue(0);
   mocks.transactionUser.count.mockResolvedValue(0);
   mocks.transactionUser.create.mockResolvedValue({
@@ -49,6 +61,14 @@ beforeEach(() => {
     username: "first_camper",
     email: "first@example.com",
   });
+});
+
+afterEach(() => {
+  if (originalBetaAccessCode === undefined) {
+    delete process.env.CAMPFIRE_BETA_ACCESS_CODE;
+  } else {
+    process.env.CAMPFIRE_BETA_ACCESS_CODE = originalBetaAccessCode;
+  }
 });
 
 describe("first-run setup", () => {
@@ -68,6 +88,43 @@ describe("first-run setup", () => {
 
     expect(response.status).toBe(400);
     expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+
+  it("rate-limits setup before parsing or opening a transaction", async () => {
+    mocks.rateLimit.checkRateLimit.mockReturnValueOnce({
+      allowed: false,
+      remaining: 0,
+      resetAt: Date.now() + 60_000,
+    });
+    const response = await setup({ ignored: true });
+
+    expect(response.status).toBe(429);
+    expect(response.headers.get("retry-after")).toBeTruthy();
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
+  });
+  it("requires the configured beta code before creating the first account", async () => {
+    const betaAccessCode = "beta-setup-code-0123456789abcdef";
+    process.env.CAMPFIRE_BETA_ACCESS_CODE = betaAccessCode;
+    const credentials = {
+      email: "first@example.com",
+      username: "first_camper",
+      password: "long-enough-password",
+    };
+
+    const blocked = await setup({
+      ...credentials,
+      betaAccessCode: "wrong",
+    });
+    expect(blocked.status).toBe(403);
+    await expect(blocked.json()).resolves.toEqual({ error: "Access denied" });
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
+
+    const allowed = await setup({ ...credentials, betaAccessCode });
+    expect(allowed.status).toBe(200);
+    expect(mocks.prisma.$transaction).toHaveBeenCalledOnce();
+    expect(JSON.stringify(mocks.transactionUser.create.mock.calls))
+      .not.toContain(betaAccessCode);
   });
 
   it("serializes the empty-instance check with initial-user creation", async () => {
