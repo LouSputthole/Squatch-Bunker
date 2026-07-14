@@ -26,6 +26,7 @@ export function WelcomeScreen({ serverId, serverName, serverIcon, onDismiss }: P
       <div className="bg-[var(--panel)] rounded-2xl shadow-2xl w-full max-w-lg p-8 text-center">
         <div className="w-20 h-20 rounded-2xl bg-[var(--panel-2)] flex items-center justify-center text-3xl font-bold mx-auto mb-4 overflow-hidden">
           {serverIcon
+            // eslint-disable-next-line @next/next/no-img-element -- server icons may be user-hosted, data, or blob URLs
             ? <img src={serverIcon} alt={serverName} className="w-full h-full object-cover" />
             : serverName[0]?.toUpperCase()
           }

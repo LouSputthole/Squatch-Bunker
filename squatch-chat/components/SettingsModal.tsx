@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import Avatar from "@/components/Avatar";
+import { BlockedUsersSettings } from "@/components/BlockedUsersSettings";
 import { useTheme, THEMES, THEME_LABELS } from "@/hooks/useTheme";
 
 interface SettingsModalProps {
@@ -11,60 +12,71 @@ interface SettingsModalProps {
   currentAvatar?: string | null;
   onAvatarChange?: (avatar: string | null) => void;
   onInputSensitivityChange?: (threshold: number) => void;
+  onBlockChange?: (userId: string, blocked: boolean) => void;
 }
 
-export default function SettingsModal({ open, onClose, username, currentAvatar, onAvatarChange, onInputSensitivityChange }: SettingsModalProps) {
-  const [tab, setTab] = useState<"audio" | "account" | "appearance">("audio");
+interface SavedAudioSettings {
+  inputDevice?: string;
+  outputDevice?: string;
+  videoDevice?: string;
+  inputVolume?: number;
+  outputVolume?: number;
+  inputSensitivity?: number;
+  messageNotifications?: boolean;
+  masterEnabled?: boolean;
+  messageSend?: boolean;
+  voice?: boolean;
+  notifications?: boolean;
+  volume?: number;
+}
+
+function readSavedAudioSettings(): SavedAudioSettings {
+  if (typeof window === "undefined") return {};
+  const saved = localStorage.getItem("campfire-audio-settings");
+  if (!saved) return {};
+  try {
+    return JSON.parse(saved) as SavedAudioSettings;
+  } catch {
+    return {};
+  }
+}
+
+export default function SettingsModal(props: SettingsModalProps) {
+  if (!props.open) return null;
+  return <SettingsModalContent {...props} />;
+}
+
+function SettingsModalContent({ onClose, username, currentAvatar, onAvatarChange, onInputSensitivityChange, onBlockChange }: SettingsModalProps) {
+  const [initialSettings] = useState(readSavedAudioSettings);
+  const [tab, setTab] = useState<"audio" | "account" | "privacy" | "appearance">("audio");
   const { theme, setTheme, themes, customColors, setCustomColors } = useTheme();
   const [inputDevices, setInputDevices] = useState<MediaDeviceInfo[]>([]);
   const [outputDevices, setOutputDevices] = useState<MediaDeviceInfo[]>([]);
   const [videoDevices, setVideoDevices] = useState<MediaDeviceInfo[]>([]);
-  const [selectedInput, setSelectedInput] = useState<string>("");
-  const [selectedOutput, setSelectedOutput] = useState<string>("");
-  const [selectedVideo, setSelectedVideo] = useState<string>("");
-  const [inputVolume, setInputVolume] = useState(100);
-  const [outputVolume, setOutputVolume] = useState(100);
+  const [selectedInput, setSelectedInput] = useState(initialSettings.inputDevice ?? "");
+  const [selectedOutput, setSelectedOutput] = useState(initialSettings.outputDevice ?? "");
+  const [selectedVideo, setSelectedVideo] = useState(initialSettings.videoDevice ?? "");
+  const [inputVolume, setInputVolume] = useState(initialSettings.inputVolume ?? 100);
+  const [outputVolume, setOutputVolume] = useState(initialSettings.outputVolume ?? 100);
   const [testing, setTesting] = useState(false);
   const [micLevel, setMicLevel] = useState(0);
-  const [inputSensitivity, setInputSensitivity] = useState(15);
-  const [messageNotifications, setMessageNotifications] = useState(true);
-  const [uiSoundsMaster, setUiSoundsMaster] = useState(true);
-  const [uiSoundMessages, setUiSoundMessages] = useState(true);
-  const [uiSoundVoice, setUiSoundVoice] = useState(true);
-  const [uiSoundNotifications, setUiSoundNotifications] = useState(true);
-  const [uiSoundVolume, setUiSoundVolume] = useState(0.3);
+  const [inputSensitivity, setInputSensitivity] = useState(initialSettings.inputSensitivity ?? 15);
+  const [messageNotifications, setMessageNotifications] = useState(initialSettings.messageNotifications ?? true);
+  const [uiSoundsMaster, setUiSoundsMaster] = useState(initialSettings.masterEnabled ?? true);
+  const [uiSoundMessages, setUiSoundMessages] = useState(initialSettings.messageSend ?? true);
+  const [uiSoundVoice, setUiSoundVoice] = useState(initialSettings.voice ?? true);
+  const [uiSoundNotifications, setUiSoundNotifications] = useState(initialSettings.notifications ?? true);
+  const [uiSoundVolume, setUiSoundVolume] = useState(initialSettings.volume ?? 0.3);
 
   const testStreamRef = useRef<MediaStream | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animFrameRef = useRef<number | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
+  const micTestRequestRef = useRef(0);
 
-  // Load saved settings
   useEffect(() => {
-    if (!open) return;
-
-    const saved = localStorage.getItem("campfire-audio-settings");
-    if (saved) {
-      try {
-        const s = JSON.parse(saved);
-        if (s.inputDevice) setSelectedInput(s.inputDevice);
-        if (s.outputDevice) setSelectedOutput(s.outputDevice);
-        if (s.videoDevice) setSelectedVideo(s.videoDevice);
-        if (s.inputVolume !== undefined) setInputVolume(s.inputVolume);
-        if (s.outputVolume !== undefined) setOutputVolume(s.outputVolume);
-        if (s.inputSensitivity !== undefined) {
-          setInputSensitivity(s.inputSensitivity);
-          onInputSensitivityChange?.(s.inputSensitivity);
-        }
-        if (s.messageNotifications !== undefined) setMessageNotifications(s.messageNotifications);
-        if (s.masterEnabled !== undefined) setUiSoundsMaster(s.masterEnabled);
-        if (s.messageSend !== undefined) setUiSoundMessages(s.messageSend);
-        if (s.voice !== undefined) setUiSoundVoice(s.voice);
-        if (s.notifications !== undefined) setUiSoundNotifications(s.notifications);
-        if (s.volume !== undefined) setUiSoundVolume(s.volume);
-      } catch { /* ignore */ }
-    }
-  }, [open]);
+    onInputSensitivityChange?.(initialSettings.inputSensitivity ?? 15);
+  }, [initialSettings.inputSensitivity, onInputSensitivityChange]);
 
   // Save settings on change
   const saveSettings = useCallback(() => {
@@ -89,8 +101,6 @@ export default function SettingsModal({ open, onClose, username, currentAvatar, 
 
   // Enumerate devices
   useEffect(() => {
-    if (!open) return;
-
     async function loadDevices() {
       try {
         // Request audio permission so labels are populated; video is optional
@@ -107,10 +117,21 @@ export default function SettingsModal({ open, onClose, username, currentAvatar, 
     }
 
     loadDevices();
-  }, [open]);
+  }, []);
+
+  const releaseMicTestResources = useCallback(() => {
+    if (animFrameRef.current !== null) cancelAnimationFrame(animFrameRef.current);
+    animFrameRef.current = null;
+    analyserRef.current = null;
+    testStreamRef.current?.getTracks().forEach((track) => track.stop());
+    testStreamRef.current = null;
+    void audioCtxRef.current?.close();
+    audioCtxRef.current = null;
+  }, []);
 
   // Mic test
   const startMicTest = useCallback(async () => {
+    const requestId = ++micTestRequestRef.current;
     setTesting(true);
     try {
       const constraints: MediaStreamConstraints = {
@@ -120,8 +141,12 @@ export default function SettingsModal({ open, onClose, username, currentAvatar, 
       };
 
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
-      testStreamRef.current = stream;
 
+      if (requestId !== micTestRequestRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+      testStreamRef.current = stream;
       const ctx = new AudioContext();
       audioCtxRef.current = ctx;
       const source = ctx.createMediaStreamSource(stream);
@@ -142,21 +167,23 @@ export default function SettingsModal({ open, onClose, username, currentAvatar, 
       updateLevel();
     } catch (err) {
       console.error("[Settings] Mic test failed:", err);
-      setTesting(false);
+      if (requestId === micTestRequestRef.current) {
+        setTesting(false);
+      }
     }
   }, [selectedInput]);
 
   const stopMicTest = useCallback(() => {
-    if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
-    animFrameRef.current = null;
-    analyserRef.current = null;
-    testStreamRef.current?.getTracks().forEach((t) => t.stop());
-    testStreamRef.current = null;
-    audioCtxRef.current?.close();
-    audioCtxRef.current = null;
+    micTestRequestRef.current += 1;
+    releaseMicTestResources();
     setMicLevel(0);
     setTesting(false);
-  }, []);
+  }, [releaseMicTestResources]);
+
+  useEffect(() => () => {
+    micTestRequestRef.current += 1;
+    releaseMicTestResources();
+  }, [releaseMicTestResources]);
 
   // Play test sound through selected output
   const playTestSound = useCallback(async () => {
@@ -181,15 +208,6 @@ export default function SettingsModal({ open, onClose, username, currentAvatar, 
     }
   }, [outputVolume]);
 
-  // Cleanup on close
-  useEffect(() => {
-    if (!open) {
-      stopMicTest();
-    }
-  }, [open, stopMicTest]);
-
-  if (!open) return null;
-
   return (
     <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center" onClick={onClose} role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">
       <div
@@ -211,7 +229,7 @@ export default function SettingsModal({ open, onClose, username, currentAvatar, 
 
         {/* Tabs */}
         <div className="flex border-b border-[var(--accent-2)]/30">
-          {(["audio", "account", "appearance"] as const).map((t) => (
+          {(["audio", "account", "privacy", "appearance"] as const).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -515,6 +533,10 @@ export default function SettingsModal({ open, onClose, username, currentAvatar, 
             />
           )}
 
+          {tab === "privacy" && (
+            <BlockedUsersSettings onBlockChange={onBlockChange} />
+          )}
+
           {tab === "appearance" && (
             <div className="space-y-6">
               <div>
@@ -588,7 +610,19 @@ function AccountTab({
   currentAvatar?: string | null;
   onAvatarChange?: (avatar: string | null) => void;
 }) {
-  const [avatar, setAvatar] = useState<string | null>(currentAvatar ?? null);
+  const avatarSource = currentAvatar ?? null;
+  const [avatarState, setAvatarState] = useState(() => ({
+    source: avatarSource,
+    value: avatarSource,
+  }));
+  const avatar = avatarState.source === avatarSource ? avatarState.value : avatarSource;
+
+  function setAvatar(value: string | null) {
+    setAvatarState({
+      source: avatarSource,
+      value,
+    });
+  }
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
   const [statusMsg, setStatusMsg] = useState("");
@@ -596,10 +630,6 @@ function AccountTab({
   const [statusSaved, setStatusSaved] = useState(false);
   const [preview, setPreview] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    setAvatar(currentAvatar ?? null);
-  }, [currentAvatar]);
 
   async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -672,19 +702,12 @@ function AccountTab({
         </label>
         <div className="flex items-center gap-4">
           <div className="relative group">
-            {displaySrc ? (
-              <img
-                src={displaySrc}
-                alt="Avatar"
-                className="w-20 h-20 rounded-full object-cover border-2 border-[var(--accent-2)]/30"
-              />
-            ) : (
-              <Avatar
-                username={username || "?"}
-                size={80}
-                className="bg-[var(--accent-2)] text-[var(--text)] border-2 border-[var(--accent-2)]/30"
-              />
-            )}
+            <Avatar
+              username={username || "?"}
+              avatarUrl={displaySrc}
+              size={80}
+              className="bg-[var(--accent-2)] text-[var(--text)] border-2 border-[var(--accent-2)]/30"
+            />
             {uploading && (
               <div className="absolute inset-0 rounded-full bg-black/50 flex items-center justify-center">
                 <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin" />

@@ -56,7 +56,9 @@ export default function ModerationPanel({
   }, [serverId]);
 
   useEffect(() => {
-    if (open) fetchMembers();
+    if (!open) return;
+    const timer = setTimeout(fetchMembers, 0);
+    return () => clearTimeout(timer);
   }, [open, fetchMembers]);
 
   if (!open) return null;
@@ -68,7 +70,8 @@ export default function ModerationPanel({
   function setPending(userId: string, on: boolean) {
     setPendingActions((prev) => {
       const next = new Set(prev);
-      on ? next.add(userId) : next.delete(userId);
+      if (on) next.add(userId);
+      else next.delete(userId);
       return next;
     });
   }

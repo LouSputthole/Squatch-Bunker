@@ -2,15 +2,20 @@
 import { useEffect, useState, useCallback } from "react";
 
 export function useNotifications() {
-  const [permission, setPermission] = useState<NotificationPermission>("default");
+  const [permission, setPermission] = useState<NotificationPermission>(() =>
+    typeof Notification === "undefined" ? "default" : Notification.permission
+  );
 
   useEffect(() => {
-    if (typeof Notification !== "undefined") {
-      setPermission(Notification.permission);
-      if (Notification.permission === "default") {
-        Notification.requestPermission().then(setPermission);
-      }
-    }
+    if (typeof Notification === "undefined") return;
+    let active = true;
+    const permissionRequest = Notification.permission === "default"
+      ? Notification.requestPermission()
+      : Promise.resolve(Notification.permission);
+    void permissionRequest.then((nextPermission) => {
+      if (active) setPermission(nextPermission);
+    }).catch(() => {});
+    return () => { active = false; };
   }, []);
 
   const notify = useCallback((title: string, body: string, onClick?: () => void) => {

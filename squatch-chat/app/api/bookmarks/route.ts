@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
-import { requireChannelMembership } from "@/lib/membership";
+import { resolveChannelAccess } from "@/lib/channelAccess";
 
 export async function GET() {
   const session = await getSession();
@@ -24,7 +24,7 @@ export async function GET() {
     for (const bookmark of bookmarks) {
       if (
         bookmark.message &&
-        (await requireChannelMembership(bookmark.message.channelId, session.userId))
+        (await resolveChannelAccess(bookmark.message.channelId, session.userId))?.canView
       ) {
         accessible.push(bookmark);
       }
@@ -55,8 +55,8 @@ export async function POST(req: NextRequest) {
     if (!message) {
       return NextResponse.json({ error: "Message not found" }, { status: 404 });
     }
-    const access = await requireChannelMembership(message.channelId, session.userId);
-    if (!access) {
+    const access = await resolveChannelAccess(message.channelId, session.userId);
+    if (!access?.canView) {
       return NextResponse.json({ error: "Not authorized" }, { status: 403 });
     }
 

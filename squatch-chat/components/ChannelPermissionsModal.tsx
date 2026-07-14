@@ -32,12 +32,15 @@ export default function ChannelPermissionsModal({ channelId, channelName, open, 
 
   useEffect(() => {
     if (!open) return;
-    setLoading(true);
-    fetch(`/api/channels/${channelId}/permissions`)
-      .then((r) => r.json())
-      .then((data) => setPermissions(data.permissions || []))
-      .catch(() => {})
-      .finally(() => setLoading(false));
+    const timer = setTimeout(() => {
+      setLoading(true);
+      fetch(`/api/channels/${channelId}/permissions`)
+        .then((r) => r.json())
+        .then((data) => setPermissions(data.permissions || []))
+        .catch(() => {})
+        .finally(() => setLoading(false));
+    }, 0);
+    return () => clearTimeout(timer);
   }, [open, channelId]);
 
   function getPermission(role: string): { canView: boolean; canSend: boolean } {

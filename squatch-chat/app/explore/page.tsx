@@ -1,6 +1,8 @@
 "use client";
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
+import Link from "next/link";
 
 interface PublicServer {
   id: string;
@@ -43,7 +45,7 @@ function ServerCard({ server, onJoin, joining }: { server: PublicServer; onJoin:
       <div className="flex items-center gap-3 mb-3">
         <div className="w-12 h-12 rounded-xl overflow-hidden shrink-0 bg-[var(--accent-2)]/30 flex items-center justify-center text-lg font-bold text-[var(--text)]">
           {server.icon ? (
-            <img src={server.icon} alt={server.name} className="w-full h-full object-cover" />
+            <Image src={server.icon} alt={server.name} width={48} height={48} className="h-full w-full object-cover" unoptimized />
           ) : (
             initials
           )}
@@ -133,7 +135,7 @@ export default function ExplorePage() {
       {/* Header */}
       <div className="border-b border-[var(--accent-2)]/20 bg-[var(--panel)]">
         <div className="max-w-5xl mx-auto px-6 py-4 flex items-center gap-4">
-          <a
+          <Link
             href="/chat"
             className="flex items-center gap-1.5 text-sm text-[var(--muted)] hover:text-[var(--text)] transition-colors mr-2"
           >
@@ -142,8 +144,8 @@ export default function ExplorePage() {
               <path d="M12 19l-7-7 7-7" />
             </svg>
             Back
-          </a>
-          <img src="/Campfire-Logo.png" alt="Campfire" className="w-9 h-9" />
+          </Link>
+          <Image src="/Campfire-Logo.png" alt="Campfire" width={36} height={36} priority />
           <h1 className="text-xl font-bold text-[var(--text)]">Explore Public Servers</h1>
         </div>
       </div>

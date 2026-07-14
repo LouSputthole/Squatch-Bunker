@@ -38,14 +38,15 @@ Caveats, honestly stated:
 | Passwords | bcrypt hashes, never plaintext |
 | Sessions | JWT in `HttpOnly` cookies (`Secure` on HTTPS), revocable server-side via `tokenVersion` |
 | TURN credentials | Served by `/api/config` to authenticated sessions only |
-| Uploads / avatars | Filenames carry 16 hex chars of `crypto.randomBytes` — unguessable capability URLs (Discord-CDN posture) |
+| Message / DM attachments | Random storage keys outside the public root; authenticated API reads recheck current channel, DM, or Journal access. The server operator can still read the bytes. |
+| Legacy uploads / avatars | Randomized public-by-URL files. Do not treat these URLs as an authorization boundary. |
 | Messages, DMs, memberships | **Plaintext in the database.** The server operator can read them. Server-side search, history sync, and moderation depend on this. |
 
 What that last row means in practice: self-hosting is the privacy feature.
-Your community's chat sits in `data/campfire.db` on hardware you control —
-no third company can read, mine, or subpoena-proxy it. Protect the box
-itself: full-disk encryption (BitLocker/LUKS) on the host, and treat `.env`
-(JWT secret) + `data/` as secrets when backing up.
+Your community's chat sits in `data/campfire.db` and its configured media root on hardware you control.
+No third company can read, mine, or subpoena-proxy it. Protect the box
+itself: full-disk encryption (BitLocker/LUKS) on the host, and treat `.env`,
+the database, public media, and private attachments as secrets when backing up.
 
 ## Not provided today
 
@@ -60,8 +61,9 @@ itself: full-disk encryption (BitLocker/LUKS) on the host, and treat `.env`
 
 - [ ] HTTPS in front of anything not on a trusted LAN (DEPLOY.md)
 - [ ] `STRICT_CORS=true` + `CORS_ORIGINS=<your origin>` in `.env`
+- [ ] `CAMPFIRE_TRUST_PROXY_HOPS` is unset for direct service exposure or equals the exact trusted proxy count; the outermost proxy replaces inbound `X-Forwarded-For`
 - [ ] `JWT_SECRET` is generated (postinstall does this) — never the example value; server refuses to boot with the default
-- [ ] Full-disk encryption on the host; backups of `data/` + `.env` stored encrypted
+- [ ] Full-disk encryption on the host; backups of the database, `.env`, public media, and private attachments stored encrypted
 - [ ] `min-port`/`max-port` pinned in turnserver.conf and mirrored in the firewall
 - [ ] Update by `git pull` + rebuild on a schedule (see DEPLOY.md → Updating)
 

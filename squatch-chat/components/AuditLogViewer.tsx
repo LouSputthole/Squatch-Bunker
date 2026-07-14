@@ -68,7 +68,8 @@ export default function AuditLogViewer({ serverId, open, onClose }: AuditLogView
 
   useEffect(() => {
     if (!open) return;
-    fetchLogs();
+    const timer = setTimeout(() => { void fetchLogs(); }, 0);
+    return () => clearTimeout(timer);
   }, [open, fetchLogs]);
 
   if (!open) return null;

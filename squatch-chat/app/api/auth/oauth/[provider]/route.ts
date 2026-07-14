@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 
 const GITHUB_CLIENT_ID = process.env.GITHUB_CLIENT_ID ?? "";
+const GITHUB_CLIENT_SECRET = process.env.GITHUB_CLIENT_SECRET ?? "";
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID ?? "";
+const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET ?? "";
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+const SECURE_COOKIE = APP_URL.startsWith("https://");
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ provider: string }> }) {
   const { provider } = await params;
@@ -13,7 +16,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ prov
   let authUrl: string;
 
   if (provider === "github") {
-    if (!GITHUB_CLIENT_ID) {
+    if (!GITHUB_CLIENT_ID || !GITHUB_CLIENT_SECRET) {
       return NextResponse.json({ error: "GitHub OAuth not configured" }, { status: 501 });
     }
     const searchParams = new URLSearchParams({
@@ -24,7 +27,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ prov
     });
     authUrl = `https://github.com/login/oauth/authorize?${searchParams}`;
   } else if (provider === "google") {
-    if (!GOOGLE_CLIENT_ID) {
+    if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
       return NextResponse.json({ error: "Google OAuth not configured" }, { status: 501 });
     }
     const searchParams = new URLSearchParams({
@@ -41,6 +44,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ prov
 
   // Store state in cookie for CSRF protection
   const response = NextResponse.redirect(authUrl);
-  response.cookies.set("oauth_state", state, { httpOnly: true, maxAge: 300, path: "/" });
+  response.cookies.set(`oauth_state_${provider}`, state, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: SECURE_COOKIE,
+    maxAge: 300,
+    path: "/api/auth/oauth/",
+  });
   return response;
 }

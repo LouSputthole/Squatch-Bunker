@@ -3,12 +3,13 @@ import { prisma } from "@/lib/db";
 import { createToken, setTokenCookie } from "@/lib/auth";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+const SECURE_COOKIE = APP_URL.startsWith("https://");
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ provider: string }> }) {
   const { provider } = await params;
   const code = req.nextUrl.searchParams.get("code");
   const state = req.nextUrl.searchParams.get("state");
-  const storedState = req.cookies.get("oauth_state")?.value;
+  const storedState = req.cookies.get(`oauth_state_${provider}`)?.value;
 
   if (!code || !state || state !== storedState) {
     return NextResponse.redirect(`${APP_URL}/?error=oauth_failed`);
@@ -30,26 +31,39 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ prov
           client_secret: process.env.GITHUB_CLIENT_SECRET,
           code,
         }),
+        signal: AbortSignal.timeout(8_000),
       });
+      if (!tokenRes.ok) throw new Error(`GitHub token exchange failed with HTTP ${tokenRes.status}`);
       const { access_token } = await tokenRes.json() as { access_token: string };
+      if (typeof access_token !== "string" || !access_token) {
+        throw new Error("GitHub token exchange returned no access token");
+      }
 
       // Get user profile
       const userRes = await fetch("https://api.github.com/user", {
         headers: { "Authorization": `Bearer ${access_token}`, "Accept": "application/json" },
+        signal: AbortSignal.timeout(8_000),
       });
+      if (!userRes.ok) throw new Error(`GitHub user lookup failed with HTTP ${userRes.status}`);
       const ghUser = await userRes.json() as {
         id: number;
         login: string;
-        email: string | null;
         avatar_url: string | null;
       };
 
       // Get verified email (may be private on GitHub profile)
       const emailRes = await fetch("https://api.github.com/user/emails", {
         headers: { "Authorization": `Bearer ${access_token}` },
+        signal: AbortSignal.timeout(8_000),
       });
-      const emails = await emailRes.json() as Array<{ email: string; primary: boolean }>;
-      const primaryEmail = emails.find((e) => e.primary)?.email ?? ghUser.email;
+      if (!emailRes.ok) throw new Error(`GitHub email lookup failed with HTTP ${emailRes.status}`);
+      const emails = await emailRes.json() as Array<{
+        email: string;
+        primary: boolean;
+        verified: boolean;
+      }>;
+      const primaryEmail = emails.find((entry) => entry.primary && entry.verified)?.email
+        ?? emails.find((entry) => entry.verified)?.email;
 
       if (!primaryEmail) {
         return NextResponse.redirect(`${APP_URL}/?error=oauth_no_email`);
@@ -71,21 +85,29 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ prov
           grant_type: "authorization_code",
           redirect_uri: `${APP_URL}/api/auth/oauth/google/callback`,
         }),
+        signal: AbortSignal.timeout(8_000),
       });
+      if (!tokenRes.ok) throw new Error(`Google token exchange failed with HTTP ${tokenRes.status}`);
       const { access_token } = await tokenRes.json() as { access_token: string };
+      if (typeof access_token !== "string" || !access_token) {
+        throw new Error("Google token exchange returned no access token");
+      }
 
       // Get user info
       const userRes = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
         headers: { "Authorization": `Bearer ${access_token}` },
+        signal: AbortSignal.timeout(8_000),
       });
+      if (!userRes.ok) throw new Error(`Google user lookup failed with HTTP ${userRes.status}`);
       const googleUser = await userRes.json() as {
         id: string;
         email: string;
+        verified_email: boolean;
         name: string;
         picture: string | null;
       };
 
-      if (!googleUser.email) {
+      if (!googleUser.email || googleUser.verified_email !== true) {
         return NextResponse.redirect(`${APP_URL}/?error=oauth_no_email`);
       }
 
@@ -97,6 +119,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ prov
       return NextResponse.redirect(`${APP_URL}/?error=unknown_provider`);
     }
 
+    email = email.trim().toLowerCase();
     // Find existing OAuth account link
     const oauthAccount = await prisma.oAuthAccount.findUnique({
       where: { provider_providerAccountId: { provider, providerAccountId: providerUserId } },
@@ -141,7 +164,13 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ prov
     setTokenCookie(response, token);
 
     // Clear the CSRF state cookie
-    response.cookies.set("oauth_state", "", { httpOnly: true, maxAge: 0, path: "/" });
+    response.cookies.set(`oauth_state_${provider}`, "", {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: SECURE_COOKIE,
+      maxAge: 0,
+      path: "/api/auth/oauth/",
+    });
 
     return response;
   } catch (err) {

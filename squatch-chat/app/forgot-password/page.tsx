@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 
 export default function ForgotPasswordPage() {
@@ -30,7 +31,7 @@ export default function ForgotPasswordPage() {
     <div className="min-h-screen flex items-center justify-center bg-[var(--bg)]">
       <div className="w-full max-w-md p-8 bg-[var(--panel)] rounded-lg border border-[var(--accent-2)]">
         <div className="flex flex-col items-center mb-6">
-          <img src="/Campfire-Logo.png" alt="Campfire" className="w-24 h-24 mb-3" />
+          <Image src="/Campfire-Logo.png" alt="Campfire" width={96} height={96} className="mb-3" priority />
           <h1 className="text-2xl font-bold text-[var(--text)] mb-1">
             Reset Password
           </h1>
@@ -44,11 +45,8 @@ export default function ForgotPasswordPage() {
             <div
               className="p-4 bg-[var(--panel-2)] border border-[var(--accent-2)] rounded text-[var(--text)] text-sm"
             >
-              Check your email for reset instructions.
+              If an account exists for that email, reset instructions are on the way.
             </div>
-            <p className="text-xs text-[var(--muted)] p-3 bg-[var(--panel-2)] rounded border border-[var(--accent-2)]/40">
-              Dev note: token would be emailed. For testing, check the database.
-            </p>
             <Link
               href="/login"
               className="block text-center text-sm text-[var(--accent)] hover:underline mt-2"
@@ -68,6 +66,7 @@ export default function ForgotPasswordPage() {
                 onChange={(e) => setEmail(e.target.value)}
                 className="w-full px-3 py-2 bg-[var(--panel-2)] text-[var(--text)] border border-[var(--accent-2)] rounded focus:outline-none focus:border-[var(--accent)]"
                 required
+                maxLength={254}
                 autoFocus
               />
             </div>

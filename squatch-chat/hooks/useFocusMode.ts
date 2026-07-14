@@ -3,46 +3,58 @@ import { useState, useEffect, useCallback } from "react";
 
 const STORAGE_KEY = "squatch:focus-mode";
 
+interface FocusState {
+  active: boolean;
+  until: number | null;
+  expired: boolean;
+}
+
+function loadFocusState(): FocusState {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return { active: false, until: null, expired: false };
+    const data = JSON.parse(raw);
+    if (!data.active) return { active: false, until: null, expired: false };
+    if (data.until && Date.now() > data.until) {
+      return { active: false, until: null, expired: true };
+    }
+    return { active: true, until: data.until ?? null, expired: false };
+  } catch {
+    return { active: false, until: null, expired: false };
+  }
+}
+
 export function useFocusMode() {
-  const [focusMode, setFocusMode] = useState(false);
-  const [focusUntil, setFocusUntil] = useState<number | null>(null);
+  const [focusState, setFocusState] = useState<FocusState>(loadFocusState);
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return;
-      const data = JSON.parse(raw);
-      if (data.active) {
-        if (data.until && Date.now() > data.until) {
-          // Expired
-          localStorage.removeItem(STORAGE_KEY);
-        } else {
-          setFocusMode(true);
-          setFocusUntil(data.until ?? null);
-        }
-      }
-    } catch {}
-  }, []);
+    if (!focusState.expired) return;
+    try { localStorage.removeItem(STORAGE_KEY); } catch {}
+  }, [focusState.expired]);
 
   const enable = useCallback((durationMinutes?: number) => {
     const until = durationMinutes ? Date.now() + durationMinutes * 60 * 1000 : null;
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify({ active: true, until }));
     } catch {}
-    setFocusMode(true);
-    setFocusUntil(until);
+    setFocusState({ active: true, until, expired: false });
   }, []);
 
   const disable = useCallback(() => {
     try { localStorage.removeItem(STORAGE_KEY); } catch {}
-    setFocusMode(false);
-    setFocusUntil(null);
+    setFocusState({ active: false, until: null, expired: false });
   }, []);
 
   const toggle = useCallback(() => {
-    if (focusMode) disable();
+    if (focusState.active) disable();
     else enable();
-  }, [focusMode, enable, disable]);
+  }, [focusState.active, enable, disable]);
 
-  return { focusMode, focusUntil, toggle, enable, disable };
+  return {
+    focusMode: focusState.active,
+    focusUntil: focusState.until,
+    toggle,
+    enable,
+    disable,
+  };
 }

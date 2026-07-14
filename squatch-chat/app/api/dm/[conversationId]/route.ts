@@ -1,5 +1,13 @@
+import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
+import { usersHaveBlock } from "@/lib/userBlocks";
+import {
+  claimPrivateUpload,
+  parseRemoteAttachmentUrl,
+  privateAttachmentUrl,
+  PrivateUploadClaimError,
+} from "@/lib/privateUploads";
 
 // GET — fetch messages for a conversation
 export async function GET(
@@ -53,9 +61,36 @@ export async function POST(
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
   const { conversationId } = await params;
-  const { content, attachmentUrl, attachmentName } = await request.json();
+  const {
+    content,
+    attachmentId: rawAttachmentId,
+    attachmentUrl,
+    attachmentName,
+  } = await request.json();
+  if (
+    rawAttachmentId !== undefined &&
+    (typeof rawAttachmentId !== "string" || !rawAttachmentId.trim())
+  ) {
+    return NextResponse.json({ error: "Invalid attachment" }, { status: 400 });
+  }
+  const attachmentId =
+    typeof rawAttachmentId === "string" ? rawAttachmentId.trim() : null;
+  const remoteAttachment = parseRemoteAttachmentUrl(attachmentUrl);
+  if (!remoteAttachment.ok) {
+    return NextResponse.json(
+      { error: "Local upload URLs cannot be attached to new direct messages" },
+      { status: 400 },
+    );
+  }
+  if (attachmentId && remoteAttachment.url) {
+    return NextResponse.json({ error: "Choose one attachment" }, { status: 400 });
+  }
 
-  if (!content?.trim() && !attachmentUrl) {
+  if (
+    !(typeof content === "string" && content.trim()) &&
+    !attachmentId &&
+    !remoteAttachment.url
+  ) {
     return NextResponse.json({ error: "Empty message" }, { status: 400 });
   }
 
@@ -70,27 +105,66 @@ export async function POST(
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const [message] = await prisma.$transaction([
-      prisma.directMessage.create({
+    const otherUserId = conversation.user1Id === session.userId
+      ? conversation.user2Id
+      : conversation.user1Id;
+    if (await usersHaveBlock(session.userId, otherUserId)) {
+      return NextResponse.json(
+        { error: "Direct messages are unavailable between these users" },
+        { status: 403 },
+      );
+    }
+
+    const messageId = randomUUID();
+    const message = await prisma.$transaction(async (tx) => {
+      let attachmentData: {
+        attachmentUrl?: string;
+        attachmentName?: string | null;
+        privateUploadId?: string;
+      } = {};
+      if (attachmentId) {
+        const upload = await claimPrivateUpload(tx, {
+          attachmentId,
+          ownerId: session.userId,
+          claimKind: "direct-message",
+          claimId: messageId,
+        });
+        attachmentData = {
+          attachmentUrl: privateAttachmentUrl(upload.id),
+          attachmentName: upload.originalName,
+          privateUploadId: upload.id,
+        };
+      } else if (remoteAttachment.url) {
+        attachmentData = {
+          attachmentUrl: remoteAttachment.url,
+          attachmentName:
+            typeof attachmentName === "string" ? attachmentName.slice(0, 255) : null,
+        };
+      }
+      const created = await tx.directMessage.create({
         data: {
+          id: messageId,
           conversationId,
           authorId: session.userId,
           content: content?.trim() || "",
-          attachmentUrl,
-          attachmentName,
+          ...attachmentData,
         },
         include: {
           author: { select: { id: true, username: true, avatar: true } },
         },
-      }),
-      prisma.conversation.update({
+      });
+      await tx.conversation.update({
         where: { id: conversationId },
         data: { updatedAt: new Date() },
-      }),
-    ]);
+      });
+      return created;
+    });
 
     return NextResponse.json({ message });
   } catch (err) {
+    if (err instanceof PrivateUploadClaimError) {
+      return NextResponse.json({ error: err.message }, { status: 400 });
+    }
     console.error("[Campfire] Failed to send DM:", err);
     return NextResponse.json({ error: "Database error" }, { status: 503 });
   }

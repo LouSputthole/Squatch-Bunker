@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { assertFeature } from "@/lib/features";
+import { requireMembership } from "@/lib/membership";
+import { memberHasPermission } from "@/lib/serverRoles";
+import { removeUnreferencedUpload } from "@/lib/messageRetention";
 
 // GET: list custom emoji for a server
 export async function GET(
@@ -12,6 +15,10 @@ export async function GET(
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
   const { serverId } = await params;
+
+  if (!(await requireMembership(serverId, session.userId))) {
+    return NextResponse.json({ error: "No permission" }, { status: 403 });
+  }
 
   const emojis = await prisma.customEmoji.findMany({
     where: { serverId },
@@ -40,11 +47,7 @@ export async function POST(
     return NextResponse.json({ error: "Name must be alphanumeric" }, { status: 400 });
   }
 
-  // Check permission (admin/owner/mod)
-  const member = await prisma.serverMember.findUnique({
-    where: { serverId_userId: { serverId, userId: session.userId } },
-  });
-  if (!member || !["owner", "admin", "mod"].includes(member.role)) {
+  if (!(await memberHasPermission(serverId, session.userId, "MANAGE_EMOJIS"))) {
     return NextResponse.json({ error: "No permission" }, { status: 403 });
   }
 
@@ -83,10 +86,7 @@ export async function DELETE(
   const emojiId = req.nextUrl.searchParams.get("id");
   if (!emojiId) return NextResponse.json({ error: "Emoji ID required" }, { status: 400 });
 
-  const member = await prisma.serverMember.findUnique({
-    where: { serverId_userId: { serverId, userId: session.userId } },
-  });
-  if (!member || !["owner", "admin", "mod"].includes(member.role)) {
+  if (!(await memberHasPermission(serverId, session.userId, "MANAGE_EMOJIS"))) {
     return NextResponse.json({ error: "No permission" }, { status: 403 });
   }
 
@@ -97,6 +97,7 @@ export async function DELETE(
   }
 
   await prisma.customEmoji.delete({ where: { id: emojiId } });
+  await removeUnreferencedUpload(emoji.url);
 
   return NextResponse.json({ deleted: true });
 }

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 import Link from "next/link";
 
 export default function RegisterPage() {
@@ -42,7 +43,7 @@ export default function RegisterPage() {
     <div className="min-h-screen flex items-center justify-center bg-[var(--bg)]">
       <div className="w-full max-w-md p-8 bg-[var(--panel)] rounded-lg border border-[var(--accent-2)]">
         <div className="flex flex-col items-center mb-6">
-          <img src="/Campfire-Logo.png" alt="Campfire" className="w-24 h-24 mb-3" />
+          <Image src="/Campfire-Logo.png" alt="Campfire" width={96} height={96} className="mb-3" priority />
           <h1 className="text-3xl font-bold text-[var(--text)] mb-1">
             Campfire
           </h1>
@@ -69,6 +70,7 @@ export default function RegisterPage() {
               onChange={(e) => setEmail(e.target.value)}
               className="w-full px-3 py-2 bg-[var(--panel-2)] text-[var(--text)] border border-[var(--accent-2)] rounded focus:outline-none focus:border-[var(--accent)]"
               required
+              maxLength={254}
             />
           </div>
 
@@ -83,6 +85,8 @@ export default function RegisterPage() {
               onChange={(e) => setUsername(e.target.value)}
               className="w-full px-3 py-2 bg-[var(--panel-2)] text-[var(--text)] border border-[var(--accent-2)] rounded focus:outline-none focus:border-[var(--accent)]"
               required
+              minLength={2}
+              maxLength={32}
             />
           </div>
 
@@ -97,7 +101,8 @@ export default function RegisterPage() {
               onChange={(e) => setPassword(e.target.value)}
               className="w-full px-3 py-2 bg-[var(--panel-2)] text-[var(--text)] border border-[var(--accent-2)] rounded focus:outline-none focus:border-[var(--accent)]"
               required
-              minLength={6}
+              minLength={8}
+              maxLength={128}
             />
           </div>
 

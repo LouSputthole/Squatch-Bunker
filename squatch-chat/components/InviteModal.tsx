@@ -8,7 +8,18 @@ interface InviteModalProps {
   memberCount: number;
   serverId: string;
   inviteCode: string;
+  inviteExpiresAt?: string | null;
+  inviteMaxUses?: number | null;
+  inviteUseCount?: number;
+  inviteRevokedAt?: string | null;
   isOwner: boolean;
+  onInviteUpdated?: (invite: {
+    inviteCode: string;
+    inviteExpiresAt: string | null;
+    inviteMaxUses: number | null;
+    inviteUseCount: number;
+    inviteRevokedAt: string | null;
+  }) => void;
   onClose: () => void;
 }
 
@@ -18,18 +29,58 @@ export default function InviteModal({
   memberCount,
   serverId,
   inviteCode: initialInviteCode,
+  inviteExpiresAt: initialInviteExpiresAt,
+  inviteMaxUses: initialInviteMaxUses,
+  inviteUseCount: initialInviteUseCount = 0,
+  inviteRevokedAt: initialInviteRevokedAt,
   isOwner,
+  onInviteUpdated,
   onClose,
 }: InviteModalProps) {
   const [origin, setOrigin] = useState("");
   const [inviteCode, setInviteCode] = useState(initialInviteCode);
+  const [inviteExpiresAt, setInviteExpiresAt] = useState(initialInviteExpiresAt ?? null);
+  const [inviteMaxUses, setInviteMaxUses] = useState(initialInviteMaxUses ?? null);
+  const [inviteUseCount, setInviteUseCount] = useState(initialInviteUseCount);
+  const [inviteRevokedAt, setInviteRevokedAt] = useState(initialInviteRevokedAt ?? null);
+  const [expiryPreset, setExpiryPreset] = useState(
+    initialInviteExpiresAt ? "keep" : "never",
+  );
+  const [expired, setExpired] = useState(false);
+  const [maxUsesInput, setMaxUsesInput] = useState(
+    initialInviteMaxUses?.toString() ?? "",
+  );
   const [copied, setCopied] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
+  const [revoking, setRevoking] = useState(false);
   const [regenError, setRegenError] = useState("");
 
   useEffect(() => {
-    setOrigin(window.location.origin);
+    const timer = window.setTimeout(() => setOrigin(window.location.origin), 0);
+    return () => window.clearTimeout(timer);
   }, []);
+
+  useEffect(() => {
+    const refresh = () => {
+      const isExpired =
+        inviteExpiresAt !== null &&
+        new Date(inviteExpiresAt).getTime() <= Date.now();
+      setExpired(isExpired);
+      if (isExpired) {
+        setExpiryPreset((current) => (current === "keep" ? "never" : current));
+      }
+    };
+    const immediate = window.setTimeout(refresh, 0);
+    const remainingMs = inviteExpiresAt
+      ? new Date(inviteExpiresAt).getTime() - Date.now()
+      : -1;
+    const expiryTimer =
+      remainingMs > 0 ? window.setTimeout(refresh, remainingMs + 25) : undefined;
+    return () => {
+      window.clearTimeout(immediate);
+      if (expiryTimer !== undefined) window.clearTimeout(expiryTimer);
+    };
+  }, [inviteExpiresAt]);
 
   // Close on Escape
   const handleKeyDown = useCallback(
@@ -45,8 +96,50 @@ export default function InviteModal({
   }, [handleKeyDown]);
 
   const inviteUrl = origin ? `${origin}/join/${inviteCode}` : `/join/${inviteCode}`;
+  const exhausted =
+    inviteMaxUses !== null && inviteUseCount >= inviteMaxUses;
+  const inviteStatus = inviteRevokedAt
+    ? "Revoked"
+    : expired
+      ? "Expired"
+      : exhausted
+        ? "Use limit reached"
+        : "Active";
+  const inviteActive = inviteStatus === "Active";
+  const remainingUses =
+    inviteMaxUses === null ? null : Math.max(0, inviteMaxUses - inviteUseCount);
+
+  function applyInviteUpdate(server: {
+    inviteCode: string;
+    inviteExpiresAt: string | null;
+    inviteMaxUses: number | null;
+    inviteUseCount: number;
+    inviteRevokedAt: string | null;
+  }) {
+    const next = {
+      inviteCode: server.inviteCode,
+      inviteExpiresAt: server.inviteExpiresAt ?? null,
+      inviteMaxUses: server.inviteMaxUses ?? null,
+      inviteUseCount: server.inviteUseCount ?? 0,
+      inviteRevokedAt: server.inviteRevokedAt ?? null,
+    };
+    setInviteCode(next.inviteCode);
+    setInviteExpiresAt(next.inviteExpiresAt);
+    setInviteMaxUses(next.inviteMaxUses);
+    setInviteUseCount(next.inviteUseCount);
+    setInviteRevokedAt(next.inviteRevokedAt);
+    setMaxUsesInput(next.inviteMaxUses?.toString() ?? "");
+    setExpiryPreset(
+      next.inviteExpiresAt &&
+        new Date(next.inviteExpiresAt).getTime() > Date.now()
+        ? "keep"
+        : "never",
+    );
+    onInviteUpdated?.(next);
+  }
 
   async function handleCopy() {
+    if (!inviteActive) return;
     try {
       await navigator.clipboard.writeText(inviteUrl);
       setCopied(true);
@@ -58,17 +151,49 @@ export default function InviteModal({
 
   async function handleRegenerate() {
     if (regenerating) return;
+    const parsedMaxUses =
+      maxUsesInput.trim() === "" ? null : Number(maxUsesInput);
+    if (
+      parsedMaxUses !== null &&
+      (!Number.isInteger(parsedMaxUses) ||
+        parsedMaxUses < 1 ||
+        parsedMaxUses > 100_000)
+    ) {
+      setRegenError("Use limit must be a whole number from 1 to 100,000");
+      return;
+    }
+
+    const expirySeconds: Record<string, number | null | undefined> = {
+      keep: undefined,
+      never: null,
+      hour: 60 * 60,
+      day: 24 * 60 * 60,
+      week: 7 * 24 * 60 * 60,
+      month: 30 * 24 * 60 * 60,
+    };
+    const payload: {
+      regenerateInvite: true;
+      inviteMaxUses: number | null;
+      inviteExpiresInSeconds?: number | null;
+    } = {
+      regenerateInvite: true,
+      inviteMaxUses: parsedMaxUses,
+    };
+    if (expirySeconds[expiryPreset] !== undefined) {
+      payload.inviteExpiresInSeconds = expirySeconds[expiryPreset];
+    }
+
     setRegenerating(true);
     setRegenError("");
     try {
       const res = await fetch(`/api/servers/${serverId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ regenerateInvite: true }),
+        body: JSON.stringify(payload),
       });
       if (res.ok) {
         const data = await res.json();
-        setInviteCode(data.server.inviteCode);
+        applyInviteUpdate(data.server);
       } else {
         const data = await res.json();
         setRegenError(data.error || "Failed to regenerate");
@@ -77,6 +202,33 @@ export default function InviteModal({
       setRegenError("Something went wrong");
     } finally {
       setRegenerating(false);
+    }
+  }
+
+  async function handleRevoke() {
+    if (revoking || !inviteActive) return;
+    if (!window.confirm("Revoke this invite link? Existing members keep access.")) {
+      return;
+    }
+
+    setRevoking(true);
+    setRegenError("");
+    try {
+      const res = await fetch(`/api/servers/${serverId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ revokeInvite: true }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setRegenError(data.error || "Failed to revoke invite");
+        return;
+      }
+      applyInviteUpdate(data.server);
+    } catch {
+      setRegenError("Something went wrong");
+    } finally {
+      setRevoking(false);
     }
   }
 
@@ -103,6 +255,7 @@ export default function InviteModal({
             {/* Server icon */}
             <div className="shrink-0">
               {serverIcon ? (
+                // eslint-disable-next-line @next/next/no-img-element -- server icons may be user-hosted, data, or blob URLs
                 <img
                   src={serverIcon}
                   alt={serverName}
@@ -144,7 +297,8 @@ export default function InviteModal({
               />
               <button
                 onClick={handleCopy}
-                className={`shrink-0 px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
+                disabled={!inviteActive}
+                className={`shrink-0 px-4 py-2 rounded-lg text-sm font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                   copied
                     ? "bg-green-600/30 text-green-400 border border-green-600/40"
                     : "bg-[var(--accent-2)] text-[var(--text)] hover:bg-[var(--accent)] border border-transparent"
@@ -155,18 +309,84 @@ export default function InviteModal({
             </div>
           </div>
 
+          <div className="rounded-lg border border-[var(--accent-2)]/20 bg-[var(--panel-2)]/40 px-3 py-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <span
+                className={`text-xs font-semibold ${
+                  inviteActive ? "text-green-400" : "text-[var(--danger)]"
+                }`}
+              >
+                {inviteStatus}
+              </span>
+              <span className="text-xs text-[var(--muted)]">
+                {inviteMaxUses === null
+                  ? `${inviteUseCount} uses`
+                  : `${inviteUseCount}/${inviteMaxUses} uses`}
+              </span>
+            </div>
+            <p className="mt-1 text-xs text-[var(--muted)]">
+              {inviteExpiresAt
+                ? `Expires ${new Date(inviteExpiresAt).toLocaleString()}`
+                : "Never expires"}
+              {remainingUses !== null && ` · ${remainingUses} remaining`}
+            </p>
+          </div>
+
           {isOwner && (
-            <div className="pt-1">
+            <div className="pt-1 space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <label className="text-xs text-[var(--muted)]">
+                  New link expires
+                  <select
+                    value={expiryPreset}
+                    onChange={(e) => setExpiryPreset(e.target.value)}
+                    className="mt-1 w-full rounded-lg border border-[var(--accent-2)]/30 bg-[var(--panel-2)] px-2 py-2 text-sm text-[var(--text)]"
+                  >
+                    {inviteExpiresAt && <option value="keep">Keep current</option>}
+                    <option value="never">Never</option>
+                    <option value="hour">1 hour</option>
+                    <option value="day">1 day</option>
+                    <option value="week">7 days</option>
+                    <option value="month">30 days</option>
+                  </select>
+                </label>
+                <label className="text-xs text-[var(--muted)]">
+                  Maximum uses
+                  <input
+                    type="number"
+                    min={1}
+                    max={100000}
+                    step={1}
+                    value={maxUsesInput}
+                    onChange={(e) => setMaxUsesInput(e.target.value)}
+                    placeholder="Unlimited"
+                    className="mt-1 w-full rounded-lg border border-[var(--accent-2)]/30 bg-[var(--panel-2)] px-2 py-2 text-sm text-[var(--text)]"
+                  />
+                </label>
+              </div>
               {regenError && (
                 <p className="text-xs text-[var(--danger)] mb-2">{regenError}</p>
               )}
-              <button
-                onClick={handleRegenerate}
-                disabled={regenerating}
-                className="w-full px-3 py-2 text-sm text-[var(--muted)] bg-[var(--panel-2)]/50 border border-[var(--accent-2)]/20 rounded-lg hover:text-[var(--text)] hover:border-[var(--accent-2)]/50 transition-colors disabled:opacity-40"
-              >
-                {regenerating ? "Regenerating..." : "Regenerate Link"}
-              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={handleRegenerate}
+                  disabled={regenerating || revoking}
+                  className="flex-1 px-3 py-2 text-sm text-[var(--text)] bg-[var(--accent-2)]/30 border border-[var(--accent-2)]/40 rounded-lg hover:bg-[var(--accent-2)]/50 transition-colors disabled:opacity-40"
+                >
+                  {regenerating
+                    ? "Generating..."
+                    : inviteActive
+                      ? "Generate New Link"
+                      : "Restore With New Link"}
+                </button>
+                <button
+                  onClick={handleRevoke}
+                  disabled={!inviteActive || regenerating || revoking}
+                  className="px-3 py-2 text-sm text-[var(--danger)] bg-[var(--panel-2)]/50 border border-[var(--danger)]/30 rounded-lg hover:bg-[var(--danger)]/10 transition-colors disabled:opacity-40"
+                >
+                  {revoking ? "Revoking..." : "Revoke"}
+                </button>
+              </div>
             </div>
           )}
         </div>

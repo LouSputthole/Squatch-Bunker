@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import Image from "next/image";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -70,7 +71,14 @@ export default function LoginPage() {
     <div className="min-h-screen flex items-center justify-center bg-[var(--bg)]">
       <div className="w-full max-w-md p-8 bg-[var(--panel)] rounded-lg border border-[var(--accent-2)]">
         <div className="flex flex-col items-center mb-6">
-          <img src="/Campfire-Icon.png" alt="Campfire" className="w-28 h-28 mb-3" />
+          <Image
+            src="/Campfire-Icon.png"
+            alt="Campfire"
+            width={112}
+            height={112}
+            className="w-28 h-28 mb-3"
+            priority
+          />
           <h1 className="sr-only">Campfire</h1>
           <p className="text-[var(--muted)] text-sm">
             Welcome back to the fire
@@ -140,6 +148,8 @@ export default function LoginPage() {
             </div>
 
             <div className="flex flex-col gap-2">
+              {/* OAuth initiation must be a full document navigation so provider redirects and cookies bypass the client router. */}
+              {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
               <a
                 href="/api/auth/oauth/github"
                 className="flex items-center justify-center gap-2 w-full py-2 bg-[#24292e] text-white rounded hover:bg-[#2f363d] transition-colors text-sm font-medium"
@@ -149,6 +159,8 @@ export default function LoginPage() {
                 </svg>
                 Continue with GitHub
               </a>
+              {/* OAuth initiation must be a full document navigation so provider redirects and cookies bypass the client router. */}
+              {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
               <a
                 href="/api/auth/oauth/google"
                 className="flex items-center justify-center gap-2 w-full py-2 bg-white text-[#333] rounded hover:bg-gray-100 transition-colors text-sm font-medium border border-gray-300"

@@ -67,15 +67,6 @@ else
   exit 1
 fi
 
-# Check pnpm
-if check_command pnpm; then
-  log_info "pnpm found: $(pnpm -v)"
-else
-  log_warn "pnpm not found — installing it now"
-  npm install -g pnpm
-  log_info "pnpm installed: $(pnpm -v)"
-fi
-
 # Check PostgreSQL
 POSTGRES_AVAILABLE=false
 if check_command psql; then
@@ -115,7 +106,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 log_step "Installing dependencies..."
-pnpm install
+npm install
 
 # ── Configure environment ─────────────────────────────────────
 
@@ -138,7 +129,7 @@ fi
 # ── Set up database ───────────────────────────────────────────
 
 log_step "Generating Prisma client..."
-npx prisma generate
+npm run db:generate
 
 # Try to create database and run migrations
 if [ "$POSTGRES_AVAILABLE" = true ]; then
@@ -158,19 +149,19 @@ if [ "$POSTGRES_AVAILABLE" = true ]; then
   fi
 
   log_info "Running database migrations..."
-  npx prisma migrate dev --name init 2>/dev/null || {
+  npm run db:migrate:dev 2>/dev/null || {
     log_warn "Migration failed — you may need to configure DATABASE_URL in .env"
-    log_info "Edit .env, set your DATABASE_URL, then run: pnpm db:migrate"
+    log_info "Edit .env, set your DATABASE_URL, then run: npm run db:migrate"
   }
 else
   log_warn "Skipping database setup (PostgreSQL not available)"
-  log_info "After installing PostgreSQL, run: pnpm db:migrate"
+  log_info "After installing PostgreSQL, run: npm run db:migrate"
 fi
 
 # ── Build the app ─────────────────────────────────────────────
 
 log_step "Building Campfire..."
-pnpm build 2>&1 || {
+npm run build 2>&1 || {
   log_warn "Build had warnings (this is usually fine for first run)"
 }
 
@@ -188,11 +179,11 @@ echo "  🌲 Starting Campfire..."
 echo ""
 
 # Start realtime server in background
-pnpm dev:realtime &
+npm run dev:realtime &
 REALTIME_PID=$!
 
 # Start Next.js
-pnpm dev &
+npm run dev &
 NEXT_PID=$!
 
 echo ""
@@ -245,7 +236,7 @@ echo -e "    ${CYAN}./stop.sh${NC}  or  ${CYAN}Ctrl+C${NC}"
 echo ""
 if [ "$POSTGRES_AVAILABLE" = false ]; then
   echo -e "  ${YELLOW}⚠ Remember to set up PostgreSQL and run:${NC}"
-  echo -e "    ${CYAN}pnpm db:migrate${NC}"
+  echo -e "    ${CYAN}npm run db:migrate${NC}"
   echo ""
 fi
 echo -e "  ${BOLD}Welcome to the woods.${NC}"

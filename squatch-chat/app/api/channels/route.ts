@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
+import { normalizeVoiceRoomConfig } from "@/lib/voiceRoomConfig";
 
 export async function POST(request: Request) {
   const session = await getSession();
@@ -7,7 +8,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
 
-  const { serverId, name, type, description, category } = await request.json();
+  const { serverId, name, type, description, category, roomMode, roomScene } = await request.json();
   if (!serverId || !name || !name.trim()) {
     return NextResponse.json(
       { error: "Server ID and channel name are required" },
@@ -17,6 +18,15 @@ export async function POST(request: Request) {
 
   const channelType = type === "voice" ? "voice" : "text";
 
+  const roomConfig = channelType === "voice"
+    ? normalizeVoiceRoomConfig({ mode: roomMode, scene: roomScene })
+    : { roomMode: "hangout" as const, roomScene: "campfire" as const };
+  if (!roomConfig) {
+    return NextResponse.json(
+      { error: "Invalid voice-room mode or scene" },
+      { status: 400 },
+    );
+  }
   try {
     const { prisma } = await import("@/lib/db");
 
@@ -42,9 +52,13 @@ export async function POST(request: Request) {
         type: channelType,
         ...(description?.trim() ? { description: description.trim() } : {}),
         ...(category?.trim() ? { category: category.trim() } : {}),
+        roomMode: roomConfig.roomMode,
+        roomScene: roomConfig.roomScene,
       },
       select: {
         id: true,
+        roomMode: true,
+        roomScene: true,
         name: true,
         type: true,
         category: true,

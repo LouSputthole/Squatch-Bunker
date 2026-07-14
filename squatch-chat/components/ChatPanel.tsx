@@ -6,12 +6,15 @@ import { truncateName } from "@/lib/utils";
 import { sounds } from "@/lib/sounds";
 import MessageBubble from "./MessageBubble";
 import PinnedMessagesPanel from "./PinnedMessagesPanel";
+import CampJournalPanel from "./CampJournalPanel";
+import CreatePollModal from "./CreatePollModal";
+import type { PollData } from "./PollCard";
 import EmojiPicker from "./EmojiPicker";
 import GifPicker from "./GifPicker";
 import SlashCommandMenu, { SLASH_COMMANDS } from "./SlashCommandMenu";
 import MentionAutocomplete from "./MentionAutocomplete";
-import LinkPreviews from "./LinkPreview";
 import { checkAutoMod } from "./AutoModSettings";
+import { VoiceNoteRecorder } from "./VoiceNoteRecorder";
 
 // ── Formatting toolbar ────────────────────────────────────────────────────────
 
@@ -159,6 +162,7 @@ interface Message {
   author: { id: string; username: string; avatar?: string | null };
   reactions?: Record<string, ReactionGroup>;
   replyTo?: ReplySnippet | null;
+  poll?: PollData | null;
   pending?: boolean;
   isSystem?: boolean;
 }
@@ -180,9 +184,14 @@ interface ChatPanelProps {
   canPin?: boolean;
   canEditTopic?: boolean;
   serverId?: string;
+  blockedUserIds?: ReadonlySet<string>;
 }
 
-export default function ChatPanel({
+export default function ChatPanel(props: ChatPanelProps) {
+  return <ChatPanelContent key={props.channelId} {...props} />;
+}
+
+function ChatPanelContent({
   channelId,
   channelName,
   channelTopic,
@@ -193,30 +202,60 @@ export default function ChatPanel({
   canPin,
   canEditTopic,
   serverId,
+  blockedUserIds,
 }: ChatPanelProps) {
+  const topicBaseline = channelTopic ?? "";
   const [messages, setMessages] = useState<Message[]>([]);
+  const [bookmarkedMessageIds, setBookmarkedMessageIds] = useState<Set<string>>(new Set());
   const [newMessage, setNewMessage] = useState("");
   const [loading, setLoading] = useState(true);
   const [typingUsers, setTypingUsers] = useState<Map<string, string>>(new Map());
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
   const [firstUnreadId, setFirstUnreadId] = useState<string | null>(null);
   const [showPinnedPanel, setShowPinnedPanel] = useState(false);
+  const [showJournalPanel, setShowJournalPanel] = useState(false);
+  const [showPollModal, setShowPollModal] = useState(false);
   const [threadParent, setThreadParent] = useState<{ id: string; author: { id: string; username: string } } | null>(null);
   const [threadMessages, setThreadMessages] = useState<Message[]>([]);
   const [threadInput, setThreadInput] = useState("");
   const [threadLoading, setThreadLoading] = useState(false);
-  const [topic, setTopic] = useState(channelTopic ?? "");
-  const [editingTopic, setEditingTopic] = useState(false);
+  const [topicState, setTopicState] = useState(() => ({
+    source: topicBaseline,
+    value: topicBaseline,
+    editing: false,
+  }));
+  const activeTopicState = topicState.source === topicBaseline
+    ? topicState
+    : { source: topicBaseline, value: topicBaseline, editing: false };
+  const topic = activeTopicState.value;
+  const editingTopic = activeTopicState.editing;
+
+  function setTopic(value: string) {
+    setTopicState((current) => {
+      const active = current.source === topicBaseline
+        ? current
+        : { source: topicBaseline, value: topicBaseline, editing: false };
+      return { ...active, value };
+    });
+  }
+
+  function setEditingTopic(editing: boolean) {
+    setTopicState((current) => {
+      const active = current.source === topicBaseline
+        ? current
+        : { source: topicBaseline, value: topicBaseline, editing: false };
+      return { ...active, editing };
+    });
+  }
   const [topicDraft, setTopicDraft] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messageRefs = useRef<Map<string, HTMLDivElement>>(new Map());
-  const prevChannelRef = useRef<string | null>(null);
   const lastReadIdRef = useRef<string | null>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isTypingRef = useRef(false);
   const userTypingTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const [uploadProgress, setUploadProgress] = useState(0);
-  const uploading = uploadProgress > 0 && uploadProgress < 100;
+  const uploading = uploadProgress > 0;
   const [isDragging, setIsDragging] = useState(false);
   const [multiFileToast, setMultiFileToast] = useState(false);
   const [slowRemaining, setSlowRemaining] = useState(0);
@@ -264,43 +303,61 @@ export default function ChatPanel({
       .catch(() => {});
   }, [serverId]);
 
-  // Sync topic when channel changes
   useEffect(() => {
-    setTopic(channelTopic ?? "");
-    setEditingTopic(false);
-  }, [channelId, channelTopic]);
+    const controller = new AbortController();
+    fetch("/api/bookmarks", { signal: controller.signal })
+      .then((response) => {
+        if (!response.ok) throw new Error("Failed to load bookmarks");
+        return response.json();
+      })
+      .then((data: { bookmarks?: Array<{ messageId: string }> }) => {
+        setBookmarkedMessageIds(
+          new Set((data.bookmarks || []).map((bookmark) => bookmark.messageId)),
+        );
+      })
+      .catch((error: unknown) => {
+        if (!(error instanceof DOMException && error.name === "AbortError")) {
+          console.error("[Campfire] Failed to load bookmarks", error);
+        }
+      });
+
+    return () => controller.abort();
+  }, []);
 
   // Load message history
   useEffect(() => {
-    setLoading(true);
-    setMessages([]);
-    setTypingUsers(new Map());
-    setReplyingTo(null);
-    setFirstUnreadId(null);
-    lastReadIdRef.current = null;
+    const controller = new AbortController();
+    let scrollTimer: ReturnType<typeof setTimeout> | null = null;
 
-    fetch(`/api/messages?channelId=${channelId}`)
-      .then((res) => res.json())
+    fetch(`/api/messages?channelId=${channelId}`, { signal: controller.signal })
+      .then((res) => {
+        if (!res.ok) throw new Error("Failed to load messages");
+        return res.json();
+      })
       .then((data) => {
         const msgs: Message[] = data.messages || [];
         setMessages(msgs);
         lastReadIdRef.current = msgs.length > 0 ? msgs[msgs.length - 1].id : null;
         setLoading(false);
-        setTimeout(scrollToBottom, 100);
+        scrollTimer = setTimeout(scrollToBottom, 100);
       })
-      .catch(() => setLoading(false));
+      .catch((error: unknown) => {
+        if (!(error instanceof DOMException && error.name === "AbortError")) {
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      controller.abort();
+      if (scrollTimer) clearTimeout(scrollTimer);
+    };
   }, [channelId, scrollToBottom]);
 
   // Socket.IO realtime
   useEffect(() => {
     const socket = getSocket();
-
-    if (prevChannelRef.current) {
-      socket.emit("channel:leave", prevChannelRef.current);
-    }
-
     socket.emit("channel:join", channelId);
-    prevChannelRef.current = channelId;
+
 
     function handleChannelMessage(message: Message) {
       // Mark first incoming message as the unread boundary (only for others' messages)
@@ -349,6 +406,12 @@ export default function ChatPanel({
       );
     }
 
+    function handlePollUpdate(poll: PollData) {
+      setMessages((current) =>
+        current.map((message) => message.poll?.id === poll.id ? { ...message, poll } : message),
+      );
+    }
+
     function handleTyping(data: {
       channelId: string;
       userId: string;
@@ -392,6 +455,7 @@ export default function ChatPanel({
     socket.on(`message:edited:${channelId}`, handleMessageEdited);
     socket.on(`message:deleted:${channelId}`, handleMessageDeleted);
     socket.on(`message:reacted:${channelId}`, handleReactionUpdate);
+    socket.on(`poll:updated:${channelId}`, handlePollUpdate);
     socket.on("typing:update", handleTyping);
 
     return () => {
@@ -399,6 +463,8 @@ export default function ChatPanel({
       socket.off(`message:edited:${channelId}`, handleMessageEdited);
       socket.off(`message:deleted:${channelId}`, handleMessageDeleted);
       socket.off(`message:reacted:${channelId}`, handleReactionUpdate);
+      socket.off(`poll:updated:${channelId}`, handlePollUpdate);
+      socket.emit("channel:leave", channelId);
       socket.off("typing:update", handleTyping);
     };
   }, [channelId, scrollToBottom, currentUserId]);
@@ -451,6 +517,68 @@ export default function ChatPanel({
         setTranslations((prev) => new Map(prev).set(messageId, data.translatedText));
       }
     } catch { /* ignore */ }
+  }
+
+  async function handleBookmark(messageId: string, bookmarked: boolean) {
+    try {
+      const response = await fetch("/api/bookmarks", {
+        method: bookmarked ? "POST" : "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messageId }),
+      });
+      if (!response.ok) {
+        const body = (await response.json().catch(() => null)) as {
+          error?: string;
+        } | null;
+        throw new Error(body?.error || "Could not update bookmark");
+      }
+
+      setBookmarkedMessageIds((current) => {
+        const next = new Set(current);
+        if (bookmarked) {
+          next.add(messageId);
+        } else {
+          next.delete(messageId);
+        }
+        return next;
+      });
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Could not update bookmark");
+    }
+  }
+
+  async function handleJournal(messageId: string) {
+    if (!serverId) return;
+    const note = window.prompt("Optional private note for your Camp Journal:", "");
+    if (note === null) return;
+    const response = await fetch(`/api/servers/${serverId}/journal`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messageId, note }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      alert(data.error || "Could not save this keepsake");
+      return;
+    }
+    setShowJournalPanel(true);
+  }
+
+  function handlePollCreated(value: unknown) {
+    const message = value as Message;
+    if (!message?.id || !message.author) return;
+    setMessages((current) => current.some((item) => item.id === message.id) ? current : [...current, message]);
+    getSocket().emit("message:send", { channelId, message });
+    setTimeout(scrollToBottom, 50);
+  }
+
+  function jumpFromJournal(sourceChannelId: string, messageId: string) {
+    if (sourceChannelId !== channelId) {
+      alert("Open the source channel to jump to this keepsake.");
+      return;
+    }
+    scrollToMessage(messageId);
+    setShowJournalPanel(false);
   }
 
   async function handleSend(e: React.FormEvent) {
@@ -682,23 +810,70 @@ export default function ChatPanel({
     }
   }
 
-  function uploadWithProgress(formData: FormData, onProgress: (pct: number) => void): Promise<{ url: string; name: string }> {
+  function uploadWithProgress(
+    formData: FormData,
+    onProgress: (pct: number) => void,
+  ): Promise<{ attachmentId: string; url: string; name: string }> {
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
       xhr.upload.addEventListener("progress", (e) => {
         if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
       });
       xhr.addEventListener("load", () => {
+        let response: { attachmentId?: string; url?: string; name?: string; error?: string } = {};
+        try {
+          response = JSON.parse(xhr.responseText);
+        } catch {
+          // Fall through to the generic upload error below.
+        }
         if (xhr.status >= 200 && xhr.status < 300) {
-          resolve(JSON.parse(xhr.responseText));
+          if (response.attachmentId && response.url && response.name) {
+            resolve({ attachmentId: response.attachmentId, url: response.url, name: response.name });
+          } else {
+            reject(new Error("Upload response was incomplete"));
+          }
         } else {
-          reject(new Error("Upload failed"));
+          reject(new Error(response.error || "Upload failed"));
         }
       });
       xhr.addEventListener("error", () => reject(new Error("Upload failed")));
-      xhr.open("POST", "/api/upload");
+      xhr.open("POST", "/api/attachments");
       xhr.send(formData);
     });
+  }
+
+  async function handleVoiceNoteSend(file: File): Promise<void> {
+    setUploadProgress(1);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const { attachmentId } = await uploadWithProgress(formData, (pct) =>
+        setUploadProgress(pct),
+      );
+
+      const res = await fetch("/api/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          channelId,
+          content: "",
+          attachmentId,
+        }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as {
+          error?: string;
+        } | null;
+        throw new Error(body?.error || "Campfire could not send that voice note.");
+      }
+
+      const { message } = await res.json();
+      setMessages((prev) => [...prev, message]);
+      setTimeout(scrollToBottom, 50);
+      getSocket().emit("message:send", { channelId, message });
+    } finally {
+      setUploadProgress(0);
+    }
   }
 
   async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
@@ -715,14 +890,14 @@ export default function ChatPanel({
     try {
       const formData = new FormData();
       formData.append("file", file);
-      let uploadResult: { url: string; name: string };
+      let uploadResult: { attachmentId: string; url: string; name: string };
       try {
         uploadResult = await uploadWithProgress(formData, (pct) => setUploadProgress(pct));
       } catch {
         alert("Upload failed");
         return;
       }
-      const { url, name } = uploadResult;
+      const { attachmentId } = uploadResult;
 
       // Create message with attachment
       const res = await fetch("/api/messages", {
@@ -731,8 +906,7 @@ export default function ChatPanel({
         body: JSON.stringify({
           channelId,
           content: "",
-          attachmentUrl: url,
-          attachmentName: name,
+          attachmentId,
         }),
       });
 
@@ -759,18 +933,18 @@ export default function ChatPanel({
     try {
       const formData = new FormData();
       formData.append("file", file);
-      let uploadResult: { url: string; name: string };
+      let uploadResult: { attachmentId: string; url: string; name: string };
       try {
         uploadResult = await uploadWithProgress(formData, (pct) => setUploadProgress(pct));
       } catch {
         alert("Upload failed");
         return;
       }
-      const { url, name } = uploadResult;
+      const { attachmentId } = uploadResult;
       const res = await fetch("/api/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ channelId, content: "", attachmentUrl: url, attachmentName: name }),
+        body: JSON.stringify({ channelId, content: "", attachmentId }),
       });
       if (res.ok) {
         const { message } = await res.json();
@@ -917,6 +1091,24 @@ export default function ChatPanel({
           </button>
         )}
         <button
+          onClick={() => setShowPollModal(true)}
+          className="text-xs px-2 py-1 rounded text-[var(--muted)] hover:text-[var(--accent-2)] transition-colors"
+          title="Start a Camp Vote"
+          aria-label="Start a Camp Vote"
+        >
+          Vote
+        </button>
+        {serverId && (
+          <button
+            onClick={() => setShowJournalPanel((open) => !open)}
+            className={`text-xs px-2 py-1 rounded transition-colors ${showJournalPanel ? "bg-[var(--accent-2)]/15 text-[var(--accent-2)]" : "text-[var(--muted)] hover:text-[var(--accent-2)]"}`}
+            title="Camp Journal"
+            aria-label="Open Camp Journal"
+          >
+            Journal
+          </button>
+        )}
+        <button
           onClick={() => setShowPinnedPanel((p) => !p)}
           className={`text-xs px-2 py-1 rounded transition-colors ${showPinnedPanel ? "bg-yellow-500/20 text-yellow-400" : "text-[var(--muted)] hover:text-yellow-400"}`}
           title="Pinned messages"
@@ -942,7 +1134,7 @@ export default function ChatPanel({
         ) : (
           messages.filter((m) => !m.parentMessageId).map((msg) => (
             <div
-              key={msg.id}
+              key={`${msg.id}:${blockedUserIds?.has(msg.author.id) ? "blocked" : "visible"}`}
               ref={(el) => { if (el) messageRefs.current.set(msg.id, el); else messageRefs.current.delete(msg.id); }}
             >
               {firstUnreadId === msg.id && (
@@ -964,8 +1156,13 @@ export default function ChatPanel({
                 onScrollToMessage={scrollToMessage}
                 onPin={handlePin}
                 onThread={openThread}
+                onBookmark={handleBookmark}
+                isBookmarked={bookmarkedMessageIds.has(msg.id)}
+                onJournal={serverId ? handleJournal : undefined}
                 onTranslate={handleTranslate}
                 translatedText={translations.get(msg.id) ?? null}
+                blocked={blockedUserIds?.has(msg.author.id)}
+                replyAuthorBlocked={!!msg.replyTo && blockedUserIds?.has(msg.replyTo.author.id)}
               />
             </div>
           ))
@@ -1104,9 +1301,14 @@ export default function ChatPanel({
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/*,video/*,.pdf,.txt,.zip,.doc,.docx,.mp3,.wav"
+            accept="image/*,video/*,.pdf,.txt,.zip,.doc,.docx,.mp3,.wav,.webm,.ogg,.m4a"
             onChange={handleFileUpload}
             className="hidden"
+          />
+          <VoiceNoteRecorder
+            key={channelId}
+            disabled={uploading || slowRemaining > 0}
+            onSend={handleVoiceNoteSend}
           />
           <label htmlFor="message-input" className="sr-only">Message #{channelName}</label>
           <textarea
@@ -1201,6 +1403,15 @@ export default function ChatPanel({
             setShowPinnedPanel(false);
           }}
           onUnpin={(messageId) => handlePin(messageId, false)}
+          blockedUserIds={blockedUserIds}
+        />
+      )}
+
+      {showJournalPanel && serverId && (
+        <CampJournalPanel
+          serverId={serverId}
+          onClose={() => setShowJournalPanel(false)}
+          onJumpToMessage={jumpFromJournal}
         />
       )}
 
@@ -1212,7 +1423,7 @@ export default function ChatPanel({
             <button onClick={() => setThreadParent(null)} className="text-[var(--muted)] hover:text-[var(--text)] text-lg leading-none" aria-label="Close thread">&times;</button>
           </div>
           <div className="px-3 py-2 border-b border-[var(--accent-2)]/10 text-xs text-[var(--muted)]">
-            Reply to <span className="text-[var(--text)] font-medium">{threadParent.author.username}</span>
+            Reply to <span className="text-[var(--text)] font-medium">{blockedUserIds?.has(threadParent.author.id) ? "blocked user" : threadParent.author.username}</span>
           </div>
           <div className="flex-1 overflow-y-auto px-2 py-2 space-y-1">
             {threadLoading ? (
@@ -1222,7 +1433,7 @@ export default function ChatPanel({
             ) : (
               threadMessages.map((msg) => (
                 <MessageBubble
-                  key={msg.id}
+                  key={`${msg.id}:${blockedUserIds?.has(msg.author.id) ? "blocked" : "visible"}`}
                   message={msg}
                   isOwn={msg.author.id === currentUserId}
                   currentUserId={currentUserId}
@@ -1232,6 +1443,11 @@ export default function ChatPanel({
                     setThreadMessages((prev) => prev.filter((m) => m.id !== id));
                   }}
                   onReact={handleReact}
+                  onBookmark={handleBookmark}
+                  isBookmarked={bookmarkedMessageIds.has(msg.id)}
+                  onJournal={serverId ? handleJournal : undefined}
+                  blocked={blockedUserIds?.has(msg.author.id)}
+                  replyAuthorBlocked={!!msg.replyTo && blockedUserIds?.has(msg.replyTo.author.id)}
                 />
               ))
             )}
@@ -1258,6 +1474,13 @@ export default function ChatPanel({
             </div>
           </form>
         </div>
+      )}
+      {showPollModal && (
+        <CreatePollModal
+          channelId={channelId}
+          onClose={() => setShowPollModal(false)}
+          onCreated={handlePollCreated}
+        />
       )}
     </div>
   );

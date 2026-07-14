@@ -75,6 +75,7 @@ describe.runIf(process.env.LOAD_TEST === "1")("load sanity", () => {
     await new Promise<void>((r) => io.close(() => r()));
     await new Promise<void>((r) => httpServer.close(() => r()));
     await prisma.serverMember.deleteMany({ where: { userId: { startsWith: "load-user-" } } });
+    await prisma.message.deleteMany({ where: { channelId } });
     await prisma.channel.deleteMany({ where: { name: "general", server: { name: "load" } } });
     await prisma.server.deleteMany({ where: { name: "load" } });
     await prisma.user.deleteMany({ where: { username: { startsWith: "load_" } } });
@@ -109,9 +110,17 @@ describe.runIf(process.env.LOAD_TEST === "1")("load sanity", () => {
     // Probe: one message must reach every OTHER client (broadcast excludes
     // the sender) — proves all room joins actually landed.
     const t1 = Date.now();
+    const probeMessage = await prisma.message.create({
+      data: {
+        channelId,
+        authorId: "load-user-0",
+        content: "probe",
+      },
+    });
+
     sockets[0].emit("message:send", {
       channelId,
-      message: { id: "probe", content: "probe", createdAt: new Date().toISOString(), author: { id: "x", username: "x" } },
+      message: { id: probeMessage.id },
     });
     await waitUntil(() => received >= CLIENTS - 1, 10_000);
     const probeMs = Date.now() - t1;
@@ -119,12 +128,23 @@ describe.runIf(process.env.LOAD_TEST === "1")("load sanity", () => {
 
     // Phase 3: burst — SENDERS distinct clients send one message each.
     received = 0;
+    const burstPrefix = Date.now();
+    const burstMessages = Array.from({ length: SENDERS }, (_, index) => ({
+      id: `load-burst-${burstPrefix}-${index}`,
+      channelId,
+      authorId: `load-user-${index + 1}`,
+      content: "burst",
+    }));
+    await prisma.message.createMany({
+      data: burstMessages,
+    });
+
     const expected = SENDERS * (CLIENTS - 1);
     const t2 = Date.now();
     for (let i = 1; i <= SENDERS; i++) {
       sockets[i].emit("message:send", {
         channelId,
-        message: { id: `burst-${i}`, content: "burst", createdAt: new Date().toISOString(), author: { id: "x", username: "x" } },
+        message: { id: burstMessages[i - 1].id },
       });
     }
     await waitUntil(() => received >= expected, 20_000);

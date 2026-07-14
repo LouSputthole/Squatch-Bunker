@@ -18,14 +18,14 @@ console.log("");
 console.log("  Starting Campfire...");
 console.log("");
 
-const isWindows = process.platform === "win32";
-const spawnOpts = { cwd: root, stdio: "inherit", shell: isWindows };
+const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+const spawnOpts = { cwd: root, stdio: "inherit", shell: false };
 
 // Start realtime server in background
-const realtime = spawn("pnpm", ["dev:realtime"], spawnOpts);
+const realtime = spawn(npm, ["run", "dev:realtime"], spawnOpts);
 
 // Start Next.js
-const next = spawn("pnpm", ["dev"], spawnOpts);
+const next = spawn(npm, ["run", "dev"], spawnOpts);
 
 console.log("");
 console.log("  Campfire is running!");

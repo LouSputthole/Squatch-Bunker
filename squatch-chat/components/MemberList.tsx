@@ -57,6 +57,7 @@ export default function MemberList({ serverId, currentUserId, currentUserRole, o
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
   const [inviteCode, setInviteCode] = useState("");
+  const [inviteAvailable, setInviteAvailable] = useState(false);
   const [copied, setCopied] = useState(false);
   const [showInvite, setShowInvite] = useState(false);
   const [joinCode, setJoinCode] = useState("");
@@ -71,6 +72,7 @@ export default function MemberList({ serverId, currentUserId, currentUserRole, o
       .then((data) => {
         setMembers(data.members || []);
         setInviteCode(data.inviteCode || "");
+        setInviteAvailable(Boolean(data.inviteAvailable));
       })
       .finally(() => {
         setLoading(false);
@@ -236,7 +238,7 @@ export default function MemberList({ serverId, currentUserId, currentUserRole, o
 
       {showInvite && (
         <div className="p-3 border-b border-[var(--accent-2)]/30 space-y-2">
-          {inviteCode && (
+          {inviteCode && inviteAvailable && (
             <button
               onClick={copyInvite}
               className="w-full text-xs px-2 py-1.5 bg-[var(--panel-2)] text-[var(--text)] rounded hover:bg-[var(--accent-2)] transition-colors"

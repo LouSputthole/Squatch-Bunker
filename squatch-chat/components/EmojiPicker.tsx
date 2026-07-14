@@ -131,12 +131,11 @@ interface EmojiPickerProps {
 export default function EmojiPicker({ onSelect, onClose }: EmojiPickerProps) {
   const [search, setSearch] = useState("");
   const [activeCategory, setActiveCategory] = useState("smileys");
-  const [recent, setRecent] = useState<string[]>([]);
+  const [recent, setRecent] = useState<string[]>(getRecent);
   const ref = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    setRecent(getRecent());
     searchRef.current?.focus();
   }, []);
 

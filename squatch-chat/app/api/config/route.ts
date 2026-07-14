@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { sfuConfigured } from "@/lib/sfu";
+import { billingConfiguration, getEdition } from "@/lib/edition";
 
 /**
  * Runtime config endpoint. Returns connection URLs derived from the request.
@@ -30,6 +31,8 @@ export async function GET(request: Request) {
   const turnCredential = (session && process.env.TURN_CREDENTIAL) || "";
 
   return NextResponse.json({
+    edition: getEdition(),
+    billingEnabled: billingConfiguration().enabled,
     appUrl,
     socketUrl,
     socketPath,

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef } from "react";
+import Image from "next/image";
 
 interface Server {
   id: string;
@@ -143,7 +144,7 @@ export default function ServerList({
       />
       <div className="w-[72px] bg-[var(--bg)] flex flex-col items-center py-3 gap-2 border-r border-[var(--accent-2)]/30 shrink-0">
         {/* Campfire logo */}
-        <img src="/Campfire-Logo.png" alt="Campfire" className="w-10 h-10 mb-1 opacity-90" title="Campfire" />
+        <Image src="/Campfire-Logo.png" alt="Campfire" width={40} height={40} className="mb-1 opacity-90" title="Campfire" />
         {/* DM button */}
         <button
           onClick={onDmClick}
@@ -204,6 +205,7 @@ export default function ServerList({
                   {isUploading ? (
                     <span className="text-xs opacity-60">...</span>
                   ) : server.icon ? (
+                    // eslint-disable-next-line @next/next/no-img-element -- server icons may be user-hosted, data, or blob URLs
                     <img src={server.icon} alt={server.name} className="w-full h-full object-cover" />
                   ) : (
                     server.name[0].toUpperCase()

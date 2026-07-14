@@ -1,15 +1,12 @@
 import { NextResponse } from "next/server";
-import bcrypt from "bcryptjs";
+import { hashPassword } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { checkRateLimit } from "@/lib/rateLimit";
+import { hashPasswordResetToken } from "@/lib/passwordReset";
+import { passwordValidationError } from "@/lib/accountCredentials";
+import { notifyRealtimeAuthorizationChange } from "@/lib/realtimeControl";
+import { clientIp } from "@/lib/clientIp";
 
-function clientIp(request: Request): string {
-  return (
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    request.headers.get("x-real-ip") ||
-    "unknown"
-  );
-}
 
 export async function POST(request: Request) {
   const rl = checkRateLimit(`reset:${clientIp(request)}`);
@@ -30,18 +27,34 @@ export async function POST(request: Request) {
   try {
     const { token, password } = await request.json();
 
-    if (!token || !password) {
+    if (typeof token !== "string" || typeof password !== "string" || !token || !password) {
       return NextResponse.json(
         { error: "Token and password are required" },
         { status: 400 }
       );
     }
 
+    const passwordError = passwordValidationError(password);
+    if (passwordError) {
+      return NextResponse.json(
+        { error: passwordError },
+        { status: 400 },
+      );
+    }
+
+    if (token.length > 512) {
+      return NextResponse.json(
+        { error: "Invalid or expired token" },
+        { status: 400 },
+      );
+    }
+
     const user = await prisma.user.findFirst({
       where: {
-        resetToken: token,
+        resetToken: hashPasswordResetToken(token),
         resetExpiry: { gt: new Date() },
       },
+      select: { id: true },
     });
 
     if (!user) {
@@ -51,10 +64,14 @@ export async function POST(request: Request) {
       );
     }
 
-    const passwordHash = await bcrypt.hash(password, 10);
+    const passwordHash = await hashPassword(password);
 
-    await prisma.user.update({
-      where: { id: user.id },
+    const consumed = await prisma.user.updateMany({
+      where: {
+        id: user.id,
+        resetToken: hashPasswordResetToken(token),
+        resetExpiry: { gt: new Date() },
+      },
       data: {
         passwordHash,
         resetToken: null,
@@ -62,6 +79,18 @@ export async function POST(request: Request) {
         // Invalidate any existing JWTs issued before the password reset
         tokenVersion: { increment: 1 },
       },
+    });
+
+    if (!consumed.count) {
+      return NextResponse.json(
+        { error: "Invalid or expired token" },
+        { status: 400 },
+      );
+    }
+
+    await notifyRealtimeAuthorizationChange({
+      scope: "session",
+      userId: user.id,
     });
 
     return NextResponse.json({ message: "Password updated successfully" });

@@ -27,8 +27,20 @@ function loadLastVoice(): StoredVoice | null {
   } catch { return null; }
 }
 
+function findStoredVoiceChannel(activeServer: Server | null): Channel | null {
+  if (!activeServer) return null;
+  const stored = loadLastVoice();
+  if (!stored || stored.serverId !== activeServer.id) return null;
+  return activeServer.channels.find(
+    (channel) => channel.id === stored.channelId && channel.type === "voice"
+  ) ?? null;
+}
+
 export function useVoice(activeServer: Server | null) {
-  const [activeVoiceChannel, setActiveVoiceChannel] = useState<Channel | null>(null);
+  const [activeVoiceChannel, setActiveVoiceChannel] = useState<Channel | null>(() =>
+    findStoredVoiceChannel(activeServer)
+  );
+  const [lastCheckedVoiceServer, setLastCheckedVoiceServer] = useState<Server | null>(activeServer);
   const [voiceParticipants, setVoiceParticipants] = useState<Map<string, VoiceParticipant[]>>(new Map());
   const [voiceState, setVoiceState] = useState({ muted: false, deafened: false, reconnecting: false, sharing: false, cameraOn: false, participants: [] as VoiceParticipant[] });
   const [pttMode, setPttMode] = useState(false);
@@ -74,18 +86,12 @@ export function useVoice(activeServer: Server | null) {
     clearLastVoice();
   }, []);
 
-  // Auto-rejoin last voice channel when server changes
-  useEffect(() => {
-    if (!activeServer) return;
-    const stored = loadLastVoice();
-    if (!stored || stored.serverId !== activeServer.id) return;
-    const voiceChannel = activeServer.channels.find(
-      (c) => c.id === stored.channelId && c.type === "voice"
-    );
-    if (voiceChannel) {
-      setActiveVoiceChannel(voiceChannel);
-    }
-  }, [activeServer]);
+  // Adjust during a server transition so restoration does not require an effect.
+  if (lastCheckedVoiceServer !== activeServer) {
+    setLastCheckedVoiceServer(activeServer);
+    const storedVoiceChannel = findStoredVoiceChannel(activeServer);
+    if (storedVoiceChannel) setActiveVoiceChannel(storedVoiceChannel);
+  }
 
   const handleParticipantsChange = useCallback((channelId: string, participants: VoiceParticipant[]) => {
     setVoiceParticipants((prev) => {
@@ -108,6 +114,9 @@ export function useVoice(activeServer: Server | null) {
   }, []);
   const setUserVolume = useCallback((userId: string, volume: number) => {
     voicePanelRef.current?.setUserVolume(userId, volume);
+  }, []);
+  const setUserRoutingMuted = useCallback((userId: string, muted: boolean) => {
+    voicePanelRef.current?.setUserRoutingMuted(userId, muted);
   }, []);
   const setInputSensitivity = useCallback((threshold: number) => {
     voicePanelRef.current?.setInputSensitivity(threshold);
@@ -236,6 +245,7 @@ export function useVoice(activeServer: Server | null) {
     disconnect,
     togglePTT,
     setUserVolume,
+    setUserRoutingMuted,
     setInputSensitivity,
     playSound,
     serverMuteUser,

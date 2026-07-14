@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef } from "react";
+import Image from "next/image";
 import Avatar from "@/components/Avatar";
 
 interface OnboardingWizardProps {
@@ -12,7 +13,6 @@ interface OnboardingWizardProps {
 }
 
 export default function OnboardingWizard({
-  userId,
   username,
   currentAvatar,
   onComplete,
@@ -175,7 +175,7 @@ export default function OnboardingWizard({
 
         {/* Logo */}
         <div style={{ display: "flex", justifyContent: "center" }}>
-          <img src="/Campfire-Logo.png" alt="Campfire" style={{ width: 48, height: 48 }} />
+          <Image src="/Campfire-Logo.png" alt="Campfire" width={48} height={48} />
         </div>
 
         {/* Step 1: Avatar */}

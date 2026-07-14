@@ -1,5 +1,5 @@
 "use client";
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback } from "react";
 
 const STORAGE_KEY = "squatch:muted-channels";
 
@@ -17,11 +17,7 @@ function saveMuted(muted: Set<string>) {
 }
 
 export function useMutedChannels() {
-  const [mutedChannels, setMutedChannels] = useState<Set<string>>(new Set());
-
-  useEffect(() => {
-    setMutedChannels(loadMuted());
-  }, []);
+  const [mutedChannels, setMutedChannels] = useState<Set<string>>(loadMuted);
 
   const toggleMute = useCallback((channelId: string) => {
     setMutedChannels(prev => {

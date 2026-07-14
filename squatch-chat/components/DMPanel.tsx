@@ -19,6 +19,7 @@ interface DMMessage {
   attachmentUrl?: string | null;
   attachmentName?: string | null;
   createdAt: string;
+  conversationId?: string;
 }
 
 interface Conversation {
@@ -35,7 +36,7 @@ interface DMPanelProps {
   onClose: () => void;
 }
 
-export default function DMPanel({ currentUserId, currentUsername, currentAvatar, onClose }: DMPanelProps) {
+export default function DMPanel({ currentUserId, onClose }: DMPanelProps) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConv, setActiveConv] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<DMMessage[]>([]);
@@ -44,7 +45,6 @@ export default function DMPanel({ currentUserId, currentUsername, currentAvatar,
   const [msgLoading, setMsgLoading] = useState(false);
   const [typingUser, setTypingUser] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Fetch conversation list
@@ -67,19 +67,11 @@ export default function DMPanel({ currentUserId, currentUsername, currentAvatar,
 
   useEffect(() => {
     if (!activeConv) return;
-    loadMessages(activeConv.id);
-
-    // Poll for new messages every 3s
-    pollRef.current = setInterval(async () => {
-      const res = await fetch(`/api/dm/${activeConv.id}`);
-      const data = await res.json();
-      if (data.messages) setMessages(data.messages);
-    }, 3000);
-
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+    const timer = setTimeout(() => { void loadMessages(activeConv.id); }, 0);
+    return () => clearTimeout(timer);
   }, [activeConv, loadMessages]);
 
-  // Join conversation room and listen for typing events
+  // Join the conversation room and receive messages/typing in realtime.
   useEffect(() => {
     if (!activeConv) return;
     const socket = getSocket();
@@ -93,9 +85,34 @@ export default function DMPanel({ currentUserId, currentUsername, currentAvatar,
       typingTimeoutRef.current = setTimeout(() => setTypingUser(null), 3000);
     }
 
+    function handleMessage(message: DMMessage) {
+      if (message.conversationId && message.conversationId !== activeConv!.id) return;
+      setMessages((previous) => {
+        if (previous.some((item) => item.id === message.id)) return previous;
+        return [...previous, message];
+      });
+      setConversations((previous) => previous
+        .map((conversation) => conversation.id === activeConv!.id
+          ? {
+              ...conversation,
+              lastMessage: {
+                content: message.content,
+                createdAt: message.createdAt,
+                authorId: message.authorId,
+              },
+              updatedAt: message.createdAt,
+            }
+          : conversation)
+        .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()));
+      setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
+    }
+
     socket.on("dm:typing", handleTyping);
+    socket.on("dm:message", handleMessage);
     return () => {
       socket.off("dm:typing", handleTyping);
+      socket.off("dm:message", handleMessage);
+      socket.emit("dm:leave", activeConv.id);
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
       setTypingUser(null);
     };
@@ -113,6 +130,7 @@ export default function DMPanel({ currentUserId, currentUsername, currentAvatar,
     });
     if (res.ok) {
       const data = await res.json();
+      getSocket().emit("dm:send", { conversationId: activeConv.id, messageId: data.message.id });
       setMessages((prev) => [...prev, data.message]);
       setConversations((prev) =>
         prev.map((c) =>

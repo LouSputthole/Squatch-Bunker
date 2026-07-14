@@ -1,5 +1,6 @@
 "use client";
 import { useState, useEffect } from "react";
+import Image from "next/image";
 
 interface OGData {
   title?: string | null;
@@ -19,28 +20,38 @@ export function extractUrls(text: string): string[] {
 }
 
 function LinkPreviewCard({ url }: { url: string }) {
-  const [data, setData] = useState<OGData | null>(previewCache.get(url) ?? null);
-  const [loaded, setLoaded] = useState(previewCache.has(url));
+  const [result, setResult] = useState<{
+    url: string;
+    data: OGData | null;
+    loaded: boolean;
+  }>(() => ({
+    url,
+    data: previewCache.get(url) ?? null,
+    loaded: previewCache.has(url),
+  }));
+  const resultIsCurrent = result.url === url;
+  const data = resultIsCurrent ? result.data : previewCache.get(url) ?? null;
+  const loaded = resultIsCurrent ? result.loaded : previewCache.has(url);
 
   useEffect(() => {
-    if (previewCache.has(url)) {
-      setData(previewCache.get(url) ?? null);
-      setLoaded(true);
-      return;
-    }
+    if (previewCache.has(url)) return;
     const controller = new AbortController();
     fetch(`/api/og-preview?url=${encodeURIComponent(url)}`, { signal: controller.signal })
       .then((r) => r.json())
       .then((d) => {
+        const preview = d.title || d.description ? d as OGData : null;
         if (d.title || d.description) {
-          previewCache.set(url, d);
-          setData(d);
+          previewCache.set(url, preview);
         } else {
           previewCache.set(url, null);
         }
+        if (!controller.signal.aborted) setResult({ url, data: preview, loaded: true });
       })
-      .catch(() => { previewCache.set(url, null); })
-      .finally(() => setLoaded(true));
+      .catch(() => {
+        if (controller.signal.aborted) return;
+        previewCache.set(url, null);
+        setResult({ url, data: null, loaded: true });
+      })
     return () => controller.abort();
   }, [url]);
 
@@ -54,9 +65,12 @@ function LinkPreviewCard({ url }: { url: string }) {
       className="block mt-2 max-w-md border border-[var(--accent-2)]/30 rounded-lg overflow-hidden hover:border-[var(--accent-2)]/60 transition-colors bg-[var(--panel-2)]"
     >
       {data.image && (
-        <img
+        <Image
           src={data.image}
           alt={data.title ?? ""}
+          width={448}
+          height={128}
+          unoptimized
           className="w-full h-32 object-cover"
           loading="lazy"
           onError={(e) => (e.currentTarget.style.display = "none")}

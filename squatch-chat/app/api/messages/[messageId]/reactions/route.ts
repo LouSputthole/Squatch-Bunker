@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getSession } from "@/lib/auth";
-import { requireChannelMembership } from "@/lib/membership";
+import { resolveChannelAccess } from "@/lib/channelAccess";
 
 export async function POST(
   req: NextRequest,
@@ -30,8 +30,8 @@ export async function POST(
     if (!message) {
       return NextResponse.json({ error: "Message not found" }, { status: 404 });
     }
-    const access = await requireChannelMembership(message.channelId, session.userId);
-    if (!access) {
+    const access = await resolveChannelAccess(message.channelId, session.userId);
+    if (!access?.canSend) {
       return NextResponse.json({ error: "Not authorized" }, { status: 403 });
     }
 

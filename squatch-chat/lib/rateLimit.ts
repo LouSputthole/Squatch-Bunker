@@ -55,8 +55,10 @@ export function checkWeightedLimit(
   return { allowed: true, resetAt: bucket.resetAt };
 }
 
-export function checkRateLimit(key: string): { allowed: boolean; remaining: number; resetAt: number } {
-  const now = Date.now();
+export function checkRateLimit(
+  key: string,
+  now = Date.now(),
+): { allowed: boolean; remaining: number; resetAt: number } {
   let bucket = buckets.get(key);
 
   if (!bucket || bucket.resetAt < now) {

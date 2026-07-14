@@ -9,14 +9,18 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ user
   const { userId: targetUserId } = await params;
 
   const myMemberships = await prisma.serverMember.findMany({
-    where: { userId: session.userId },
+    where: { userId: session.userId, banned: false },
     select: { serverId: true },
   });
 
   const myServerIds = myMemberships.map((m) => m.serverId);
 
   const mutual = await prisma.serverMember.findMany({
-    where: { userId: targetUserId, serverId: { in: myServerIds } },
+    where: {
+      userId: targetUserId,
+      serverId: { in: myServerIds },
+      banned: false,
+    },
     include: { server: { select: { id: true, name: true, icon: true } } },
   });
 

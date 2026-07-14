@@ -70,6 +70,17 @@ export function useServers() {
     });
   }, []);
 
+  const updateActiveServer = useCallback((patch: Partial<Server>) => {
+    setActiveServer((prev) => {
+      if (!prev) return prev;
+      const updated = { ...prev, ...patch };
+      setServers((list) => list.map((server) =>
+        server.id === updated.id ? updated : server
+      ));
+      return updated;
+    });
+  }, []);
+
   const renameActiveServer = useCallback((newName: string) => {
     setActiveServer((prev) => {
       if (!prev) return prev;
@@ -98,6 +109,7 @@ export function useServers() {
     addChannel,
     updateChannels,
     removeChannel,
+    updateActiveServer,
     renameActiveServer,
     removeActiveServer,
   };

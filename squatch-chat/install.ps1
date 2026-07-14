@@ -54,16 +54,6 @@ if (Test-CommandExists "node") {
     exit 1
 }
 
-# ── Check pnpm ────────────────────────────────────────────────
-
-if (Test-CommandExists "pnpm") {
-    Write-Info "pnpm found: $(pnpm -v)"
-} else {
-    Write-Warn "pnpm not found - installing it now"
-    npm install -g pnpm
-    Write-Info "pnpm installed: $(pnpm -v)"
-}
-
 # ── Check PostgreSQL ──────────────────────────────────────────
 
 $pgAvailable = $false
@@ -103,7 +93,7 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $scriptDir
 
 Write-Step "Installing dependencies..."
-pnpm install
+npm install
 
 # ── Configure environment ─────────────────────────────────────
 
@@ -126,27 +116,27 @@ if (-not (Test-Path ".env")) {
 # ── Set up database ───────────────────────────────────────────
 
 Write-Step "Generating Prisma client..."
-npx prisma generate
+npm run db:generate
 
 if ($pgAvailable) {
     Write-Step "Setting up database..."
     Write-Info "Running database migrations..."
     try {
-        npx prisma migrate dev --name init 2>$null
+        npm run db:migrate:dev 2>$null
     } catch {
         Write-Warn "Migration failed - you may need to configure DATABASE_URL in .env"
-        Write-Info "Edit .env, set your DATABASE_URL, then run: pnpm db:migrate"
+        Write-Info "Edit .env, set your DATABASE_URL, then run: npm run db:migrate"
     }
 } else {
     Write-Warn "Skipping database setup (PostgreSQL not available)"
-    Write-Info "After installing PostgreSQL, run: pnpm db:migrate"
+    Write-Info "After installing PostgreSQL, run: npm run db:migrate"
 }
 
 # ── Build the app ─────────────────────────────────────────────
 
 Write-Step "Building Campfire..."
 try {
-    pnpm build 2>&1
+    npm run build 2>&1
 } catch {
     Write-Warn "Build had warnings (this is usually fine for first run)"
 }
@@ -167,13 +157,13 @@ Write-Host ""
 # Start realtime server in background
 $realtimeJob = Start-Job -ScriptBlock {
     Set-Location $using:scriptDir
-    pnpm dev:realtime
+    npm run dev:realtime
 }
 
 # Start Next.js in background
 $nextJob = Start-Job -ScriptBlock {
     Set-Location $using:scriptDir
-    pnpm dev
+    npm run dev
 }
 
 Write-Host "  Campfire is running!" -ForegroundColor Green
@@ -267,7 +257,7 @@ Write-Host "    .\stop.ps1  or  Ctrl+C" -ForegroundColor Cyan
 Write-Host ""
 if (-not $pgAvailable) {
     Write-Host "  [!] Remember to set up PostgreSQL and run:" -ForegroundColor Yellow
-    Write-Host "    pnpm db:migrate" -ForegroundColor Cyan
+    Write-Host "    npm run db:migrate" -ForegroundColor Cyan
     Write-Host ""
 }
 Write-Host "  Welcome to the woods." -ForegroundColor White

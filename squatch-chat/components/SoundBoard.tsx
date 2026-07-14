@@ -41,7 +41,11 @@ export default function SoundBoard({
     } catch { /* ignore */ }
   }, [serverId]);
 
-  useEffect(() => { if (open) load(); }, [open, load]);
+  useEffect(() => {
+    if (!open) return;
+    const timer = setTimeout(() => { void load(); }, 0);
+    return () => clearTimeout(timer);
+  }, [open, load]);
 
   async function handleFile(file: File) {
     setError("");

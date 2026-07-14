@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
+import { projectVisibleServerChannels } from "@/lib/channelAccess";
 
 export async function GET() {
   const session = await getSession();
@@ -11,19 +12,27 @@ export async function GET() {
     const { prisma } = await import("@/lib/db");
     const servers = await prisma.server.findMany({
       where: {
-        members: { some: { userId: session.userId } },
+        members: { some: { userId: session.userId, banned: false } },
       },
       include: {
         channels: { orderBy: { createdAt: "asc" } },
-        _count: { select: { members: true } },
+        _count: { select: { members: { where: { banned: false } } } },
       },
       orderBy: { createdAt: "asc" },
     });
 
-    return NextResponse.json({ servers });
+    const visibleServers = await projectVisibleServerChannels(
+      servers,
+      session.userId,
+      prisma,
+    );
+    return NextResponse.json({ servers: visibleServers });
   } catch (err) {
     console.error("[Campfire] Failed to fetch servers:", err);
-    return NextResponse.json({ servers: [] });
+    return NextResponse.json(
+      { error: "Unable to load servers" },
+      { status: 503 },
+    );
   }
 }
 

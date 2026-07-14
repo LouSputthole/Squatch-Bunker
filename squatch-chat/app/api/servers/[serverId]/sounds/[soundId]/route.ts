@@ -14,6 +14,9 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   if (!sound || sound.serverId !== serverId) return NextResponse.json({ error: "Sound not found" }, { status: 404 });
 
   const ctx = await getPermContext(serverId, session.userId);
+  if (!ctx.isMember) {
+    return NextResponse.json({ error: "Not a server member" }, { status: 403 });
+  }
   const isUploader = sound.createdBy === session.userId;
   if (!isUploader && !hasPermission("MANAGE_EMOJIS", ctx)) {
     return NextResponse.json({ error: "Not allowed" }, { status: 403 });
