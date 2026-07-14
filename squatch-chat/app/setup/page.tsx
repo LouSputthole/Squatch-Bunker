@@ -9,6 +9,7 @@ export default function SetupPage() {
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [betaAccessCode, setBetaAccessCode] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [done, setDone] = useState(false);
@@ -38,7 +39,7 @@ export default function SetupPage() {
       const res = await fetch("/api/setup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, email, password }),
+        body: JSON.stringify({ username, email, password, betaAccessCode }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -79,18 +80,20 @@ export default function SetupPage() {
         </div>
 
         {error && (
-          <div className="mb-4 p-3 bg-red-500/20 text-red-400 rounded text-sm">{error}</div>
+          <div role="alert" className="mb-4 p-3 bg-red-500/20 text-red-400 rounded text-sm">{error}</div>
         )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-xs text-[var(--muted)] mb-1 uppercase tracking-wide">
+            <label htmlFor="setup-username" className="block text-xs text-[var(--muted)] mb-1 uppercase tracking-wide">
               Username
             </label>
             <input
+              id="setup-username"
               type="text"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
+              autoComplete="username"
               minLength={2}
               maxLength={32}
               required
@@ -98,32 +101,50 @@ export default function SetupPage() {
             />
           </div>
           <div>
-            <label className="block text-xs text-[var(--muted)] mb-1 uppercase tracking-wide">
+            <label htmlFor="setup-email" className="block text-xs text-[var(--muted)] mb-1 uppercase tracking-wide">
               Email
             </label>
             <input
+              id="setup-email"
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
+              autoComplete="email"
               required
               maxLength={254}
               className="w-full px-3 py-2 bg-[var(--panel-2)] text-[var(--text)] border border-[var(--accent-2)] rounded focus:outline-none focus:border-[var(--accent)] text-sm"
             />
           </div>
           <div>
-            <label className="block text-xs text-[var(--muted)] mb-1 uppercase tracking-wide">
+            <label htmlFor="setup-password" className="block text-xs text-[var(--muted)] mb-1 uppercase tracking-wide">
               Password
             </label>
             <input
+              id="setup-password"
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
+              autoComplete="new-password"
               required
               minLength={8}
               maxLength={128}
               className="w-full px-3 py-2 bg-[var(--panel-2)] text-[var(--text)] border border-[var(--accent-2)] rounded focus:outline-none focus:border-[var(--accent)] text-sm"
             />
           </div>
+          <div>
+            <label htmlFor="setup-beta-access-code" className="block text-xs text-[var(--muted)] mb-1 uppercase tracking-wide">
+              Beta access code <span className="normal-case tracking-normal">(if required)</span>
+            </label>
+            <input
+              id="setup-beta-access-code"
+              type="password"
+              value={betaAccessCode}
+              onChange={(e) => setBetaAccessCode(e.target.value)}
+              autoComplete="one-time-code"
+              className="w-full px-3 py-2 bg-[var(--panel-2)] text-[var(--text)] border border-[var(--accent-2)] rounded focus:outline-none focus:border-[var(--accent)] text-sm"
+            />
+          </div>
+
           <button
             type="submit"
             disabled={loading}

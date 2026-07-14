@@ -10,6 +10,7 @@ export default function RegisterPage() {
   const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [betaAccessCode, setBetaAccessCode] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -22,7 +23,7 @@ export default function RegisterPage() {
       const res = await fetch("/api/auth/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, username, password }),
+        body: JSON.stringify({ email, username, password, betaAccessCode }),
       });
 
       const data = await res.json();
@@ -54,7 +55,7 @@ export default function RegisterPage() {
 
         <form onSubmit={handleSubmit} className="space-y-4">
           {error && (
-            <div className="p-3 bg-[var(--danger)] text-[var(--text)] rounded text-sm">
+            <div role="alert" aria-live="polite" className="p-3 bg-[var(--danger)] text-[var(--text)] rounded text-sm">
               {error}
             </div>
           )}
@@ -68,6 +69,7 @@ export default function RegisterPage() {
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
+              autoComplete="email"
               className="w-full px-3 py-2 bg-[var(--panel-2)] text-[var(--text)] border border-[var(--accent-2)] rounded focus:outline-none focus:border-[var(--accent)]"
               required
               maxLength={254}
@@ -83,6 +85,7 @@ export default function RegisterPage() {
               type="text"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
+              autoComplete="username"
               className="w-full px-3 py-2 bg-[var(--panel-2)] text-[var(--text)] border border-[var(--accent-2)] rounded focus:outline-none focus:border-[var(--accent)]"
               required
               minLength={2}
@@ -99,10 +102,25 @@ export default function RegisterPage() {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
+              autoComplete="new-password"
               className="w-full px-3 py-2 bg-[var(--panel-2)] text-[var(--text)] border border-[var(--accent-2)] rounded focus:outline-none focus:border-[var(--accent)]"
               required
               minLength={8}
               maxLength={128}
+            />
+          </div>
+
+          <div>
+            <label htmlFor="register-beta-access-code" className="block text-sm text-[var(--muted)] mb-1">
+              Beta access code <span className="text-xs">(if required)</span>
+            </label>
+            <input
+              id="register-beta-access-code"
+              type="password"
+              value={betaAccessCode}
+              onChange={(e) => setBetaAccessCode(e.target.value)}
+              className="w-full px-3 py-2 bg-[var(--panel-2)] text-[var(--text)] border border-[var(--accent-2)] rounded focus:outline-none focus:border-[var(--accent)]"
+              autoComplete="one-time-code"
             />
           </div>
 

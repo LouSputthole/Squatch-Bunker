@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { hashPassword, createToken, setTokenCookie } from "@/lib/auth";
 import { parseAccountCredentials } from "@/lib/accountCredentials";
+import { betaAccessAllowed } from "@/lib/betaAccess";
+import { checkRateLimit } from "@/lib/rateLimit";
+import { clientIp } from "@/lib/clientIp";
 
 class SetupAlreadyCompleteError extends Error {}
 
@@ -19,11 +22,34 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+  const { allowed, remaining, resetAt } = checkRateLimit(`setup:${clientIp(req)}`);
+  if (!allowed) {
+    return NextResponse.json(
+      { error: "Too many attempts. Please try again later." },
+      {
+        status: 429,
+        headers: {
+          "X-RateLimit-Remaining": String(remaining),
+          "X-RateLimit-Reset": String(Math.ceil(resetAt / 1000)),
+          "Retry-After": String(Math.ceil((resetAt - Date.now()) / 1000)),
+        },
+      },
+    );
+  }
+
   let body: unknown;
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  const betaAccessCode =
+    typeof body === "object" && body !== null && "betaAccessCode" in body
+      ? (body as Record<string, unknown>).betaAccessCode
+      : undefined;
+  if (!betaAccessAllowed(betaAccessCode)) {
+    return NextResponse.json({ error: "Access denied" }, { status: 403 });
   }
 
   const parsed = parseAccountCredentials(body);

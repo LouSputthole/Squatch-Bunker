@@ -10,6 +10,7 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [guestName, setGuestName] = useState("");
+  const [betaAccessCode, setBetaAccessCode] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [showGuest, setShowGuest] = useState(false);
@@ -50,7 +51,10 @@ export default function LoginPage() {
       const res = await fetch("/api/auth/guest", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: guestName.trim() }),
+        body: JSON.stringify({
+          username: guestName.trim(),
+          betaAccessCode,
+        }),
       });
 
       const data = await res.json();
@@ -68,8 +72,8 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[var(--bg)]">
-      <div className="w-full max-w-md p-8 bg-[var(--panel)] rounded-lg border border-[var(--accent-2)]">
+    <div className="min-h-screen flex flex-col bg-[var(--bg)]">
+      <main className="mx-auto my-auto w-[calc(100%_-_2rem)] max-w-md p-8 bg-[var(--panel)] rounded-lg border border-[var(--accent-2)]">
         <div className="flex flex-col items-center mb-6">
           <Image
             src="/Campfire-Icon.png"
@@ -86,7 +90,11 @@ export default function LoginPage() {
         </div>
 
         {error && (
-          <div className="p-3 mb-4 bg-[var(--danger)] text-[var(--text)] rounded text-sm">
+          <div
+            role="alert"
+            aria-live="polite"
+            className="p-3 mb-4 bg-[var(--danger)] text-[var(--text)] rounded text-sm"
+          >
             {error}
           </div>
         )}
@@ -154,7 +162,7 @@ export default function LoginPage() {
                 href="/api/auth/oauth/github"
                 className="flex items-center justify-center gap-2 w-full py-2 bg-[#24292e] text-white rounded hover:bg-[#2f363d] transition-colors text-sm font-medium"
               >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                <svg aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/>
                 </svg>
                 Continue with GitHub
@@ -165,7 +173,7 @@ export default function LoginPage() {
                 href="/api/auth/oauth/google"
                 className="flex items-center justify-center gap-2 w-full py-2 bg-white text-[#333] rounded hover:bg-gray-100 transition-colors text-sm font-medium border border-gray-300"
               >
-                <svg width="16" height="16" viewBox="0 0 24 24">
+                <svg aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 24 24">
                   <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
                   <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
                   <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
@@ -223,6 +231,20 @@ export default function LoginPage() {
                 </p>
               </div>
 
+              <div>
+                <label htmlFor="guest-beta-access-code" className="block text-sm text-[var(--muted)] mb-1">
+                  Beta access code <span className="text-xs">(if required)</span>
+                </label>
+                <input
+                  id="guest-beta-access-code"
+                  type="password"
+                  value={betaAccessCode}
+                  onChange={(e) => setBetaAccessCode(e.target.value)}
+                  className="w-full px-3 py-2 bg-[var(--panel-2)] text-[var(--text)] border border-[var(--accent-2)] rounded focus:outline-none focus:border-[var(--accent)]"
+                  autoComplete="one-time-code"
+                />
+              </div>
+
               <button
                 type="submit"
                 disabled={loading || !guestName.trim()}
@@ -233,6 +255,7 @@ export default function LoginPage() {
             </form>
 
             <button
+              type="button"
               onClick={() => { setShowGuest(false); setError(""); }}
               className="mt-4 w-full text-center text-sm text-[var(--muted)] hover:text-[var(--text)] transition-colors"
             >
@@ -240,7 +263,28 @@ export default function LoginPage() {
             </button>
           </>
         )}
-      </div>
+      </main>
+      <footer
+        aria-label="License and source"
+        className="px-4 pb-6 text-center text-xs text-[var(--muted)]"
+      >
+        <p>
+          Campfire is licensed under{" "}
+          <a
+            href="https://github.com/LouSputthole/Squatch-Bunker/blob/main/squatch-chat/LICENSE"
+            className="underline underline-offset-2 hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+          >
+            AGPL-3.0-only
+          </a>{" "}
+          |{" "}
+          <a
+            href="https://github.com/LouSputthole/Squatch-Bunker"
+            className="underline underline-offset-2 hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+          >
+            View corresponding source
+          </a>
+        </p>
+      </footer>
     </div>
   );
 }

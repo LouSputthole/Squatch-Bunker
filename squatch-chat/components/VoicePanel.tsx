@@ -3,7 +3,10 @@
 import { useState, useEffect, useRef, useCallback, forwardRef, useImperativeHandle, useEffectEvent } from "react";
 import { getSocket } from "@/lib/socket";
 import { sounds } from "@/lib/sounds";
-import { getRuntimeConfig, ensureRuntimeConfig } from "@/hooks/useRuntimeConfig";
+import {
+  ensureRuntimeConfig,
+  invalidateRuntimeConfig,
+} from "@/hooks/useRuntimeConfig";
 import { effectiveUserVolume } from "@/lib/voiceVolume";
 import {
   AUDIO_SETTINGS_STORAGE_KEY,
@@ -69,17 +72,22 @@ export interface VoicePanelHandle {
   getLocalScreenStream: () => MediaStream | null;
 }
 
-function getIceServers(): RTCConfiguration {
+async function getIceServers(): Promise<RTCConfiguration> {
   const servers: RTCIceServer[] = [
     { urls: "stun:stun.l.google.com:19302" },
     { urls: "stun:stun1.l.google.com:19302" },
   ];
 
   // Add TURN server if configured (needed for voice across NATs/internet)
-  const config = getRuntimeConfig();
-  if (config?.turnUrl) {
+  const config = await ensureRuntimeConfig();
+  const turnUrls = config.turnUrls.length > 0
+    ? config.turnUrls
+    : config.turnUrl
+      ? [config.turnUrl]
+      : [];
+  if (turnUrls.length > 0 && config.turnUsername && config.turnCredential) {
     servers.push({
-      urls: config.turnUrl,
+      urls: turnUrls,
       username: config.turnUsername,
       credential: config.turnCredential,
     });
@@ -136,6 +144,7 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
   const localStreamRef = useRef<MediaStream | null>(null);
   const peersRef = useRef<Map<string, RTCPeerConnection>>(new Map());
   const reconnectTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const iceRestartingPeersRef = useRef<Set<string>>(new Set());
   const audioElementsRef = useRef<Map<string, HTMLAudioElement>>(new Map());
   const joinedChannelRef = useRef<string | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
@@ -170,6 +179,7 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
   const cleanupPeers = useCallback(() => {
     reconnectTimersRef.current.forEach((timer) => clearTimeout(timer));
     reconnectTimersRef.current.clear();
+    iceRestartingPeersRef.current.clear();
     peersRef.current.forEach((pc) => pc.close());
     peersRef.current.clear();
     audioElementsRef.current.forEach((el) => { el.srcObject = null; el.remove(); });
@@ -386,8 +396,14 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
     screenPeersRef.current.clear();
   }, []);
 
-  const createScreenPeer = useCallback((remoteSocketId: string, initiator: boolean) => {
-    const pc = new RTCPeerConnection(getIceServers());
+  const createScreenPeer = useCallback(async (remoteSocketId: string, initiator: boolean) => {
+    const configuration = await getIceServers();
+    const existingPeer = screenPeersRef.current.get(remoteSocketId);
+    if (existingPeer && existingPeer.connectionState !== "closed") {
+      existingPeer.setConfiguration(configuration);
+      return existingPeer;
+    }
+    const pc = new RTCPeerConnection(configuration);
     const socket = getSocket();
 
     if (initiator && screenStreamRef.current) {
@@ -417,13 +433,21 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
       }
     };
 
+    screenPeersRef.current.set(remoteSocketId, pc);
     if (initiator) {
-      pc.createOffer()
-        .then((offer) => pc.setLocalDescription(offer))
-        .then(() => { socket.emit("screen:offer", { to: remoteSocketId, channelId, offer: pc.localDescription! }); });
+      try {
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        socket.emit("screen:offer", { to: remoteSocketId, channelId, offer: pc.localDescription! });
+      } catch (error) {
+        if (screenPeersRef.current.get(remoteSocketId) === pc) {
+          screenPeersRef.current.delete(remoteSocketId);
+        }
+        pc.close();
+        throw error;
+      }
     }
 
-    screenPeersRef.current.set(remoteSocketId, pc);
     return pc;
   }, [participants, channelId]);
 
@@ -453,7 +477,7 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
 
       // Send screen to all existing voice peers
       for (const [socketId] of peersRef.current) {
-        createScreenPeer(socketId, true);
+        await createScreenPeer(socketId, true);
       }
 
       // Handle user stopping share via browser UI
@@ -533,13 +557,6 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
     }
   }, [channelId]);
 
-  // Warm the runtime-config cache so getIceServers() (synchronous) sees the
-  // TURN relay by the time the first peer connection is created on join —
-  // without this the TURN env vars silently never reach the client.
-  useEffect(() => {
-    void ensureRuntimeConfig();
-  }, []);
-
   // Screen share signaling handlers
   useEffect(() => {
     if (!joined) return;
@@ -562,13 +579,17 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
       }
     }
 
-    function handleScreenOffer(data: { from: string; fromUserId: string; fromUsername: string; offer: RTCSessionDescriptionInit }) {
+    async function handleScreenOffer(data: { from: string; fromUserId: string; fromUsername: string; offer: RTCSessionDescriptionInit }) {
       socketToUserRef.current.set(data.from, data.fromUserId);
-      const pc = createScreenPeer(data.from, false);
-      pc.setRemoteDescription(new RTCSessionDescription(data.offer))
-        .then(() => pc.createAnswer())
-        .then((answer) => pc.setLocalDescription(answer))
-        .then(() => { socket.emit("screen:answer", { to: data.from, channelId, answer: pc.localDescription! }); });
+      try {
+        const pc = await createScreenPeer(data.from, false);
+        await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        socket.emit("screen:answer", { to: data.from, channelId, answer: pc.localDescription! });
+      } catch (error) {
+        console.error("[Screen] Could not answer offer:", error);
+      }
     }
 
     function handleScreenAnswer(data: { from: string; answer: RTCSessionDescriptionInit }) {
@@ -661,8 +682,14 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
   }, [joined, channelId]);
 
   const createPeer = useCallback(
-    function createPeer(remoteSocketId: string, initiator: boolean, remoteUserId?: string) {
-      const pc = new RTCPeerConnection(getIceServers());
+    async function createPeer(remoteSocketId: string, initiator: boolean, remoteUserId?: string) {
+      const configuration = await getIceServers();
+      const existingPeer = peersRef.current.get(remoteSocketId);
+      if (existingPeer && existingPeer.connectionState !== "closed") {
+        existingPeer.setConfiguration(configuration);
+        return existingPeer;
+      }
+      const pc = new RTCPeerConnection(configuration);
       const socket = getSocket();
       const pendingReconnect = reconnectTimersRef.current.get(remoteSocketId);
       if (pendingReconnect) {
@@ -751,7 +778,9 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
           const reconnectTimer = setTimeout(() => {
             reconnectTimersRef.current.delete(remoteSocketId);
             if (!joinedRef.current) return;
-            createPeer(remoteSocketId, true, uid);
+            void createPeer(remoteSocketId, true, uid).catch((error) => {
+              console.error("[Voice] Could not recreate failed peer:", error);
+            });
           }, 1000);
           reconnectTimersRef.current.set(remoteSocketId, reconnectTimer);
         } else if (state === "disconnected") {
@@ -764,7 +793,11 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
               peersRef.current.delete(remoteSocketId);
               audioElementsRef.current.get(remoteSocketId)?.remove();
               audioElementsRef.current.delete(remoteSocketId);
-              if (joinedRef.current) createPeer(remoteSocketId, true, uid);
+              if (joinedRef.current) {
+                void createPeer(remoteSocketId, true, uid).catch((error) => {
+                  console.error("[Voice] Could not recreate disconnected peer:", error);
+                });
+              }
             }
           }, 5000);
           const pendingReconnect = reconnectTimersRef.current.get(remoteSocketId);
@@ -784,13 +817,21 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
         }
       };
 
+      peersRef.current.set(remoteSocketId, pc);
       if (initiator) {
-        pc.createOffer()
-          .then((offer) => pc.setLocalDescription(offer))
-          .then(() => { socket.emit("voice:offer", { to: remoteSocketId, channelId, offer: pc.localDescription! }); });
+        try {
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          socket.emit("voice:offer", { to: remoteSocketId, channelId, offer: pc.localDescription! });
+        } catch (error) {
+          if (peersRef.current.get(remoteSocketId) === pc) {
+            peersRef.current.delete(remoteSocketId);
+          }
+          pc.close();
+          throw error;
+        }
       }
 
-      peersRef.current.set(remoteSocketId, pc);
       return pc;
     },
     [channelId]
@@ -798,6 +839,11 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
 
   const autoJoin = useEffectEvent(async (isCancelled: () => boolean) => {
     try {
+      // Refresh once per join to prevent a previous SPA session's user-bound
+      // credential from crossing a logout/login boundary.
+      invalidateRuntimeConfig();
+      await ensureRuntimeConfig({ forceRefresh: true });
+      if (isCancelled()) return;
       const deviceSettings = readMediaDeviceSettings();
       mediaDeviceSettingsRef.current = deviceSettings;
       const { stream, usedDefault } = await requestVoiceStream(
@@ -1012,7 +1058,11 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
     }) {
       if (data.channelId !== channelId) return;
       data.participants.forEach((p) => {
-        if (p.userId !== currentUserId) createPeer(p.socketId, true, p.userId);
+        if (p.userId !== currentUserId) {
+          void createPeer(p.socketId, true, p.userId).catch((error) => {
+            console.error("[Voice] Could not create participant peer:", error);
+          });
+        }
       });
     }
 
@@ -1021,7 +1071,9 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
       sounds.voiceJoin();
       // If we're sharing screen, send it to the new peer
       if (screenStreamRef.current) {
-        createScreenPeer(data.socketId, true);
+        void createScreenPeer(data.socketId, true).catch((error) => {
+          console.error("[Screen] Could not create peer for new participant:", error);
+        });
       }
     }
 
@@ -1033,18 +1085,23 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
         clearTimeout(reconnectTimer);
         reconnectTimersRef.current.delete(data.socketId);
       }
+      iceRestartingPeersRef.current.delete(data.socketId);
       const pc = peersRef.current.get(data.socketId);
       if (pc) { pc.close(); peersRef.current.delete(data.socketId); }
       const audio = audioElementsRef.current.get(data.socketId);
       if (audio) { audio.srcObject = null; audio.remove(); audioElementsRef.current.delete(data.socketId); }
     }
 
-    function handleOffer(data: { from: string; fromUserId?: string; offer: RTCSessionDescriptionInit }) {
-      const pc = createPeer(data.from, false, data.fromUserId);
-      pc.setRemoteDescription(new RTCSessionDescription(data.offer))
-        .then(() => pc.createAnswer())
-        .then((answer) => pc.setLocalDescription(answer))
-        .then(() => { socket.emit("voice:answer", { to: data.from, channelId, answer: pc.localDescription! }); });
+    async function handleOffer(data: { from: string; fromUserId?: string; offer: RTCSessionDescriptionInit }) {
+      try {
+        const pc = await createPeer(data.from, false, data.fromUserId);
+        await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        socket.emit("voice:answer", { to: data.from, channelId, answer: pc.localDescription! });
+      } catch (error) {
+        console.error("[Voice] Could not answer offer:", error);
+      }
     }
 
     function handleAnswer(data: { from: string; answer: RTCSessionDescriptionInit }) {
@@ -1108,15 +1165,22 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
     const interval = setInterval(() => {
       peersRef.current.forEach((pc, socketId) => {
         if (pc.connectionState === "failed" || pc.iceConnectionState === "failed") {
+          if (iceRestartingPeersRef.current.has(socketId)) return;
+          iceRestartingPeersRef.current.add(socketId);
           console.log("[Voice] ICE restart for peer:", socketId);
-          pc.restartIce();
-          pc.createOffer({ iceRestart: true })
+          void getIceServers()
+            .then((configuration) => {
+              pc.setConfiguration(configuration);
+              pc.restartIce();
+              return pc.createOffer({ iceRestart: true });
+            })
             .then((offer) => pc.setLocalDescription(offer))
             .then(() => {
               const socket = getSocket();
               socket.emit("voice:offer", { to: socketId, channelId, offer: pc.localDescription! });
             })
-            .catch((err) => console.error("[Voice] ICE restart failed:", err));
+            .catch((err) => console.error("[Voice] ICE restart failed:", err))
+            .finally(() => { iceRestartingPeersRef.current.delete(socketId); });
         }
       });
     }, 5000);

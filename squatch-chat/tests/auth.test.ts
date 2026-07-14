@@ -80,4 +80,12 @@ describe("validateSessionToken", () => {
     await prisma.user.delete({ where: { id: deletedUser.id } });
     expect(await validateSessionToken(token)).toBeNull();
   });
+
+  it("rejects a signed legacy guest token with no persisted user", async () => {
+    const token = createToken({
+      userId: `guest-${crypto.randomUUID()}`,
+      username: "legacy_guest",
+    });
+    expect(await validateSessionToken(token)).toBeNull();
+  });
 });

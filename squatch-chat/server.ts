@@ -18,6 +18,8 @@ import {
   sweepExpiredMessages,
 } from "./lib/messageRetention";
 import { assertEditionConfig } from "./lib/edition";
+import { assertBetaAccessConfig } from "./lib/betaAccess";
+import { assertTurnConfiguration } from "./lib/turnCredentials";
 import {
   resolveUserMediaPath,
   userMediaCacheControl,
@@ -75,6 +77,14 @@ function serveUserMedia(
 
 async function main() {
   process.env.CAMPFIRE_UNIFIED_SERVER = "1";
+  assertBetaAccessConfig();
+  const turnConfiguration = assertTurnConfiguration();
+  if (turnConfiguration.mode === "legacy") {
+    console.warn(
+      "[Campfire] Configuration warning: legacy static TURN credentials are enabled "
+      + "for compatibility and do not satisfy public-beta readiness. Configure TURN_AUTH_SECRET.",
+    );
+  }
   const edition = assertEditionConfig();
   for (const warning of edition.warnings) {
     console.warn(`[Campfire] Configuration warning: ${warning}`);

@@ -1,9 +1,18 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { prisma } from "@/lib/db";
 import { verifyPassword } from "@/lib/auth";
 import { POST } from "@/app/api/auth/register/route";
 
 let requestNumber = 0;
+const originalBetaAccessCode = process.env.CAMPFIRE_BETA_ACCESS_CODE;
+
+afterEach(() => {
+  if (originalBetaAccessCode === undefined) {
+    delete process.env.CAMPFIRE_BETA_ACCESS_CODE;
+  } else {
+    process.env.CAMPFIRE_BETA_ACCESS_CODE = originalBetaAccessCode;
+  }
+});
 
 function register(body: unknown, raw = false) {
   requestNumber += 1;
@@ -61,5 +70,27 @@ describe("POST /api/auth/register", () => {
     await expect(response.json()).resolves.toEqual({
       error: "Email or username already taken",
     });
+  });
+
+  it("requires the configured beta access code before creating an account", async () => {
+    const betaAccessCode = "beta-registration-code-0123456789";
+    process.env.CAMPFIRE_BETA_ACCESS_CODE = betaAccessCode;
+    const credentials = {
+      email: "beta-registration@example.com",
+      username: "beta_registration",
+      password: "long-enough-password",
+    };
+
+    const blocked = await register({ ...credentials, betaAccessCode: "wrong" });
+    expect(blocked.status).toBe(403);
+    await expect(blocked.clone().json()).resolves.toEqual({ error: "Access denied" });
+    const blockedBody = await blocked.text();
+    expect(blockedBody).not.toContain(betaAccessCode);
+    await expect(
+      prisma.user.findUnique({ where: { email: credentials.email } }),
+    ).resolves.toBeNull();
+
+    const allowed = await register({ ...credentials, betaAccessCode });
+    expect(allowed.status).toBe(201);
   });
 });

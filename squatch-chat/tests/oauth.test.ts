@@ -109,6 +109,7 @@ describe("OAuth callback identity verification", () => {
   });
 
   it("normalizes a verified email before linking an existing account", async () => {
+    vi.stubEnv("CAMPFIRE_BETA_ACCESS_CODE", "invited-beta-code-long-enough");
     const existingUser = {
       id: "existing-user",
       email: "camper@example.com",
@@ -156,5 +157,89 @@ describe("OAuth callback identity verification", () => {
       username: existingUser.username,
       tokenVersion: 0,
     });
+  });
+
+  it("allows an already-linked OAuth user when invited access is enabled", async () => {
+    vi.stubEnv("CAMPFIRE_BETA_ACCESS_CODE", "invited-beta-code-long-enough");
+    const linkedUser = {
+      id: "linked-user",
+      email: "linked@example.com",
+      username: "linked_camper",
+      tokenVersion: 2,
+    };
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ access_token: "provider-token" }),
+        { status: 200 },
+      ))
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({
+          id: "google-linked-user",
+          email: "linked@example.com",
+          verified_email: true,
+          name: "Linked Camper",
+          picture: null,
+        }),
+        { status: 200 },
+      ));
+    mocks.prisma.oAuthAccount.findUnique.mockResolvedValue({
+      user: linkedUser,
+    });
+
+    const { GET } = await import("@/app/api/auth/oauth/[provider]/callback/route");
+    const response = await GET(
+      callbackRequest("google"),
+      { params: Promise.resolve({ provider: "google" }) },
+    );
+
+    expect(response.headers.get("location")).toBe(`${APP_URL}/chat`);
+    expect(mocks.prisma.user.findUnique).not.toHaveBeenCalled();
+    expect(mocks.prisma.user.create).not.toHaveBeenCalled();
+    expect(mocks.prisma.oAuthAccount.create).not.toHaveBeenCalled();
+    expect(mocks.auth.createToken).toHaveBeenCalledWith({
+      userId: linkedUser.id,
+      username: linkedUser.username,
+      tokenVersion: linkedUser.tokenVersion,
+    });
+  });
+
+  it("blocks a brand-new OAuth identity before user or link creation when invited access is enabled", async () => {
+    vi.stubEnv("CAMPFIRE_BETA_ACCESS_CODE", "invited-beta-code-long-enough");
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ access_token: "provider-token" }),
+        { status: 200 },
+      ))
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({
+          id: "google-new-user",
+          email: "new@example.com",
+          verified_email: true,
+          name: "New Camper",
+          picture: null,
+        }),
+        { status: 200 },
+      ));
+    mocks.prisma.oAuthAccount.findUnique.mockResolvedValue(null);
+    mocks.prisma.user.findUnique.mockResolvedValue(null);
+
+    const { GET } = await import("@/app/api/auth/oauth/[provider]/callback/route");
+    const response = await GET(
+      callbackRequest("google"),
+      { params: Promise.resolve({ provider: "google" }) },
+    );
+
+    expect(response.headers.get("location")).toBe(
+      `${APP_URL}/?error=beta_access_required`,
+    );
+    expect(mocks.prisma.oAuthAccount.findUnique).toHaveBeenCalledTimes(1);
+    expect(mocks.prisma.user.findUnique).toHaveBeenCalledTimes(1);
+    expect(mocks.prisma.user.findUnique).toHaveBeenCalledWith({
+      where: { email: "new@example.com" },
+    });
+    expect(mocks.prisma.user.create).not.toHaveBeenCalled();
+    expect(mocks.prisma.oAuthAccount.create).not.toHaveBeenCalled();
+    expect(mocks.auth.createToken).not.toHaveBeenCalled();
+    expect(mocks.auth.setTokenCookie).not.toHaveBeenCalled();
   });
 });

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { createToken, setTokenCookie } from "@/lib/auth";
+import { betaAccessRequired } from "@/lib/betaAccess";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 const SECURE_COOKIE = APP_URL.startsWith("https://");
@@ -134,6 +135,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ prov
       user = existingUser ?? undefined;
 
       if (!user) {
+        if (betaAccessRequired()) {
+          return NextResponse.redirect(
+            new URL("/?error=beta_access_required", APP_URL),
+          );
+        }
+
         // Create new user — sanitize username and ensure uniqueness
         const baseUsername = name.slice(0, 20).replace(/[^a-zA-Z0-9_]/g, "_");
         let username = baseUsername;

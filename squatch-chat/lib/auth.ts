@@ -64,11 +64,6 @@ export async function validateSessionToken(
   const payload = verifyToken(token);
   if (!payload) return null;
 
-  // Ephemeral fallback guests (issued only when the DB is unavailable) carry a
-  // synthetic "guest-" id that is never persisted, so there is no row to check.
-  // Their JWT exp claim is the only bound and is already enforced by verifyToken.
-  if (payload.userId.startsWith("guest-")) return payload;
-
   // Stateful checks: load the user to enforce token revocation (tokenVersion)
   // and guest-session expiry. Fail closed if the user is gone or the DB errors.
   try {
