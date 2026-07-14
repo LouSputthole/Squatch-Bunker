@@ -437,6 +437,29 @@ jobs:
             '
           done
 
+          build_only_jwt="$(
+            sed -n 's/^ARG CAMPFIRE_BUILD_JWT_SECRET=//p' Dockerfile
+          )"
+          test -n "$build_only_jwt"
+          docker run --rm --user 0:0 --entrypoint sh \
+            --env BUILD_ONLY_JWT="$build_only_jwt" \
+            campfirereleaseci-app -c '
+            set +e
+            grep -r -F -l "$BUILD_ONLY_JWT" /app \
+              > /tmp/build-jwt-matches \
+              2> /tmp/build-jwt-errors
+            grep_status=$?
+            set -e
+            if [ "$grep_status" -eq 0 ]; then
+              cat /tmp/build-jwt-matches
+              exit 1
+            fi
+            if [ "$grep_status" -ne 1 ]; then
+              cat /tmp/build-jwt-errors >&2
+              exit "$grep_status"
+            fi
+          '
+
       - name: Start and verify the production stack
         run: |
           docker compose -f docker-compose.prod.yml \

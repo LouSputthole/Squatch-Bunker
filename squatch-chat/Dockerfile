@@ -18,7 +18,8 @@ FROM base AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-RUN npm run build
+ARG CAMPFIRE_BUILD_JWT_SECRET=campfire-build-only-jwt-never-use-at-runtime-0000000000000000
+RUN JWT_SECRET="${CAMPFIRE_BUILD_JWT_SECRET}" npm run build
 
 # --- Production ---
 FROM base AS runner
