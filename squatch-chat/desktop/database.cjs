@@ -3,9 +3,29 @@
 const fs = require("node:fs");
 const path = require("node:path");
 
-const DESKTOP_SCHEMA_VERSION = 4;
+const DESKTOP_SCHEMA_VERSION = 5;
 
 const TABLES = [
+  [
+    'CREATE TABLE IF NOT EXISTS "WebhookEvent" (',
+    '  "id" TEXT NOT NULL PRIMARY KEY,',
+    '  "status" TEXT NOT NULL DEFAULT \'processing\',',
+    '  "updatedAt" DATETIME NOT NULL',
+    ')',
+  ].join("\n"),
+  [
+    'CREATE TABLE IF NOT EXISTS "Report" (',
+    '  "id" TEXT NOT NULL PRIMARY KEY,',
+    '  "reporterId" TEXT NOT NULL,',
+    '  "targetUserId" TEXT NOT NULL,',
+    '  "messageId" TEXT,',
+    '  "reason" TEXT NOT NULL,',
+    '  "status" TEXT NOT NULL DEFAULT \'open\',',
+    '  "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,',
+    '  CONSTRAINT "Report_reporterId_fkey" FOREIGN KEY ("reporterId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE,',
+    '  CONSTRAINT "Report_targetUserId_fkey" FOREIGN KEY ("targetUserId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE',
+    ')',
+  ].join("\n"),
   `CREATE TABLE IF NOT EXISTS "PrivateUpload" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "ownerId" TEXT NOT NULL,
@@ -109,6 +129,8 @@ const INDEXES = [
   'CREATE UNIQUE INDEX IF NOT EXISTS "PrivateUpload_claimKind_claimId_key" ON "PrivateUpload"("claimKind", "claimId")',
   'CREATE INDEX IF NOT EXISTS "PrivateUpload_ownerId_state_createdAt_idx" ON "PrivateUpload"("ownerId", "state", "createdAt")',
   'CREATE UNIQUE INDEX IF NOT EXISTS "Message_privateUploadId_key" ON "Message"("privateUploadId")',
+  'CREATE INDEX IF NOT EXISTS "Report_targetUserId_status_idx" ON "Report"("targetUserId", "status")',
+  'CREATE INDEX IF NOT EXISTS "Report_reporterId_idx" ON "Report"("reporterId")',
   'CREATE UNIQUE INDEX IF NOT EXISTS "DirectMessage_privateUploadId_key" ON "DirectMessage"("privateUploadId")',
   'CREATE INDEX IF NOT EXISTS "JournalEntry_privateUploadId_idx" ON "JournalEntry"("privateUploadId")',
   'CREATE INDEX IF NOT EXISTS "UserBlock_blockedId_idx" ON "UserBlock"("blockedId")',
@@ -225,6 +247,8 @@ function assertCurrentSchema(database) {
       "inviteUseCount",
       "inviteRevokedAt",
     ],
+    WebhookEvent: ["id", "status", "updatedAt"],
+    Report: ["id", "reporterId", "targetUserId", "reason", "status"],
     Channel: ["roomMode", "roomScene", "retentionDays"],
     Message: ["privateUploadId"],
     DirectMessage: ["privateUploadId"],
@@ -258,6 +282,8 @@ function assertCurrentSchema(database) {
     }
   }
   assertForeignKey(database, "PrivateUpload", "ownerId", "User", "RESTRICT");
+  assertForeignKey(database, "Report", "reporterId", "User", "CASCADE");
+  assertForeignKey(database, "Report", "targetUserId", "User", "CASCADE");
   assertForeignKey(database, "Message", "privateUploadId", "PrivateUpload", "SET NULL");
   assertForeignKey(database, "DirectMessage", "privateUploadId", "PrivateUpload", "SET NULL");
   assertForeignKey(database, "JournalEntry", "privateUploadId", "PrivateUpload", "SET NULL");

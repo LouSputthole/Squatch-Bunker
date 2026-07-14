@@ -1,0 +1,603 @@
+name: Release gates
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  postgresql-upgrade:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    defaults:
+      run:
+        working-directory: squatch-chat
+
+    services:
+      postgres:
+        image: postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
+        env:
+          POSTGRES_USER: campfire_upgrade
+          POSTGRES_PASSWORD: campfire-upgrade-password
+          POSTGRES_DB: campfire_upgrade_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U campfire_upgrade -d campfire_upgrade_db"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+
+    env:
+      DATABASE_URL: postgresql://campfire_upgrade:campfire-upgrade-password@127.0.0.1:5432/campfire_upgrade_db?schema=public
+      JWT_SECRET: ci-jwt-secret-not-a-real-secret-0123456789-abcdef
+      CAMPFIRE_POSTINSTALL_GENERATE_ONLY: "1"
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: squatch-chat/package-lock.json
+
+      - name: Install dependencies without touching PostgreSQL
+        run: npm ci
+
+      - name: Recreate the 0.0.3 PostgreSQL migration state
+        run: |
+          mkdir -p "$RUNNER_TEMP/later-migrations"
+          for migration in prisma/migrations-postgresql/*; do
+            case "$(basename "$migration")" in
+              migration_lock.toml|20260711000000_init|20260711000001_reports|20260711000002_friendship_pair_unique)
+                ;;
+              *)
+                mv "$migration" "$RUNNER_TEMP/later-migrations/"
+                ;;
+            esac
+          done
+
+          npm run db:migrate
+          npm run db:verify:postgresql-baseline
+          npx prisma migrate status --config prisma.postgresql.config.ts
+
+          npx prisma db execute \
+            --config prisma.postgresql.config.ts \
+            --stdin <<'SQL'
+          INSERT INTO "User" ("id", "email", "username", "passwordHash", "stripeCustomerId", "stripeSubscriptionId", "updatedAt")
+          VALUES
+            ('release-upgrade-requester', 'requester@example.invalid', 'release_upgrade_requester', 'not-a-real-hash', 'cus_release_upgrade_requester', 'sub_release_upgrade_requester', CURRENT_TIMESTAMP),
+            ('release-upgrade-addressee', 'addressee@example.invalid', 'release_upgrade_addressee', 'not-a-real-hash', 'cus_release_upgrade_addressee', 'sub_release_upgrade_addressee', CURRENT_TIMESTAMP),
+            ('release-upgrade-duplicate', 'duplicate@example.invalid', 'release_upgrade_duplicate', 'not-a-real-hash', 'cus_release_upgrade_requester', NULL, CURRENT_TIMESTAMP);
+
+          INSERT INTO "Friendship" ("id", "requesterId", "addresseeId", "status", "updatedAt")
+          VALUES ('release-upgrade-block', 'release-upgrade-requester', 'release-upgrade-addressee', 'blocked', CURRENT_TIMESTAMP);
+          SQL
+
+
+      - name: Reject duplicate legacy billing identifiers before upgrade
+        run: |
+          if npm run db:migrate > "$RUNNER_TEMP/duplicate-preflight.log" 2>&1; then
+            echo "Migration unexpectedly accepted duplicate legacy billing identifiers." >&2
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/duplicate-preflight.log"
+          grep -Fq 'duplicate User.stripeCustomerId values exist' \
+            "$RUNNER_TEMP/duplicate-preflight.log"
+          grep -Fq 'Resolve the duplicate records, take a new backup, and retry.' \
+            "$RUNNER_TEMP/duplicate-preflight.log"
+
+          npx prisma db execute \
+            --config prisma.postgresql.config.ts \
+            --stdin <<'SQL'
+          DELETE FROM "User" WHERE "id" = 'release-upgrade-duplicate';
+          SQL
+      - name: Upgrade 0.0.3 data to the beta schema
+        run: |
+          mv "$RUNNER_TEMP/later-migrations/"* \
+            prisma/migrations-postgresql/
+
+          npm run db:migrate
+          npm run db:migrate
+          npx prisma migrate status --config prisma.postgresql.config.ts
+          npx prisma migrate diff \
+            --config prisma.postgresql.config.ts \
+            --from-config-datasource \
+            --to-schema prisma/schema.postgresql.prisma \
+            --exit-code
+          CAMPFIRE_VERIFY_LEGACY_BLOCK=1 npm run db:verify:postgresql
+          git diff --exit-code -- prisma/migrations-postgresql
+
+  sqlite-lifecycle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    defaults:
+      run:
+        working-directory: squatch-chat
+
+    env:
+      DATABASE_URL: file:./data/campfire.db
+      JWT_SECRET: ci-jwt-secret-not-a-real-secret-0123456789-abcdef
+      CAMPFIRE_UPLOAD_DIR: tests/.tmp/sqlite-media
+      NEXT_PUBLIC_APP_URL: https://sqlite-ci.example
+      STRICT_CORS: "true"
+      CORS_ORIGINS: https://sqlite-ci.example
+      COOKIE_NAME: sqlite-ci-token
+      PORT: "3300"
+      CAMPFIRE_ALLOW_DESTRUCTIVE_FIXTURE: "1"
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: squatch-chat/package-lock.json
+
+      - name: Install and synchronize a fresh SQLite database
+        run: |
+          npm ci
+          npm run db:sync
+          CAMPFIRE_SQLITE_PERSISTENCE=seed npm run db:verify:sqlite
+          npm run build
+
+      - name: Verify fresh SQLite host restart persistence
+        run: |
+          wait_for_health() {
+            for attempt in $(seq 1 60); do
+              if curl -fsS http://127.0.0.1:3300/api/health |
+                grep -q '"status":"ok"'; then
+                return 0
+              fi
+              sleep 2
+            done
+            cat "$RUNNER_TEMP/sqlite-app.log"
+            return 1
+          }
+
+          app_pid=""
+          trap 'if [ -n "$app_pid" ]; then kill "$app_pid" 2>/dev/null || true; fi' EXIT
+
+          NODE_ENV=production node --import tsx server.ts > "$RUNNER_TEMP/sqlite-app.log" 2>&1 &
+          app_pid=$!
+          wait_for_health
+          curl -fsS http://127.0.0.1:3300/api/config |
+            grep -Fq '"socketPath":"/api/socketio"'
+          npm run runtime:verify:realtime -- \
+            http://127.0.0.1:3300 \
+            https://sqlite-ci.example
+          kill "$app_pid"
+          wait "$app_pid" || true
+          app_pid=""
+
+          NODE_ENV=production node --import tsx server.ts > "$RUNNER_TEMP/sqlite-app.log" 2>&1 &
+          app_pid=$!
+          wait_for_health
+          CAMPFIRE_SQLITE_PERSISTENCE=verify npm run db:verify:sqlite
+          npm run runtime:verify:realtime -- \
+            http://127.0.0.1:3300 \
+            https://sqlite-ci.example
+          kill "$app_pid"
+          wait "$app_pid" || true
+          app_pid=""
+          trap - EXIT
+
+      - name: Upgrade real v0.0.3 SQLite data and create a recovery set
+        run: |
+          rm -rf data/backups
+          npm run db:fixture:sqlite-v0.0.3
+          npm run db:sync
+          find data/backups -type f -name 'campfire.db.*.bak' -size +0c \
+            -print -quit | grep -q .
+
+          CAMPFIRE_SQLITE_LEGACY=1 \
+          CAMPFIRE_SQLITE_PERSISTENCE=seed \
+          CAMPFIRE_SQLITE_RECOVERY=seed \
+            npm run db:verify:sqlite
+
+          mkdir -p \
+            "$CAMPFIRE_UPLOAD_DIR/uploads" \
+            "$CAMPFIRE_UPLOAD_DIR/avatars" \
+            "$CAMPFIRE_UPLOAD_DIR/private-uploads"
+          printf '%s\n' beta-sqlite-upload-persistence \
+            > "$CAMPFIRE_UPLOAD_DIR/uploads/release-smoke.txt"
+          printf '%s\n' beta-sqlite-avatar-persistence \
+            > "$CAMPFIRE_UPLOAD_DIR/avatars/release-smoke.txt"
+          printf '%s\n' beta-sqlite-private-persistence \
+            > "$CAMPFIRE_UPLOAD_DIR/private-uploads/release-sqlite-private-smoke.txt"
+
+          NODE_ENV=production node --import tsx server.ts > "$RUNNER_TEMP/sqlite-upgrade-app.log" 2>&1 &
+          app_pid=$!
+          trap 'kill "$app_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:3300/api/health |
+              grep -q '"status":"ok"'; then
+              break
+            fi
+            if [ "$attempt" -eq 60 ]; then
+              cat "$RUNNER_TEMP/sqlite-upgrade-app.log"
+              exit 1
+            fi
+            sleep 2
+          done
+          npm run runtime:verify:realtime -- \
+            http://127.0.0.1:3300 \
+            https://sqlite-ci.example
+          kill "$app_pid"
+          wait "$app_pid" || true
+          trap - EXIT
+
+          node -e "const D=require('better-sqlite3'); const db=new D('data/campfire.db'); const rows=db.pragma('wal_checkpoint(TRUNCATE)'); if(rows.some(row=>row.busy)) process.exit(1); db.close();"
+          cp data/campfire.db "$RUNNER_TEMP/campfire-sqlite.db"
+          tar -C "$CAMPFIRE_UPLOAD_DIR" -czf \
+            "$RUNNER_TEMP/campfire-sqlite-media.tgz" \
+            uploads avatars private-uploads
+          test -s "$RUNNER_TEMP/campfire-sqlite.db"
+          test -s "$RUNNER_TEMP/campfire-sqlite-media.tgz"
+
+      - name: Restore SQLite database and media into a clean state
+        run: |
+          test "$CAMPFIRE_UPLOAD_DIR" = "tests/.tmp/sqlite-media"
+          rm -f data/campfire.db data/campfire.db-journal \
+            data/campfire.db-wal data/campfire.db-shm
+          rm -rf "$CAMPFIRE_UPLOAD_DIR"
+          mkdir -p "$CAMPFIRE_UPLOAD_DIR"
+          cp "$RUNNER_TEMP/campfire-sqlite.db" data/campfire.db
+          tar -C "$CAMPFIRE_UPLOAD_DIR" -xzf \
+            "$RUNNER_TEMP/campfire-sqlite-media.tgz"
+
+          npm run db:sync
+          CAMPFIRE_SQLITE_LEGACY=1 \
+          CAMPFIRE_SQLITE_PERSISTENCE=verify \
+          CAMPFIRE_SQLITE_RECOVERY=verify \
+            npm run db:verify:sqlite
+          grep -Fxq 'beta-sqlite-upload-persistence' \
+            "$CAMPFIRE_UPLOAD_DIR/uploads/release-smoke.txt"
+          grep -Fxq 'beta-sqlite-avatar-persistence' \
+            "$CAMPFIRE_UPLOAD_DIR/avatars/release-smoke.txt"
+          grep -Fxq 'beta-sqlite-private-persistence' \
+            "$CAMPFIRE_UPLOAD_DIR/private-uploads/release-sqlite-private-smoke.txt"
+
+          NODE_ENV=production node --import tsx server.ts > "$RUNNER_TEMP/sqlite-restored-app.log" 2>&1 &
+          app_pid=$!
+          trap 'kill "$app_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:3300/api/health |
+              grep -q '"status":"ok"'; then
+              break
+            fi
+            if [ "$attempt" -eq 60 ]; then
+              cat "$RUNNER_TEMP/sqlite-restored-app.log"
+              exit 1
+            fi
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:3300/api/config |
+            grep -Fq '"socketPath":"/api/socketio"'
+          npm run runtime:verify:realtime -- \
+            http://127.0.0.1:3300 \
+            https://sqlite-ci.example
+          kill "$app_pid"
+          wait "$app_pid" || true
+          trap - EXIT
+
+
+  release-stack:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    defaults:
+      run:
+        working-directory: squatch-chat
+
+    services:
+      postgres:
+        image: postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
+        env:
+          POSTGRES_USER: campfire_ci
+          POSTGRES_PASSWORD: campfire-ci-service-password
+          POSTGRES_DB: campfire_ci_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U campfire_ci -d campfire_ci_db"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+
+    env:
+      DATABASE_URL: postgresql://campfire_ci:campfire-ci-service-password@127.0.0.1:5432/campfire_ci_db?schema=public
+      JWT_SECRET: ci-jwt-secret-not-a-real-secret-0123456789-abcdef
+      CAMPFIRE_POSTINSTALL_GENERATE_ONLY: "1"
+      DB_USER: compose_ci_user
+      DB_PASSWORD: compose-ci-password
+      DB_NAME: compose_ci_db
+      PORT: "3200"
+      COMPOSE_PROJECT_NAME: campfirereleaseci
+      NEXT_PUBLIC_APP_URL: https://campfire-ci.example
+      STRICT_CORS: "true"
+      CORS_ORIGINS: https://campfire-ci.example
+      COOKIE_NAME: campfire-ci-token
+      CONTEXT_SENTINEL: campfire-context-should-never-enter-image-0.1.0-beta.1
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: squatch-chat/package-lock.json
+
+      - name: Install dependencies without touching PostgreSQL
+        run: npm ci
+
+      - name: Apply and verify fresh PostgreSQL migrations
+        run: |
+          npm run db:migrate
+          npm run db:migrate
+          npx prisma migrate status --config prisma.postgresql.config.ts
+          npx prisma migrate diff \
+            --config prisma.postgresql.config.ts \
+            --from-config-datasource \
+            --to-schema prisma/schema.postgresql.prisma \
+            --exit-code
+          npm run db:verify:postgresql
+
+      - name: Build and verify production PostgreSQL health
+        env:
+          NODE_ENV: production
+          CAMPFIRE_BIND_HOST: 127.0.0.1
+          PORT: "3100"
+        run: |
+          npm run build
+          npm run host > "$RUNNER_TEMP/postgres-app.log" 2>&1 &
+          app_pid=$!
+          trap 'kill "$app_pid" 2>/dev/null || true' EXIT
+
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:3100/api/health |
+              grep -q '"status":"ok"'; then
+              exit 0
+            fi
+            sleep 2
+          done
+
+          cat "$RUNNER_TEMP/postgres-app.log"
+          exit 1
+
+      - name: Validate Compose configuration
+        run: docker compose -f docker-compose.prod.yml config --quiet
+
+      - name: Create hostile Docker-context sentinels
+        run: |
+          mkdir -p backups data public/uploads public/avatars desktop/.stage desktop/dist
+          printf 'NEXT_PUBLIC_CONTEXT_SENTINEL=%s\n' "$CONTEXT_SENTINEL" > .env
+          printf 'NEXT_PUBLIC_CONTEXT_SENTINEL=%s\n' "$CONTEXT_SENTINEL" > .env.local
+          for path in \
+            .npmrc release-context.pem release-context.key \
+            release-context.p12 release-context.pfx release-context.crt \
+            release-context.cer release-context.bak \
+            backups/release-context.txt data/campfire.db \
+            public/uploads/release-context.txt \
+            public/avatars/release-context.txt \
+            desktop/.stage/release-context.txt \
+            desktop/dist/release-context.txt; do
+            printf '%s\n' "$CONTEXT_SENTINEL" > "$path"
+          done
+
+      - name: Build deterministic builder and production images
+        run: |
+          docker compose -f docker-compose.prod.yml build --pull --no-cache app
+          docker build --target builder --tag campfire-release-builder:ci .
+          docker image inspect campfire-release-builder:ci > /dev/null
+          docker image inspect campfirereleaseci-app > /dev/null
+
+      - name: Verify builder and runner images exclude local secrets and state
+        run: |
+          for image in campfire-release-builder:ci campfirereleaseci-app; do
+            docker run --rm --user 0:0 --entrypoint sh \
+              --env CONTEXT_SENTINEL="$CONTEXT_SENTINEL" \
+              "$image" -c '
+              set -eu
+              for path in \
+                /app/.env /app/.env.local /app/.npmrc \
+                /app/release-context.pem /app/release-context.key \
+                /app/release-context.p12 /app/release-context.pfx \
+                /app/release-context.crt /app/release-context.cer \
+                /app/release-context.bak /app/backups/release-context.txt \
+                /app/data/campfire.db \
+                /app/public/uploads/release-context.txt \
+                /app/public/avatars/release-context.txt \
+                /app/desktop/.stage/release-context.txt \
+                /app/desktop/dist/release-context.txt; do
+                test ! -e "$path"
+              done
+
+              set +e
+              grep -r -F -l "$CONTEXT_SENTINEL" /app \
+                > /tmp/context-sentinel-matches \
+                2> /tmp/context-sentinel-errors
+              grep_status=$?
+              set -e
+              if [ "$grep_status" -eq 0 ]; then
+                cat /tmp/context-sentinel-matches
+                exit 1
+              fi
+              if [ "$grep_status" -ne 1 ]; then
+                cat /tmp/context-sentinel-errors >&2
+                exit "$grep_status"
+              fi
+            '
+          done
+
+          build_only_jwt="$(
+            sed -n 's/^ARG CAMPFIRE_BUILD_JWT_SECRET=//p' Dockerfile
+          )"
+          test -n "$build_only_jwt"
+          docker run --rm --user 0:0 --entrypoint sh \
+            --env BUILD_ONLY_JWT="$build_only_jwt" \
+            campfirereleaseci-app -c '
+            set +e
+            grep -r -F -l "$BUILD_ONLY_JWT" /app \
+              > /tmp/build-jwt-matches \
+              2> /tmp/build-jwt-errors
+            grep_status=$?
+            set -e
+            if [ "$grep_status" -eq 0 ]; then
+              cat /tmp/build-jwt-matches
+              exit 1
+            fi
+            if [ "$grep_status" -ne 1 ]; then
+              cat /tmp/build-jwt-errors >&2
+              exit "$grep_status"
+            fi
+          '
+
+      - name: Start and verify the production stack
+        run: |
+          docker compose -f docker-compose.prod.yml \
+            up -d --wait --wait-timeout 240
+
+          curl -fsS "http://127.0.0.1:${PORT}/api/health" |
+            grep -q '"status":"ok"'
+          curl -fsS "http://127.0.0.1:${PORT}/api/config" |
+            grep -Fq '"socketPath":"/api/socketio"'
+          docker compose -f docker-compose.prod.yml exec -T app sh -c \
+            'test "$(id -u)" -ne 0 && test -w /app/.next/cache'
+          docker compose -f docker-compose.prod.yml exec -T app \
+            npm run runtime:verify:realtime -- \
+              http://127.0.0.1:3000 \
+              https://campfire-ci.example
+
+          docker compose -f docker-compose.prod.yml exec -T db \
+            psql -U "$DB_USER" -d "$DB_NAME" -Atc 'SHOW server_version;' |
+            grep -E '^16\.'
+
+          docker compose -f docker-compose.prod.yml exec -T app \
+            npm run db:migrate
+          docker compose -f docker-compose.prod.yml exec -T app \
+            npx prisma migrate status --config prisma.postgresql.config.ts
+
+      - name: Verify container-replacement persistence and capture a stopped-app backup
+        run: |
+          docker compose -f docker-compose.prod.yml exec -T db \
+            psql -v ON_ERROR_STOP=1 -U "$DB_USER" -d "$DB_NAME" <<'SQL'
+          CREATE TABLE "_campfire_release_smoke" ("marker" TEXT PRIMARY KEY);
+          INSERT INTO "_campfire_release_smoke" ("marker") VALUES ('beta-persistence');
+
+          INSERT INTO "User" ("id", "email", "username", "passwordHash", "updatedAt")
+          VALUES ('release-media-owner', 'release-media@example.invalid', 'release_media_owner', 'not-a-real-hash', CURRENT_TIMESTAMP);
+
+          INSERT INTO "PrivateUpload" ("id", "ownerId", "storageKey", "originalName", "contentType", "byteSize", "state")
+          VALUES ('release-private-upload', 'release-media-owner', 'release-private-smoke.txt', 'release-private-smoke.txt', 'text/plain', 25, 'pending');
+          SQL
+
+          docker compose -f docker-compose.prod.yml exec -T app sh -c '
+            set -eu
+            printf "%s\n" beta-upload-persistence > /app/media/uploads/release-smoke.txt
+            printf "%s\n" beta-avatar-persistence > /app/media/avatars/release-smoke.txt
+            printf "%s\n" beta-private-persistence > /app/media/private-uploads/release-private-smoke.txt
+          '
+
+          old_app_id="$(docker compose -f docker-compose.prod.yml ps -q app)"
+          old_db_id="$(docker compose -f docker-compose.prod.yml ps -q db)"
+          docker compose -f docker-compose.prod.yml \
+            up -d --force-recreate --wait --wait-timeout 240
+          test "$(docker compose -f docker-compose.prod.yml ps -q app)" != "$old_app_id"
+          test "$(docker compose -f docker-compose.prod.yml ps -q db)" != "$old_db_id"
+
+          docker compose -f docker-compose.prod.yml exec -T db \
+            psql -U "$DB_USER" -d "$DB_NAME" -Atc \
+              'SELECT "marker" FROM "_campfire_release_smoke";' |
+            grep -Fxq 'beta-persistence'
+          docker compose -f docker-compose.prod.yml exec -T db \
+            psql -U "$DB_USER" -d "$DB_NAME" -Atc \
+              "SELECT \"storageKey\" || ':' || \"state\" FROM \"PrivateUpload\" WHERE \"id\" = 'release-private-upload';" |
+            grep -Fxq 'release-private-smoke.txt:pending'
+          docker compose -f docker-compose.prod.yml exec -T app \
+            grep -Fxq 'beta-upload-persistence' /app/media/uploads/release-smoke.txt
+          docker compose -f docker-compose.prod.yml exec -T app \
+            grep -Fxq 'beta-avatar-persistence' /app/media/avatars/release-smoke.txt
+          docker compose -f docker-compose.prod.yml exec -T app \
+            grep -Fxq 'beta-private-persistence' /app/media/private-uploads/release-private-smoke.txt
+          docker compose -f docker-compose.prod.yml exec -T app \
+            npm run runtime:verify:realtime -- \
+              http://127.0.0.1:3000 \
+              https://campfire-ci.example
+
+          docker compose -f docker-compose.prod.yml stop app
+          test -n "$(docker compose -f docker-compose.prod.yml ps -aq app)"
+          test "$(docker inspect -f '{{.State.Running}}' "$(docker compose -f docker-compose.prod.yml ps -aq app)")" = "false"
+
+          docker compose -f docker-compose.prod.yml exec -T db \
+            pg_dump -U "$DB_USER" -d "$DB_NAME" \
+              --format=custom --no-owner --no-privileges \
+            > "$RUNNER_TEMP/campfire.dump"
+          docker compose -f docker-compose.prod.yml run \
+            --rm --no-deps -T --entrypoint sh app -c \
+              'tar -C /app/media -czf - uploads avatars private-uploads' \
+            > "$RUNNER_TEMP/campfire-media.tgz"
+          test -s "$RUNNER_TEMP/campfire.dump"
+          test -s "$RUNNER_TEMP/campfire-media.tgz"
+
+      - name: Restore database and media into clean volumes
+        run: |
+          docker compose -f docker-compose.prod.yml down -v --remove-orphans
+          docker compose -f docker-compose.prod.yml \
+            up -d db --wait --wait-timeout 120
+
+          docker compose -f docker-compose.prod.yml exec -T db \
+            pg_restore -U "$DB_USER" -d "$DB_NAME" \
+              --exit-on-error --no-owner --no-privileges \
+            < "$RUNNER_TEMP/campfire.dump"
+
+          docker compose -f docker-compose.prod.yml run \
+            --rm --no-deps -T --entrypoint sh app -c \
+              'mkdir -p /app/media && tar -C /app/media -xzf -' \
+            < "$RUNNER_TEMP/campfire-media.tgz"
+
+          docker compose -f docker-compose.prod.yml \
+            up -d app --wait --wait-timeout 240
+          curl -fsS "http://127.0.0.1:${PORT}/api/health" |
+            grep -q '"status":"ok"'
+          curl -fsS "http://127.0.0.1:${PORT}/api/config" |
+            grep -Fq '"socketPath":"/api/socketio"'
+          docker compose -f docker-compose.prod.yml exec -T app sh -c \
+            'test "$(id -u)" -ne 0 && test -w /app/.next/cache'
+          docker compose -f docker-compose.prod.yml exec -T db \
+            psql -U "$DB_USER" -d "$DB_NAME" -Atc \
+              'SELECT "marker" FROM "_campfire_release_smoke";' |
+            grep -Fxq 'beta-persistence'
+          docker compose -f docker-compose.prod.yml exec -T db \
+            psql -U "$DB_USER" -d "$DB_NAME" -Atc \
+              "SELECT \"storageKey\" || ':' || \"state\" FROM \"PrivateUpload\" WHERE \"id\" = 'release-private-upload';" |
+            grep -Fxq 'release-private-smoke.txt:pending'
+          docker compose -f docker-compose.prod.yml exec -T app \
+            grep -Fxq 'beta-upload-persistence' /app/media/uploads/release-smoke.txt
+          docker compose -f docker-compose.prod.yml exec -T app \
+            grep -Fxq 'beta-avatar-persistence' /app/media/avatars/release-smoke.txt
+          docker compose -f docker-compose.prod.yml exec -T app \
+            grep -Fxq 'beta-private-persistence' /app/media/private-uploads/release-private-smoke.txt
+          docker compose -f docker-compose.prod.yml exec -T app \
+            npm run runtime:verify:realtime -- \
+              http://127.0.0.1:3000 \
+              https://campfire-ci.example
+
+      - name: Show production-stack diagnostics
+        if: failure()
+        run: |
+          docker compose -f docker-compose.prod.yml ps || true
+          docker compose -f docker-compose.prod.yml logs --no-color || true
+
+      - name: Remove production-stack resources
+        if: always()
+        run: |
+          docker compose -f docker-compose.prod.yml \
+            down -v --remove-orphans

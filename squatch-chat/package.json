@@ -1,6 +1,6 @@
 {
   "name": "campfire",
-  "version": "0.0.3",
+  "version": "0.1.0-beta.1",
   "private": true,
   "license": "AGPL-3.0-only",
   "engines": {
@@ -12,6 +12,7 @@
     "dev:full": "node scripts/dev-full.mjs",
     "postinstall": "node scripts/postinstall.mjs",
     "build": "node scripts/build.mjs",
+    "release:check": "node scripts/check-release-metadata.mjs",
     "start": "next start",
     "host": "npx tsx server.ts",
     "lint": "eslint",
@@ -20,11 +21,15 @@
     "db:up": "node scripts/db-up.mjs",
     "db:down": "node scripts/db-down.mjs",
     "db:wait": "node scripts/db-wait.mjs",
-    "db:migrate": "prisma migrate deploy --config prisma.postgresql.config.ts",
+    "db:migrate": "tsx scripts/preflight-postgresql.ts && prisma migrate deploy --config prisma.postgresql.config.ts",
     "db:migrate:dev": "prisma migrate dev --config prisma.postgresql.config.ts",
     "db:generate": "node scripts/generate-prisma.mjs",
     "db:check": "node scripts/check-prisma-pipeline.mjs",
     "db:sync": "node scripts/sync-sqlite.mjs",
+    "db:fixture:sqlite-v0.0.3": "node scripts/create-v003-sqlite-fixture.mjs",
+    "db:verify:sqlite": "tsx scripts/verify-sqlite.ts",
+    "db:verify:postgresql": "tsx scripts/verify-postgresql.ts",
+    "db:verify:postgresql-baseline": "tsx scripts/verify-postgresql-baseline.ts",
     "db:push": "prisma db push --config prisma.config.ts",
     "db:studio": "prisma studio --config prisma.config.ts",
     "db:reset": "prisma db push --config prisma.config.ts --force-reset",
@@ -33,7 +38,8 @@
     "desktop:run": "npm run desktop:stage && electron desktop",
     "desktop:portable": "npm run desktop:stage && electron-builder --config packaging/electron-builder.json --win portable --x64",
     "desktop:installer": "npm run desktop:stage && electron-builder --config packaging/electron-builder.json --win nsis --x64",
-    "desktop:dist": "npm run desktop:stage && electron-builder --config packaging/electron-builder.json --win portable nsis --x64"
+    "desktop:dist": "npm run desktop:stage && electron-builder --config packaging/electron-builder.json --win portable nsis --x64",
+    "runtime:verify:realtime": "tsx scripts/verify-realtime.ts"
   },
   "dependencies": {
     "@prisma/adapter-better-sqlite3": "7.8.0",

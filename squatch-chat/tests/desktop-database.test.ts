@@ -1,21 +1,72 @@
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
   rmSync,
+  writeFileSync,
 } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   DESKTOP_SCHEMA_VERSION,
   upgradeDesktopDatabase,
 } from "@/desktop/database.cjs";
+import { importLegacyDesktopState } from "@/desktop/legacy-state.cjs";
 
 const Database = createRequire(import.meta.url)("better-sqlite3");
 const temporaryDirectories: string[] = [];
+
+function createV003DesktopState(root: string) {
+  const databasePath = join(root, "campfire.db");
+  const database = new Database(databasePath);
+  database.exec(
+    readFileSync(
+      resolve(
+        process.cwd(),
+        "..",
+        "desktop",
+        "db-migrations",
+        "0001_init",
+        "migration.sql",
+      ),
+      "utf8",
+    ),
+  );
+  database.exec(
+    [
+      'CREATE TABLE "_campfire_migrations" (',
+      '  "name" TEXT PRIMARY KEY,',
+      '  "applied_at" TEXT NOT NULL DEFAULT (datetime(\'now\'))',
+      ');',
+      'INSERT INTO "_campfire_migrations" ("name") VALUES (\'0001_init\');',
+      'INSERT INTO "User" ("id", "email", "username", "passwordHash", "updatedAt")',
+      "VALUES",
+      "  ('legacy-owner', 'owner@legacy.test', 'legacy_owner', 'hash', CURRENT_TIMESTAMP),",
+      "  ('legacy-member', 'member@legacy.test', 'legacy_member', 'hash', CURRENT_TIMESTAMP);",
+      'INSERT INTO "Server" ("id", "name", "ownerId", "inviteCode")',
+      "VALUES ('legacy-server', 'Legacy Camp', 'legacy-owner', 'legacy-invite');",
+      'INSERT INTO "Channel" ("id", "serverId", "name")',
+      "VALUES ('legacy-channel', 'legacy-server', 'general');",
+      'INSERT INTO "Message" ("id", "channelId", "authorId", "content", "updatedAt")',
+      "VALUES ('legacy-message', 'legacy-channel', 'legacy-owner', 'still here', CURRENT_TIMESTAMP);",
+      'INSERT INTO "Friendship" ("id", "requesterId", "addresseeId", "status", "createdAt", "updatedAt")',
+      "VALUES ('legacy-block', 'legacy-member', 'legacy-owner', 'blocked', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);",
+      "PRAGMA user_version = 0;",
+    ].join("\n"),
+  );
+  database.close();
+
+  mkdirSync(join(root, "uploads"), { recursive: true });
+  mkdirSync(join(root, "avatars"), { recursive: true });
+  writeFileSync(join(root, "uploads", "legacy.txt"), "legacy upload");
+  writeFileSync(join(root, "avatars", "legacy.png"), "legacy avatar");
+  writeFileSync(join(root, "secret"), "a".repeat(64));
+  return databasePath;
+}
 
 function createLegacyDatabase({ duplicateStripe = false } = {}) {
   const directory = mkdtempSync(join(tmpdir(), "campfire-desktop-db-"));
@@ -78,6 +129,211 @@ afterEach(() => {
 });
 
 describe("desktop database upgrades", () => {
+  it("imports the real installed v0.0.3 state layout without modifying its source", async () => {
+    const root = mkdtempSync(join(tmpdir(), "campfire-v003-installed-"));
+    temporaryDirectories.push(root);
+    const legacyDatabasePath = createV003DesktopState(root);
+
+    const result = await importLegacyDesktopState({
+      userDataPath: root,
+      portableDirectory: null,
+      Database,
+      log: () => undefined,
+    });
+
+    expect(result.status).toBe("imported");
+    expect(existsSync(legacyDatabasePath)).toBe(true);
+    expect(readFileSync(join(root, "media", "uploads", "legacy.txt"), "utf8"))
+      .toBe("legacy upload");
+    expect(readFileSync(join(root, "media", "avatars", "legacy.png"), "utf8"))
+      .toBe("legacy avatar");
+
+    const imported = new Database(join(root, "data", "campfire.db"), {
+      readonly: true,
+    });
+    expect(imported.pragma("user_version", { simple: true })).toBe(
+      DESKTOP_SCHEMA_VERSION,
+    );
+    expect(
+      imported.prepare('SELECT "content" FROM "Message" WHERE "id" = ?').get(
+        "legacy-message",
+      ),
+    ).toEqual({ content: "still here" });
+    for (const table of ["WebhookEvent", "Report"]) {
+      expect(
+        imported
+          .prepare(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+          )
+          .get(table),
+      ).toBeTruthy();
+    }
+    imported.close();
+  });
+
+  it("imports committed WAL pages without rewriting the legacy database", async () => {
+    const root = mkdtempSync(join(tmpdir(), "campfire-v003-wal-"));
+    temporaryDirectories.push(root);
+    const legacyDatabasePath = createV003DesktopState(root);
+    const writer = new Database(legacyDatabasePath);
+
+    try {
+      writer.pragma("journal_mode = WAL");
+      writer.pragma("wal_autocheckpoint = 0");
+      writer
+        .prepare(
+          'INSERT INTO "Message" ("id", "channelId", "authorId", "content", "updatedAt") VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)',
+        )
+        .run(
+          "legacy-wal-message",
+          "legacy-channel",
+          "legacy-owner",
+          "committed in WAL",
+        );
+
+      const legacyWalPath = legacyDatabasePath + "-wal";
+      const databaseBefore = readFileSync(legacyDatabasePath);
+      const walBefore = readFileSync(legacyWalPath);
+
+      await importLegacyDesktopState({
+        userDataPath: root,
+        portableDirectory: null,
+        Database,
+        log: () => undefined,
+      });
+
+      expect(readFileSync(legacyDatabasePath)).toEqual(databaseBefore);
+      expect(readFileSync(legacyWalPath)).toEqual(walBefore);
+      const imported = new Database(join(root, "data", "campfire.db"), {
+        readonly: true,
+      });
+      expect(
+        imported
+          .prepare('SELECT "content" FROM "Message" WHERE "id" = ?')
+          .get("legacy-wal-message"),
+      ).toEqual({ content: "committed in WAL" });
+      imported.close();
+    } finally {
+      writer.close();
+    }
+  });
+
+  it("imports the real portable v0.0.3 layout exactly once", async () => {
+    const portableDirectory = mkdtempSync(
+      join(tmpdir(), "campfire-v003-portable-"),
+    );
+    temporaryDirectories.push(portableDirectory);
+    const legacyRoot = join(portableDirectory, "data");
+    const userDataPath = join(portableDirectory, "CampfireData");
+    mkdirSync(legacyRoot, { recursive: true });
+    const legacyDatabasePath = createV003DesktopState(legacyRoot);
+    const messages: string[] = [];
+
+    const first = await importLegacyDesktopState({
+      userDataPath,
+      portableDirectory,
+      Database,
+      log: (message: string) => messages.push(message),
+    });
+    const second = await importLegacyDesktopState({
+      userDataPath,
+      portableDirectory,
+      Database,
+      log: (message: string) => messages.push(message),
+    });
+
+    expect(first).toMatchObject({
+      status: "imported",
+      legacyRoot,
+      copiedMedia: true,
+      preservedJwtSecret: true,
+    });
+    expect(second).toMatchObject({ status: "existing-beta" });
+    expect(existsSync(legacyDatabasePath)).toBe(true);
+    expect(
+      readFileSync(
+        join(userDataPath, "media", "uploads", "legacy.txt"),
+        "utf8",
+      ),
+    ).toBe("legacy upload");
+    expect(
+      JSON.parse(
+        readFileSync(join(userDataPath, "desktop-config.json"), "utf8"),
+      ).jwtSecret,
+    ).toBe("a".repeat(64));
+    expect(messages.some((message) => message.includes("Imported v0.0.3")))
+      .toBe(true);
+  });
+
+  it("refuses to overwrite beta state when legacy portable state is also present", async () => {
+    const portableDirectory = mkdtempSync(
+      join(tmpdir(), "campfire-v003-conflict-"),
+    );
+    temporaryDirectories.push(portableDirectory);
+    const legacyRoot = join(portableDirectory, "data");
+    const userDataPath = join(portableDirectory, "CampfireData");
+    mkdirSync(legacyRoot, { recursive: true });
+    mkdirSync(userDataPath, { recursive: true });
+    const legacyDatabasePath = createV003DesktopState(legacyRoot);
+    const betaConfig = { jwtSecret: "b".repeat(96) };
+    writeFileSync(
+      join(userDataPath, "desktop-config.json"),
+      JSON.stringify(betaConfig),
+    );
+
+    const result = await importLegacyDesktopState({
+      userDataPath,
+      portableDirectory,
+      Database,
+      log: () => undefined,
+    });
+
+    expect(result).toMatchObject({ status: "conflict" });
+    expect(
+      JSON.parse(
+        readFileSync(join(userDataPath, "desktop-config.json"), "utf8"),
+      ),
+    ).toEqual(betaConfig);
+    expect(existsSync(join(userDataPath, "data", "campfire.db"))).toBe(false);
+    expect(existsSync(legacyDatabasePath)).toBe(true);
+  });
+
+  it("leaves both roots unchanged when a legacy import cannot be upgraded", async () => {
+    const portableDirectory = mkdtempSync(
+      join(tmpdir(), "campfire-v003-failure-"),
+    );
+    temporaryDirectories.push(portableDirectory);
+    const legacyRoot = join(portableDirectory, "data");
+    const userDataPath = join(portableDirectory, "CampfireData");
+    mkdirSync(legacyRoot, { recursive: true });
+    const legacyDatabasePath = createV003DesktopState(legacyRoot);
+    const legacy = new Database(legacyDatabasePath);
+    legacy
+      .prepare('UPDATE "User" SET "stripeCustomerId" = ?')
+      .run("cus_duplicate");
+    legacy.close();
+    const messages: string[] = [];
+
+    await expect(
+      importLegacyDesktopState({
+        userDataPath,
+        portableDirectory,
+        Database,
+        log: (message: string) => messages.push(message),
+      }),
+    ).rejects.toThrow(/stripeCustomerId has duplicates/);
+
+    expect(existsSync(join(userDataPath, "data"))).toBe(false);
+    expect(existsSync(join(userDataPath, "media"))).toBe(false);
+    expect(existsSync(join(userDataPath, "desktop-config.json"))).toBe(false);
+    const unchanged = new Database(legacyDatabasePath, { readonly: true });
+    expect(unchanged.pragma("user_version", { simple: true })).toBe(0);
+    expect(unchanged.prepare('SELECT COUNT(*) AS count FROM "User"').get())
+      .toEqual({ count: 2 });
+    unchanged.close();
+    expect(messages.at(-1)).toContain("failed safely");
+  });
+
   it("backs up and upgrades a legacy database exactly once", () => {
     const { databasePath, directory } = createLegacyDatabase();
     const first = upgradeDesktopDatabase({
@@ -161,6 +417,70 @@ describe("desktop database upgrades", () => {
     expect(readdirSync(join(directory, "backups"))).toHaveLength(backupsBefore);
   });
 
+  it("upgrades pre-beta v4 databases that predate reports and webhooks", () => {
+    const { databasePath, directory } = createLegacyDatabase();
+    upgradeDesktopDatabase({
+      databasePath,
+      Database,
+      log: () => undefined,
+    });
+
+    const legacyV4 = new Database(databasePath);
+    legacyV4.exec('DROP TABLE "Report"; DROP TABLE "WebhookEvent";');
+    legacyV4.pragma("user_version = 4");
+    legacyV4.close();
+
+    const backupsBefore = readdirSync(join(directory, "backups")).length;
+    const result = upgradeDesktopDatabase({
+      databasePath,
+      Database,
+      log: () => undefined,
+    });
+
+    expect(result.upgraded).toBe(true);
+    expect(result.backupPath).toMatch(/\.pre-v5\./);
+    expect(result.backupPath && existsSync(result.backupPath)).toBe(true);
+
+    const database = new Database(databasePath, { readonly: true });
+    expect(database.pragma("user_version", { simple: true })).toBe(5);
+    expect(database.prepare('SELECT COUNT(*) AS count FROM "User"').get())
+      .toEqual({ count: 2 });
+    for (const table of ["WebhookEvent", "Report"]) {
+      expect(
+        database
+          .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?")
+          .get(table),
+      ).toBeTruthy();
+    }
+    for (const index of [
+      "Report_targetUserId_status_idx",
+      "Report_reporterId_idx",
+    ]) {
+      expect(
+        database
+          .prepare("SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?")
+          .get(index),
+      ).toBeTruthy();
+    }
+    const reportForeignKeys = database
+      .prepare('PRAGMA foreign_key_list("Report")')
+      .all() as Array<{ from: string; table: string; on_delete: string }>;
+    expect(reportForeignKeys).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ from: "reporterId", table: "User", on_delete: "CASCADE" }),
+        expect.objectContaining({ from: "targetUserId", table: "User", on_delete: "CASCADE" }),
+      ]),
+    );
+    database.close();
+
+    const backupsAfterUpgrade = readdirSync(join(directory, "backups")).length;
+    expect(backupsAfterUpgrade).toBe(backupsBefore + 1);
+    expect(
+      upgradeDesktopDatabase({ databasePath, Database, log: () => undefined }),
+    ).toEqual({ upgraded: false, backupPath: null });
+    expect(readdirSync(join(directory, "backups"))).toHaveLength(backupsAfterUpgrade);
+  });
+
   it("refuses duplicate Stripe identifiers before changing the schema", () => {
     const { databasePath, directory } = createLegacyDatabase({
       duplicateStripe: true,
@@ -209,5 +529,23 @@ describe("desktop private attachment storage", () => {
 
     expect(mainSource).toContain('path.join(mediaRoot, "private-uploads")');
     expect(mainSource).toContain('path.join(mediaRoot, "uploads")');
+  });
+
+  it("imports legacy state before creating fresh beta state", () => {
+    const mainSource = readFileSync(
+      new URL("../desktop/main.cjs", import.meta.url),
+      "utf8",
+    );
+    const importPosition = mainSource.indexOf("importLegacyDesktopState({");
+    const configPosition = mainSource.indexOf(
+      "const desktopConfig = ensureDesktopConfig();",
+    );
+    const databasePosition = mainSource.indexOf(
+      "const databasePath = ensureDatabase(serverRoot);",
+    );
+
+    expect(importPosition).toBeGreaterThan(0);
+    expect(configPosition).toBeGreaterThan(importPosition);
+    expect(databasePosition).toBeGreaterThan(importPosition);
   });
 });

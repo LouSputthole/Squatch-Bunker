@@ -4,6 +4,14 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import Avatar from "@/components/Avatar";
 import { BlockedUsersSettings } from "@/components/BlockedUsersSettings";
 import { useTheme, THEMES, THEME_LABELS } from "@/hooks/useTheme";
+import {
+  applyAudioOutputDevice,
+  getMediaDeviceSettings,
+  readAudioSettings,
+  reconcileMediaDeviceSettings,
+  requestVoiceStream,
+  saveAudioSettings,
+} from "@/lib/mediaDeviceSettings";
 
 interface SettingsModalProps {
   open: boolean;
@@ -15,39 +23,13 @@ interface SettingsModalProps {
   onBlockChange?: (userId: string, blocked: boolean) => void;
 }
 
-interface SavedAudioSettings {
-  inputDevice?: string;
-  outputDevice?: string;
-  videoDevice?: string;
-  inputVolume?: number;
-  outputVolume?: number;
-  inputSensitivity?: number;
-  messageNotifications?: boolean;
-  masterEnabled?: boolean;
-  messageSend?: boolean;
-  voice?: boolean;
-  notifications?: boolean;
-  volume?: number;
-}
-
-function readSavedAudioSettings(): SavedAudioSettings {
-  if (typeof window === "undefined") return {};
-  const saved = localStorage.getItem("campfire-audio-settings");
-  if (!saved) return {};
-  try {
-    return JSON.parse(saved) as SavedAudioSettings;
-  } catch {
-    return {};
-  }
-}
-
 export default function SettingsModal(props: SettingsModalProps) {
   if (!props.open) return null;
   return <SettingsModalContent {...props} />;
 }
 
 function SettingsModalContent({ onClose, username, currentAvatar, onAvatarChange, onInputSensitivityChange, onBlockChange }: SettingsModalProps) {
-  const [initialSettings] = useState(readSavedAudioSettings);
+  const [initialSettings] = useState(readAudioSettings);
   const [tab, setTab] = useState<"audio" | "account" | "privacy" | "appearance">("audio");
   const { theme, setTheme, themes, customColors, setCustomColors } = useTheme();
   const [inputDevices, setInputDevices] = useState<MediaDeviceInfo[]>([]);
@@ -80,7 +62,7 @@ function SettingsModalContent({ onClose, username, currentAvatar, onAvatarChange
 
   // Save settings on change
   const saveSettings = useCallback(() => {
-    localStorage.setItem("campfire-audio-settings", JSON.stringify({
+    saveAudioSettings({
       inputDevice: selectedInput,
       outputDevice: selectedOutput,
       videoDevice: selectedVideo,
@@ -94,29 +76,56 @@ function SettingsModalContent({ onClose, username, currentAvatar, onAvatarChange
       voice: uiSoundVoice,
       notifications: uiSoundNotifications,
       volume: uiSoundVolume,
-    }));
+    });
   }, [selectedInput, selectedOutput, selectedVideo, inputVolume, outputVolume, inputSensitivity, messageNotifications, uiSoundsMaster, uiSoundMessages, uiSoundVoice, uiSoundNotifications, uiSoundVolume]);
 
   useEffect(() => { saveSettings(); }, [saveSettings]);
 
   // Enumerate devices
   useEffect(() => {
-    async function loadDevices() {
-      try {
-        // Request audio permission so labels are populated; video is optional
-        const tempStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        tempStream.getTracks().forEach((t) => t.stop());
+    let cancelled = false;
 
+    async function refreshDevices() {
+      try {
         const devices = await navigator.mediaDevices.enumerateDevices();
+        if (cancelled) return;
+
         setInputDevices(devices.filter((d) => d.kind === "audioinput"));
         setOutputDevices(devices.filter((d) => d.kind === "audiooutput"));
         setVideoDevices(devices.filter((d) => d.kind === "videoinput"));
+
+        const reconciled = reconcileMediaDeviceSettings(readAudioSettings(), devices);
+        const nextDevices = getMediaDeviceSettings(reconciled.settings);
+        setSelectedInput(nextDevices.inputDevice);
+        setSelectedOutput(nextDevices.outputDevice);
+        setSelectedVideo(nextDevices.videoDevice);
+        if (reconciled.changed) saveAudioSettings(reconciled.settings);
       } catch (err) {
         console.error("[Settings] Failed to enumerate devices:", err);
       }
     }
 
-    loadDevices();
+    async function initializeDevices() {
+      try {
+        // Request audio permission so labels are populated; video is optional.
+        const tempStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        tempStream.getTracks().forEach((track) => track.stop());
+      } catch {
+        // Enumeration still returns default/permission-limited devices.
+      }
+      await refreshDevices();
+    }
+
+    function handleDeviceChange() {
+      void refreshDevices();
+    }
+
+    navigator.mediaDevices.addEventListener("devicechange", handleDeviceChange);
+    void initializeDevices();
+    return () => {
+      cancelled = true;
+      navigator.mediaDevices.removeEventListener("devicechange", handleDeviceChange);
+    };
   }, []);
 
   const releaseMicTestResources = useCallback(() => {
@@ -134,18 +143,16 @@ function SettingsModalContent({ onClose, username, currentAvatar, onAvatarChange
     const requestId = ++micTestRequestRef.current;
     setTesting(true);
     try {
-      const constraints: MediaStreamConstraints = {
-        audio: selectedInput
-          ? { deviceId: { exact: selectedInput }, echoCancellation: true, noiseSuppression: true }
-          : { echoCancellation: true, noiseSuppression: true },
-      };
-
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      const { stream, usedDefault } = await requestVoiceStream(
+        navigator.mediaDevices,
+        selectedInput,
+      );
 
       if (requestId !== micTestRequestRef.current) {
         stream.getTracks().forEach((track) => track.stop());
         return;
       }
+      if (usedDefault) setSelectedInput("");
       testStreamRef.current = stream;
       const ctx = new AudioContext();
       audioCtxRef.current = ctx;
@@ -187,12 +194,18 @@ function SettingsModalContent({ onClose, username, currentAvatar, onAvatarChange
 
   // Play test sound through selected output
   const playTestSound = useCallback(async () => {
+    let ctx: AudioContext | null = null;
+    let audio: HTMLAudioElement | null = null;
+
     try {
-      const ctx = new AudioContext();
+      ctx = new AudioContext();
+      audio = new Audio();
+      const destination = ctx.createMediaStreamDestination();
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.connect(gain);
-      gain.connect(ctx.destination);
+      gain.connect(destination);
+      audio.srcObject = destination.stream;
 
       osc.frequency.setValueAtTime(440, ctx.currentTime);
       osc.frequency.setValueAtTime(550, ctx.currentTime + 0.15);
@@ -200,13 +213,23 @@ function SettingsModalContent({ onClose, username, currentAvatar, onAvatarChange
       gain.gain.setValueAtTime((outputVolume / 100) * 0.3, ctx.currentTime);
       gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
 
+      await applyAudioOutputDevice(audio, selectedOutput);
+      await audio.play();
       osc.start(ctx.currentTime);
       osc.stop(ctx.currentTime + 0.5);
-      setTimeout(() => ctx.close(), 700);
+      const activeContext = ctx;
+      const activeAudio = audio;
+      setTimeout(() => {
+        activeAudio.pause();
+        activeAudio.srcObject = null;
+        void activeContext.close();
+      }, 700);
     } catch {
-      // Audio not supported
+      audio?.pause();
+      if (audio) audio.srcObject = null;
+      void ctx?.close();
     }
-  }, [outputVolume]);
+  }, [outputVolume, selectedOutput]);
 
   return (
     <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center" onClick={onClose} role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">

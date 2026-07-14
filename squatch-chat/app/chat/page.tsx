@@ -52,7 +52,7 @@ type ServerWithSettings = Server & {
   welcomeMessage?: string | null;
 };
 
-const APP_VERSION = "v0.2.0";
+const APP_VERSION = `v${process.env.NEXT_PUBLIC_APP_VERSION ?? "dev"}`;
 
 export default function ChatPage() {
   return (

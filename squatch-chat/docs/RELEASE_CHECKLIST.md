@@ -114,7 +114,10 @@ npm run desktop:installer
 npm run desktop:dist
 ```
 
-Local worktree evidence (2026-07-13; not release sign-off): Node v24.14.1/npm 11.11.0; `npm test` passed 61 files and 373 tests with one file/test intentionally skipped; lint, TypeScript, dual-provider Prisma checks, idempotent SQLite sync, production build (53 static pages), a 200-client opt-in load sanity, and `npm audit --audit-level=high` with zero vulnerabilities passed. An authenticated production HTTP story verified private upload/claim, full/`HEAD`/Range reads, non-public storage, and immediate access revocation. `desktop:stage`, `desktop:verify`, and `desktop:dist` passed. The worktree is not frozen/clean, Node 22 clean-checkout evidence remains open, both binaries are `NotSigned`, and actual executable launch/install smoke was not run because unsigned-artifact execution requires explicit authorization in this environment. Docker, live PostgreSQL, clean-machine, upgrade/repair/uninstall, signing, backup/restore, and failure-path evidence remain open.
+Historical `0.0.3` worktree evidence (2026-07-13; not beta sign-off): Node
+v24.14.1/npm 11.11.0 passed 373 tests, lint, TypeScript, provider checks,
+SQLite sync, production build, audit, load sanity, private-attachment HTTP
+acceptance, desktop staging/verification, and unsigned desktop builds. None of those artifact results carry forward to `0.1.0-beta.1`; the exact-candidate gates below remain authoritative.
 
 - [ ] `desktop:stage` produces a complete staged app without copying `.env`, development databases, user uploads, or signing secrets.
 - [ ] The staged launcher starts the custom Campfire server and waits for a healthy local endpoint before opening a window.
@@ -129,7 +132,7 @@ Local worktree evidence (2026-07-13; not release sign-off): Node v24.14.1/npm 11
 - [ ] SHA-256 checksums, exact filenames, sizes, supported Windows versions, and signature verification instructions are published.
 - [ ] Smoke tests run against the actual portable and installer artifacts, not only the staged directory.
 
-Current local artifact fingerprints (not release sign-off; both Authenticode `NotSigned`):
+Historical `0.0.3` local artifact fingerprints (not beta sign-off; both Authenticode `NotSigned`):
 
 - `desktop/dist/Campfire-Portable-0.0.3-x64.exe` — 125232117 bytes; SHA-256 `0C6E4C34C318F2CB0C72C3B9BBEFD57BD041A4B1E43E8AE69693A715D322FD81`
 - `desktop/dist/Campfire-Setup-0.0.3-x64.exe` — 125499964 bytes; SHA-256 `BAA288D624FC15E3146F44D08E1568C8C324D7E167FB316377DC23754589BBC8`

@@ -6,11 +6,11 @@
   "author": "Squatch Bunker",
   "license": "AGPL-3.0-only",
   "scripts": {
-    "start": "electron .",
+    "start": "node scripts/legacy-disabled.mjs",
     "icons": "node scripts/make-icons.mjs",
-    "build:all": "node build-desktop.mjs",
-    "build:portable": "node build-desktop.mjs --portable",
-    "build:installer": "node build-desktop.mjs --installer"
+    "build:all": "node scripts/legacy-disabled.mjs",
+    "build:portable": "node scripts/legacy-disabled.mjs",
+    "build:installer": "node scripts/legacy-disabled.mjs"
   },
   "devDependencies": {
     "@electron/rebuild": "^4.0.1",
