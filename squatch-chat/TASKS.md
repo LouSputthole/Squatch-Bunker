@@ -1,5 +1,15 @@
 # Campfire — 10 Priority Tasks for Helper Coder
 
+> **STATUS (2026-07-26): ALL 10 TASKS COMPLETE — this file is historical.**
+> Every feature below is implemented in the current tree (error/404 pages,
+> password reset, attachment previews, notifications, channel categories,
+> status messages, emoji picker, invite modal, typing indicators, unread
+> badges). Do not pick work from this list. Current priorities live in
+> [ROADMAP.md](./ROADMAP.md) — Milestone 0 (release-candidate evidence) is
+> the blocking milestone, tracked in
+> [docs/RELEASE_CHECKLIST.md](./docs/RELEASE_CHECKLIST.md) and
+> [docs/releases/0.1.0-beta.1-evidence.md](./docs/releases/0.1.0-beta.1-evidence.md).
+
 ## IMPORTANT: Project Context
 
 The app is a **Next.js 16 App Router** project located at `squatch-chat/` in the repo.
