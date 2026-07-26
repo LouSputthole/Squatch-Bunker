@@ -13,6 +13,7 @@
     "postinstall": "node scripts/postinstall.mjs",
     "build": "node scripts/build.mjs",
     "release:check": "node scripts/check-release-metadata.mjs",
+    "audit:deps": "node scripts/audit-dependencies.mjs --audit-level=high",
     "start": "next start",
     "host": "npx tsx server.ts",
     "lint": "eslint",
@@ -51,7 +52,7 @@
     "cookie": "^1.1.1",
     "dotenv": "^17.4.0",
     "jsonwebtoken": "^9.0.3",
-    "next": "^16.2.10",
+    "next": "^16.2.11",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "socket.io": "^4.8.3",
@@ -60,7 +61,8 @@
   },
   "overrides": {
     "@hono/node-server": "1.19.13",
-    "postcss": "8.5.16"
+    "postcss": "8.5.23",
+    "sharp": "0.35.3"
   },
   "devDependencies": {
     "@electron/rebuild": "4.2.0",
