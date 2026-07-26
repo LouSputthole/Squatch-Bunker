@@ -39,8 +39,7 @@ import { usePresence } from "@/hooks/usePresence";
 import { useVoice } from "@/hooks/useVoice";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useOfflineQueue } from "@/hooks/useOfflineQueue";
-import { useNotifications } from "@/hooks/useNotifications";
-import NotificationBell from "@/components/NotificationBell";
+import EmberInbox, { type InboxNotification } from "@/components/EmberInbox";
 import GatheringsPanel from "@/components/GatheringsPanel";
 
 import type { Channel, Server } from "@/types/chat";
@@ -76,10 +75,8 @@ function ChatPageInner() {
   const activeChannelDetails = ch.activeChannel as ChannelWithSlowMode | null;
   const activeServerDetails = srv.activeServer as ServerWithSettings | null;
 
-  const { notify } = useNotifications();
   const [socketStatus, setSocketStatus] = useState<"connected" | "connecting" | "disconnected">("connecting");
   const offlineQueue = useOfflineQueue();
-  const [notifications, setNotifications] = useState<Array<{id: string, title: string, body: string, timestamp: number, read: boolean}>>([]);
 
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -204,39 +201,29 @@ function ChatPageInner() {
     toggleDeafen: voice.toggleDeafen,
   });
 
-  // Notification socket listeners
-  useEffect(() => {
-    const s = getSocket();
-
-    function pushNotification(title: string, body: string) {
-      setNotifications((prev) => {
-        const item = { id: Date.now().toString() + Math.random(), title, body, timestamp: Date.now(), read: false };
-        return [item, ...prev].slice(0, 10);
-      });
+  // Ember Inbox navigation: jump to the space a notification points at.
+  const handleNotificationNavigate = useCallback((notification: InboxNotification) => {
+    if (notification.type === "friend_request") {
+      setDmOpen(false);
+      setFriendsOpen(true);
+      setViewingVoiceRoom(false);
+      return;
     }
-
-    function onDmMessage(message: { content: string }) {
-      notify("New DM", message.content);
-      pushNotification("New DM", message.content);
+    if (notification.type === "dm") {
+      openDmPanel();
+      return;
     }
-
-    function onFriendRequest() {
-      notify("Friend Request", "Someone sent you a friend request");
-      pushNotification("Friend Request", "Someone sent you a friend request");
+    if (notification.serverId) {
+      const server = srv.servers.find((s) => s.id === notification.serverId);
+      if (!server) return;
+      setDmOpen(false);
+      setFriendsOpen(false);
+      setViewingVoiceRoom(false);
+      srv.selectServer(server, ch.setActiveChannel);
+      const channel = server.channels.find((c) => c.id === notification.channelId);
+      if (channel) ch.setActiveChannel(channel);
     }
-
-    s.on("dm:notification", onDmMessage);
-    s.on("friend:request", onFriendRequest);
-
-    return () => {
-      s.off("dm:notification", onDmMessage);
-      s.off("friend:request", onFriendRequest);
-    };
-  }, [notify]);
-
-  const handleMarkAllRead = useCallback(() => {
-    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
-  }, []);
+  }, [srv, ch, openDmPanel]);
 
 
   // Init: fetch user + servers, connect socket, restore URL selection
@@ -788,7 +775,11 @@ function ChatPageInner() {
             </svg>
           </button>
           <ShareLink />
-          <NotificationBell notifications={notifications} onMarkAllRead={handleMarkAllRead} />
+          <EmberInbox
+            currentServerId={dmOpen || friendsOpen ? null : srv.activeServer?.id}
+            currentChannelId={dmOpen || friendsOpen ? null : ch.activeChannel?.id}
+            onNavigate={handleNotificationNavigate}
+          />
           <AmbientSounds />
           {srv.activeServer && (
             <button

@@ -15,6 +15,11 @@ import {
 import { usersHaveBlock } from "@/lib/userBlocks";
 import { checkRateLimit } from "@/lib/rateLimit";
 import { createOriginPolicy } from "@/lib/originPolicy";
+import {
+  createChannelMessageNotifications,
+  registerNotificationEmitter,
+  upsertDmNotification,
+} from "@/lib/notifications";
 
 const COOKIE_NAME = process.env.COOKIE_NAME || "squatch-token";
 const SOCKET_PATH = process.env.SOCKET_PATH || "/api/socketio";
@@ -76,6 +81,16 @@ interface LanternRoomState {
   queue: string[];
 }
 const lanternRooms = new Map<string, LanternRoomState>();
+// Fireside Stage: listener/speaker rooms with a raise-hand queue. Like the
+// Lantern, state is process-local and advisory — it resets on restart and does
+// not enforce media routing (peers self-mute in the audience).
+interface StageRoomState {
+  hostId: string;
+  speakers: Set<string>;
+  queue: string[];
+}
+const stageRooms = new Map<string, StageRoomState>();
+const MAX_STAGE_SPEAKERS = 8;
 interface OffshootMemberState {
   username: string;
   socketId: string;
@@ -319,6 +334,57 @@ export function attachSocketIO(
     broadcastRealtimeLantern(channelId);
   }
 
+  function realtimeStagePayload(channelId: string) {
+    const state = stageRooms.get(channelId);
+    const room = voiceRooms.get(channelId);
+    if (!state) {
+      return {
+        channelId,
+        active: false,
+        hostId: null,
+        speakers: [],
+        queue: [],
+        limits: { maxSpeakers: MAX_STAGE_SPEAKERS },
+      };
+    }
+    const present = (userId: string) => room?.has(userId) ?? false;
+    const named = (userId: string) => ({
+      userId,
+      username: room?.get(userId)?.username || "Camper",
+    });
+    return {
+      channelId,
+      active: true,
+      hostId: state.hostId,
+      speakers: Array.from(state.speakers).filter(present).map(named),
+      queue: state.queue.filter(present).map(named),
+      limits: { maxSpeakers: MAX_STAGE_SPEAKERS },
+    };
+  }
+
+  function broadcastRealtimeStage(channelId: string): void {
+    io.to(`voice:${channelId}`).emit("stage:update", realtimeStagePayload(channelId));
+  }
+
+  function removeUserFromRealtimeStage(channelId: string, userId: string): void {
+    const state = stageRooms.get(channelId);
+    const room = voiceRooms.get(channelId);
+    if (!state) return;
+    state.speakers.delete(userId);
+    state.queue = state.queue.filter((queuedId) => queuedId !== userId);
+    if (!room || room.size === 0) {
+      stageRooms.delete(channelId);
+      return;
+    }
+    if (state.hostId === userId) {
+      const nextHost = Array.from(state.speakers).find((id) => room.has(id))
+        ?? (room.keys().next().value as string);
+      state.hostId = nextHost;
+      state.speakers.add(nextHost);
+    }
+    broadcastRealtimeStage(channelId);
+  }
+
   async function evictVoiceParticipant(channelId: string, userId: string): Promise<void> {
     const room = voiceRooms.get(channelId);
     const entry = room?.get(userId);
@@ -348,6 +414,7 @@ export function attachSocketIO(
     removeUserFromRealtimeOffshoot(channelId, userId);
     if (room?.size === 0) voiceRooms.delete(channelId);
     removeUserFromRealtimeLantern(channelId, userId);
+    removeUserFromRealtimeStage(channelId, userId);
     await broadcastVoiceParticipantsAuthorized(channelId);
   }
 
@@ -472,6 +539,16 @@ export function attachSocketIO(
     refreshRealtimeAuthorization,
   );
   httpServer.once("close", unregisterAuthorizationListener);
+
+  // Route modules (e.g. friend requests) hand committed notification rows to
+  // every attached realtime server through this bridge; delivery targets the
+  // recipient's per-user room.
+  const unregisterNotificationEmitter = registerNotificationEmitter(
+    (userId, notification) => {
+      io.to(`user:${userId}`).emit("notification:new", notification);
+    },
+  );
+  httpServer.once("close", unregisterNotificationEmitter);
 
   // Heartbeat cleanup
   const heartbeatTimer = setInterval(() => {
@@ -600,6 +677,67 @@ export function attachSocketIO(
       if (state.hostId === currentUserId) return true;
       const serverId = voiceChannelServer.get(channelId);
       return !!serverId && memberHasPermission(serverId, currentUserId, "MOVE_MEMBERS");
+    }
+
+    function stagePayload(channelId: string) {
+      const state = stageRooms.get(channelId);
+      const room = voiceRooms.get(channelId);
+      if (!state) {
+        return {
+          channelId,
+          active: false,
+          hostId: null,
+          speakers: [],
+          queue: [],
+          limits: { maxSpeakers: MAX_STAGE_SPEAKERS },
+        };
+      }
+      const present = (userId: string) => room?.has(userId) ?? false;
+      const named = (userId: string) => ({
+        userId,
+        username: room?.get(userId)?.username || "Camper",
+      });
+      return {
+        channelId,
+        active: true,
+        hostId: state.hostId,
+        speakers: Array.from(state.speakers).filter(present).map(named),
+        queue: state.queue.filter(present).map(named),
+        limits: { maxSpeakers: MAX_STAGE_SPEAKERS },
+      };
+    }
+
+    function broadcastStage(channelId: string) {
+      io.to(`voice:${channelId}`).emit("stage:update", stagePayload(channelId));
+    }
+
+    function removeFromStage(channelId: string, userId: string) {
+      const state = stageRooms.get(channelId);
+      const room = voiceRooms.get(channelId);
+      if (!state) return;
+      state.speakers.delete(userId);
+      state.queue = state.queue.filter((queuedId) => queuedId !== userId);
+      if (!room || room.size === 0) {
+        stageRooms.delete(channelId);
+        return;
+      }
+      if (state.hostId === userId) {
+        const nextHost = Array.from(state.speakers).find((id) => room.has(id))
+          ?? (room.keys().next().value as string);
+        state.hostId = nextHost;
+        state.speakers.add(nextHost);
+      }
+      broadcastStage(channelId);
+    }
+
+    async function canControlStage(channelId: string, state: StageRoomState) {
+      if (state.hostId === currentUserId) return true;
+      const serverId = voiceChannelServer.get(channelId);
+      return !!serverId && memberHasPermission(serverId, currentUserId, "MOVE_MEMBERS");
+    }
+
+    function emitStageError(channelId: string, code: string, message: string) {
+      socket.emit("stage:error", { channelId, code, message });
     }
     function offshootPayload(channelId: string) {
       const rooms = offshootRooms.get(channelId);
@@ -730,6 +868,32 @@ export function attachSocketIO(
       });
       if (!message) return;
       socket.to(`channel:${data.channelId}`).emit(`message:channel:${data.channelId}`, message);
+
+      // Ember Inbox: durable mention/reply notifications for this
+      // authoritative message, pushed to each recipient's user room.
+      if (!message.isSystem) {
+        try {
+          const channel = await prisma.channel.findUnique({
+            where: { id: data.channelId },
+            select: { name: true },
+          });
+          const created = await createChannelMessageNotifications({
+            messageId: message.id,
+            channelId: data.channelId,
+            channelName: channel?.name ?? "channel",
+            serverId: access.serverId,
+            authorId: currentUserId,
+            authorUsername: currentUsername,
+            content: message.content,
+            replyToAuthorId: message.replyTo?.author?.id ?? null,
+          });
+          for (const notification of created) {
+            io.to(`user:${notification.userId}`).emit("notification:new", notification);
+          }
+        } catch (error) {
+          console.error("[Campfire] message notification creation failed:", error);
+        }
+      }
     }));
 
     socket.on("message:edit", safeHandler(async (data: { channelId: string; messageId: string; content: string; updatedAt: string }) => {
@@ -899,7 +1063,7 @@ export function attachSocketIO(
         resolveChannelAccess(channelId, currentUserId),
         prisma.channel.findUnique({
           where: { id: channelId },
-          select: { type: true },
+          select: { type: true, roomMode: true },
         }),
       ]);
       if (!access?.canView || channel?.type !== "voice") {
@@ -926,6 +1090,18 @@ export function attachSocketIO(
       socket.emit("offshoot:update", offshootPayload(channelId));
       if (lanternRooms.has(channelId)) {
         socket.emit("lantern:update", lanternPayload(channelId));
+      }
+      // Fireside Stage rooms open with the first arrival hosting; everyone
+      // after that joins the audience.
+      if (channel.roomMode === "fireside-stage" && !stageRooms.has(channelId)) {
+        stageRooms.set(channelId, {
+          hostId: currentUserId,
+          speakers: new Set([currentUserId]),
+          queue: [],
+        });
+      }
+      if (stageRooms.has(channelId)) {
+        socket.emit("stage:update", stagePayload(channelId));
       }
 
       socket.to(`voice:${channelId}`).emit("voice:user-joined", { channelId, userId: currentUserId, username: currentUsername, socketId: socket.id });
@@ -1020,6 +1196,79 @@ export function attachSocketIO(
       lanternRooms.delete(channelId);
       broadcastLantern(channelId);
     }));
+
+    // ─── Fireside Stage ───
+    socket.on("stage:state", safeHandler((channelId: string) => {
+      if (!isStr(channelId) || !isCurrentVoiceParticipant(channelId)) return;
+      socket.emit("stage:update", stagePayload(channelId));
+    }));
+
+    socket.on("stage:request", safeHandler((channelId: string) => {
+      if (!isStr(channelId) || overLimit("stage:request")) return;
+      if (!isCurrentVoiceParticipant(channelId)) return;
+      const state = stageRooms.get(channelId);
+      if (!state) {
+        emitStageError(channelId, "stage_inactive", "This room has no stage.");
+        return;
+      }
+      if (state.speakers.has(currentUserId) || state.queue.includes(currentUserId)) return;
+      state.queue.push(currentUserId);
+      broadcastStage(channelId);
+    }));
+
+    socket.on("stage:withdraw", safeHandler((channelId: string) => {
+      if (!isStr(channelId) || !isCurrentVoiceParticipant(channelId)) return;
+      const state = stageRooms.get(channelId);
+      if (!state || !state.queue.includes(currentUserId)) return;
+      state.queue = state.queue.filter((userId) => userId !== currentUserId);
+      broadcastStage(channelId);
+    }));
+
+    socket.on("stage:promote", safeHandler(async (data: { channelId: string; targetUserId: string }) => {
+      if (!isObj(data) || !isStr(data.channelId) || !isStr(data.targetUserId)) return;
+      if (overLimit("stage:promote")) return;
+      if (!isCurrentVoiceParticipant(data.channelId)) return;
+      const state = stageRooms.get(data.channelId);
+      if (!state) {
+        emitStageError(data.channelId, "stage_inactive", "This room has no stage.");
+        return;
+      }
+      if (!(await canControlStage(data.channelId, state))) {
+        emitStageError(data.channelId, "stage_forbidden", "Only the host or a moderator can bring campers up.");
+        return;
+      }
+      if (!voiceRooms.get(data.channelId)?.has(data.targetUserId)) {
+        emitStageError(data.channelId, "target_not_in_room", "That camper is no longer in the room.");
+        return;
+      }
+      if (state.speakers.has(data.targetUserId)) return;
+      const presentSpeakers = Array.from(state.speakers)
+        .filter((userId) => voiceRooms.get(data.channelId)?.has(userId));
+      if (presentSpeakers.length >= MAX_STAGE_SPEAKERS) {
+        emitStageError(data.channelId, "speaker_capacity", `The stage holds ${MAX_STAGE_SPEAKERS} speakers.`);
+        return;
+      }
+      state.queue = state.queue.filter((userId) => userId !== data.targetUserId);
+      state.speakers.add(data.targetUserId);
+      broadcastStage(data.channelId);
+    }));
+
+    socket.on("stage:demote", safeHandler(async (data: { channelId: string; targetUserId: string }) => {
+      if (!isObj(data) || !isStr(data.channelId) || !isStr(data.targetUserId)) return;
+      if (overLimit("stage:demote")) return;
+      if (!isCurrentVoiceParticipant(data.channelId)) return;
+      const state = stageRooms.get(data.channelId);
+      if (!state || !state.speakers.has(data.targetUserId)) return;
+      // Speakers may step down themselves; moving anyone else needs control.
+      if (data.targetUserId !== currentUserId && !(await canControlStage(data.channelId, state))) {
+        emitStageError(data.channelId, "stage_forbidden", "Only the host or a moderator can move speakers to the audience.");
+        return;
+      }
+      state.speakers.delete(data.targetUserId);
+      state.queue = state.queue.filter((userId) => userId !== data.targetUserId);
+      broadcastStage(data.channelId);
+    }));
+
     socket.on("offshoot:state", safeHandler((channelId: string) => {
       if (!isStr(channelId) || !isCurrentVoiceParticipant(channelId)) return;
       socket.emit("offshoot:update", offshootPayload(channelId));
@@ -1316,6 +1565,7 @@ export function attachSocketIO(
       // Do not mutate any room or facilitation state until every check passes.
       room!.delete(data.targetUserId);
       removeFromLantern(data.fromChannelId, data.targetUserId);
+      removeFromStage(data.fromChannelId, data.targetUserId);
       removeUserFromOffshoot(data.targetUserId);
       await targetSocket.leave(`voice:${data.fromChannelId}`);
       io.to(`voice:${data.fromChannelId}`).emit("voice:user-left", { channelId: data.fromChannelId, userId: data.targetUserId, socketId: targetEntry.socketId });
@@ -1362,6 +1612,7 @@ export function attachSocketIO(
         leaveCurrentOffshoot();
         if (room.size === 0) voiceRooms.delete(channelId);
         removeFromLantern(channelId, currentUserId);
+        removeFromStage(channelId, currentUserId);
         broadcastVoiceParticipants(channelId);
       }
     }
@@ -1412,6 +1663,20 @@ export function attachSocketIO(
 
       socket.to(`conv:${data.conversationId}`).emit("dm:message", message);
       io.to(`user:${recipientId}`).emit("dm:notification", message);
+
+      // Ember Inbox: one unread entry per conversation, refreshed per message.
+      try {
+        const notification = await upsertDmNotification({
+          conversationId: data.conversationId,
+          authorId: currentUserId,
+          authorUsername: currentUsername,
+          recipientId,
+          content: message.content,
+        });
+        io.to(`user:${recipientId}`).emit("notification:new", notification);
+      } catch (error) {
+        console.error("[Campfire] dm notification creation failed:", error);
+      }
     }));
 
     socket.on("dm:typing", safeHandler(async (data: { conversationId: string }) => {

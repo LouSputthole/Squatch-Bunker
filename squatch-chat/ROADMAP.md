@@ -145,12 +145,12 @@ Exit: Campfire covers the high-value Discord workflows its target communities ac
 These are the ranked follow-on features after the current ten-feature wave:
 
 1. **Ranger Desk** — a moderation case inbox with evidence, assignment, action history, escalation, and appeals.
-2. **Fireside Stage** — listener/speaker voice rooms with a request-to-speak queue, host promotion, moderation, and capacity rules.
+2. **Fireside Stage** — **complete in worktree (2026-07-26):** the `fireside-stage` voice-room mode opens with the first arrival hosting; listeners raise hands into a FIFO queue, the host or a MOVE_MEMBERS moderator promotes/demotes, capacity is eight speakers, and host transfer/cleanup runs on leave, kick, move, and disconnect. Stage state shares the Lantern trust boundary: process-local, advisory, client-side audience muting — not media-enforced.
 3. **Trail Boards** — forum-style channels with tags, searchable posts, resolved/archived states, and durable topic ownership.
-4. **Ember Inbox** — a persistent notification center with unread state, per-space policy, push/digest delivery, and quiet hours.
+4. **Ember Inbox** — **complete in worktree (2026-07-26):** durable per-user notifications (mentions, replies, DMs collapsed per conversation, friend requests) with unread state, mark-read/clear APIs, per-space all/mentions/none policy enforcement, quiet hours (client-evaluated, DB-synced), realtime `notification:new` push, and an inbox UI replacing the ephemeral bell. Digest/email delivery remains future work.
 5. **Gathering Seasons** — recurring Gatherings with external calendar links, host controls, capacity, waitlists, and reminder policy.
 
-Treat these as planned work, not shipped capability. Ranger Desk and Ember Inbox come first because safety and reliable attention management are prerequisites for larger public communities.
+Items 2 and 4 describe implementation scope, not a public release — they still pass through the release gates like everything else. Ranger Desk is next: safety tooling is the remaining prerequisite for larger public communities.
 
 ## Milestone 6 — deepen Campfire’s own flare
 
