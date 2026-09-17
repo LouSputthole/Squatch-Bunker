@@ -61,8 +61,10 @@
   },
   "overrides": {
     "@hono/node-server": "1.19.13",
+    "deepmerge-ts": "8.0.2",
+    "mysql2": "3.24.4",
     "postcss": "8.5.23",
-    "sharp": "0.35.3"
+    "sharp": "0.35.4"
   },
   "devDependencies": {
     "@electron/rebuild": "4.2.0",
