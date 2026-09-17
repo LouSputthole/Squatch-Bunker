@@ -137,6 +137,7 @@ function ChatPageInner() {
     if (willOpen) setViewingVoiceRoom(false);
   }, [friendsOpen]);
 
+  const [dmTargetConversationId, setDmTargetConversationId] = useState<string | null>(null);
   const openDmPanel = useCallback(() => {
     setFriendsOpen(false);
     setDmOpen(true);
@@ -210,6 +211,7 @@ function ChatPageInner() {
       return;
     }
     if (notification.type === "dm") {
+      setDmTargetConversationId(notification.conversationId);
       openDmPanel();
       return;
     }
@@ -439,7 +441,9 @@ function ChatPageInner() {
             currentUserId={auth.user.id}
             currentUsername={auth.user.username}
             currentAvatar={auth.user.avatar}
-            onClose={() => setDmOpen(false)}
+            key={dmTargetConversationId ?? "dm"}
+            initialConversationId={dmTargetConversationId}
+            onClose={() => { setDmOpen(false); setDmTargetConversationId(null); }}
           />
         </div>
       ) : friendsOpen && auth.user ? (

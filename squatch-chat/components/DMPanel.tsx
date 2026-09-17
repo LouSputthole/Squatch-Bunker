@@ -33,10 +33,12 @@ interface DMPanelProps {
   currentUserId: string;
   currentUsername: string;
   currentAvatar?: string | null;
+  /** Conversation to open once the list loads (e.g. from an inbox notification). */
+  initialConversationId?: string | null;
   onClose: () => void;
 }
 
-export default function DMPanel({ currentUserId, onClose }: DMPanelProps) {
+export default function DMPanel({ currentUserId, initialConversationId, onClose }: DMPanelProps) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConv, setActiveConv] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<DMMessage[]>([]);
@@ -51,8 +53,15 @@ export default function DMPanel({ currentUserId, onClose }: DMPanelProps) {
   useEffect(() => {
     fetch("/api/dm")
       .then((r) => r.json())
-      .then((data) => setConversations(data.conversations || []))
+      .then((data) => {
+        const list: Conversation[] = data.conversations || [];
+        setConversations(list);
+        const target = initialConversationId && list.find((c) => c.id === initialConversationId);
+        if (target) setActiveConv(target);
+      })
       .finally(() => setLoading(false));
+    // The parent remounts this panel (key) when the target conversation changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Fetch messages when conversation selected

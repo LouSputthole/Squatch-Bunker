@@ -192,6 +192,22 @@ describe("channel message notifications", () => {
     expect(bare.map((n) => n.userId).sort()).toEqual([guest.id, otherGuest.id].sort());
   });
 
+  it("notifies once per recipient per message, even when the send is replayed", async () => {
+    const input = baseMessageInput("again @ember_member");
+    const [first, replay, concurrentA, concurrentB] = [
+      await createChannelMessageNotifications(input),
+      await createChannelMessageNotifications(input),
+      ...(await Promise.all([
+        createChannelMessageNotifications({ ...input, messageId: "replayed-concurrently" }),
+        createChannelMessageNotifications({ ...input, messageId: "replayed-concurrently" }),
+      ])),
+    ];
+    expect(first).toHaveLength(1);
+    expect(replay).toHaveLength(0);
+    expect(concurrentA.length + concurrentB.length).toBe(1);
+    expect(await prisma.notification.count({ where: { userId: memberId } })).toBe(2);
+  });
+
   it("creates a reply notification and prefers mention when both apply", async () => {
     const reply = await createChannelMessageNotifications({
       ...baseMessageInput("responding to your point"),
@@ -269,7 +285,29 @@ describe("dm notifications", () => {
       recipientId: memberId,
       content: "third message",
     });
-    expect(third.id).not.toBe(first.id);
+    // ...it re-opens the conversation's single entry as unread.
+    expect(third.id).toBe(first.id);
+    expect(third.readAt).toBeNull();
+    expect(third.body).toBe("third message");
+    expect(await prisma.notification.count({ where: { userId: memberId } })).toBe(1);
+  });
+
+  it("stays at one entry when DMs for a conversation arrive concurrently", async () => {
+    const conversationId = randomUUID();
+    await Promise.all(
+      ["a", "b", "c", "d"].map((content) =>
+        upsertDmNotification({
+          conversationId,
+          authorId,
+          authorUsername: "ember_author",
+          recipientId: memberId,
+          content,
+        }),
+      ),
+    );
+    expect(
+      await prisma.notification.count({ where: { userId: memberId, conversationId } }),
+    ).toBe(1);
   });
 });
 

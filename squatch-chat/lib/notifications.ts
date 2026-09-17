@@ -175,8 +175,12 @@ export async function createChannelMessageNotifications(
     if (level === "none") continue;
     if (await isBlockedEitherWay(recipientId, input.authorId, database)) continue;
 
-    created.push(await database.notification.create({
+    // Deterministic id: the primary key makes "one notification per recipient
+    // per message" atomic, so a replayed `message:send` for an existing message
+    // cannot stack inbox rows or re-fire desktop alerts.
+    const record = await database.notification.create({
       data: {
+        id: `msg:${recipientId}:${input.messageId}`,
         userId: recipientId,
         type,
         title: type === "mention"
@@ -188,7 +192,12 @@ export async function createChannelMessageNotifications(
         messageId: input.messageId,
         actorId: input.authorId,
       },
-    }));
+    }).catch((error: unknown) => {
+      // P2002 = unique violation: this recipient was already notified.
+      if ((error as { code?: string })?.code === "P2002") return null;
+      throw error;
+    });
+    if (record) created.push(record);
   }
   return created;
 }
@@ -202,40 +211,39 @@ export interface DmNotificationInput {
 }
 
 /**
- * One unread inbox entry per conversation: a fresh DM refreshes the existing
- * unread entry instead of stacking a row per message.
+ * One inbox entry per conversation: a fresh DM refreshes that entry (and
+ * re-opens it as unread) instead of stacking a row per message. The
+ * deterministic id lets the primary key make this atomic, so two DMs handled
+ * concurrently cannot create two entries.
  */
 export async function upsertDmNotification(
   input: DmNotificationInput,
   database: NotificationDatabase = prisma,
 ): Promise<NotificationRecord> {
-  const title = `New message from ${displayName(input.authorUsername)}`;
-  const body = previewOf(input.content);
-
-  const existing = await database.notification.findFirst({
-    where: {
+  const fresh = {
+    title: `New message from ${displayName(input.authorUsername)}`,
+    body: previewOf(input.content),
+    actorId: input.authorId,
+    createdAt: new Date(),
+    readAt: null,
+  };
+  const id = `dm:${input.recipientId}:${input.conversationId}`;
+  const write = () => database.notification.upsert({
+    where: { id },
+    update: fresh,
+    create: {
+      id,
       userId: input.recipientId,
       type: "dm",
       conversationId: input.conversationId,
-      readAt: null,
+      ...fresh,
     },
-    select: { id: true },
   });
-  if (existing) {
-    return database.notification.update({
-      where: { id: existing.id },
-      data: { title, body, actorId: input.authorId, createdAt: new Date() },
-    });
-  }
-  return database.notification.create({
-    data: {
-      userId: input.recipientId,
-      type: "dm",
-      title,
-      body,
-      conversationId: input.conversationId,
-      actorId: input.authorId,
-    },
+  // A concurrent first write can lose the insert race (P2002); the row exists
+  // by then, so the retry lands as an update.
+  return write().catch((error: unknown) => {
+    if ((error as { code?: string })?.code === "P2002") return write();
+    throw error;
   });
 }
 

@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useDismissable } from "@/hooks/useDismissable";
 import { useNotifications } from "@/hooks/useNotifications";
 import { getSocket } from "@/lib/socket";
@@ -70,6 +70,10 @@ export default function EmberInbox({ currentServerId, currentChannelId, onNaviga
   const { notify } = useNotifications();
 
   const [items, setItems] = useState<InboxNotification[]>([]);
+  const itemsRef = useRef(items);
+  useEffect(() => {
+    itemsRef.current = items;
+  }, [items]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
@@ -109,8 +113,11 @@ export default function EmberInbox({ currentServerId, currentChannelId, onNaviga
   useEffect(() => {
     const socket = getSocket();
     function onNew(notification: InboxNotification) {
+      // A refreshed DM entry re-emits the same id: only count it when it was
+      // not already sitting here unread, or the badge outruns the real total.
+      const alreadyUnread = itemsRef.current.some((n) => n.id === notification.id && !n.readAt);
       setItems((prev) => [notification, ...prev.filter((n) => n.id !== notification.id)]);
-      setUnreadCount((prev) => prev + 1);
+      if (!alreadyUnread) setUnreadCount((prev) => prev + 1);
       if (!isQuietAt(minutesNow(), quietStart, quietEnd)) {
         notify(notification.title, notification.body);
       }
