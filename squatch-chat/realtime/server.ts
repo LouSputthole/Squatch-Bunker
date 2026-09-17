@@ -1217,7 +1217,8 @@ export function attachSocketIO(
     }));
 
     socket.on("stage:withdraw", safeHandler((channelId: string) => {
-      if (!isStr(channelId) || !isCurrentVoiceParticipant(channelId)) return;
+      if (!isStr(channelId) || overLimit("stage:withdraw")) return;
+      if (!isCurrentVoiceParticipant(channelId)) return;
       const state = stageRooms.get(channelId);
       if (!state || !state.queue.includes(currentUserId)) return;
       state.queue = state.queue.filter((userId) => userId !== currentUserId);
