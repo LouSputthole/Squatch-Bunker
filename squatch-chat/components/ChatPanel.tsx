@@ -908,6 +908,10 @@ function ChatPanelContent({
   }
 
   async function handleFileDrop(file: File) {
+    if (slowRemaining > 0) {
+      alert(`Slow mode: wait ${slowRemaining}s to send again`);
+      return;
+    }
     if (file.size > 10 * 1024 * 1024) {
       alert("File too large. Maximum size is 10MB. Videos are supported but must be under 10MB.");
       return;
@@ -929,15 +933,19 @@ function ChatPanelContent({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ channelId, content: "", attachmentId }),
       });
-      if (res.ok) {
-        const { message } = await res.json();
-        setMessages((prev) => [...prev, message]);
-        setTimeout(scrollToBottom, 50);
-        const socket = getSocket();
-        socket.emit("message:send", { channelId, message });
+      if (!res.ok) {
+        // Surface the server's reason (slow mode, revoked access) instead of
+        // letting a finished upload vanish without a message.
+        const body = (await res.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(body?.error || "Upload failed. Please try again.");
       }
-    } catch {
-      alert("Upload failed. Please try again.");
+      const { message } = await res.json();
+      setMessages((prev) => [...prev, message]);
+      setTimeout(scrollToBottom, 50);
+      const socket = getSocket();
+      socket.emit("message:send", { channelId, message });
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Upload failed. Please try again.");
     } finally {
       setUploadProgress(0);
     }
@@ -1272,7 +1280,7 @@ function ChatPanelContent({
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            disabled={uploading}
+            disabled={uploading || slowRemaining > 0}
             className="px-3 py-3 text-[var(--muted)] hover:text-[var(--text)] transition-colors disabled:opacity-30"
             title="Upload file"
             aria-label="Upload file"
