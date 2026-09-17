@@ -57,6 +57,14 @@ export function useChannels(activeServer: Server | null) {
     saveUnreads(unreadCounts);
   }, [unreadCounts]);
 
+  // Surface unreads in the tab title so a backgrounded tab still signals activity
+  useEffect(() => {
+    let total = 0;
+    unreadCounts.forEach((n) => { total += n; });
+    document.title = total > 0 ? `(${total > 99 ? "99+" : total}) Campfire` : "Campfire";
+    return () => { document.title = "Campfire"; };
+  }, [unreadCounts]);
+
   // URL sync
   const updateUrl = useCallback((serverId?: string, channelId?: string) => {
     const params = new URLSearchParams();

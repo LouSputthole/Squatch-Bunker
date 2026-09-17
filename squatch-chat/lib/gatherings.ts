@@ -188,3 +188,41 @@ export function gatheringResponse(
     updatedAt: gathering.updatedAt.toISOString(),
   };
 }
+
+const icsText = (value: string) =>
+  value.replace(/\\/g, "\\\\").replace(/([;,])/g, "\\$1").replace(/\r?\n/g, "\\n");
+
+const icsDate = (value: string | Date) =>
+  new Date(value).toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
+
+/**
+ * A single-event iCalendar file so members can drop a Gathering into any
+ * calendar app. UTC timestamps; the calendar localises them.
+ */
+export function gatheringIcs(
+  gathering: {
+    id: string;
+    title: string;
+    description?: string | null;
+    startsAt: string | Date;
+    endsAt: string | Date;
+  },
+  now = new Date(),
+): string {
+  // ponytail: no 75-octet line folding; Google/Apple/Outlook accept long lines.
+  return [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//Campfire//Gatherings//EN",
+    "BEGIN:VEVENT",
+    `UID:${gathering.id}@campfire`,
+    `DTSTAMP:${icsDate(now)}`,
+    `DTSTART:${icsDate(gathering.startsAt)}`,
+    `DTEND:${icsDate(gathering.endsAt)}`,
+    `SUMMARY:${icsText(gathering.title)}`,
+    ...(gathering.description ? [`DESCRIPTION:${icsText(gathering.description)}`] : []),
+    "END:VEVENT",
+    "END:VCALENDAR",
+    "",
+  ].join("\r\n");
+}

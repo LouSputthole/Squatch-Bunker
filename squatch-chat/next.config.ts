@@ -11,6 +11,24 @@ const nextConfig: NextConfig = {
   },
   output: "standalone",
   turbopack: { root: projectRoot },
+  async headers() {
+    return [
+      {
+        source: "/:path*",
+        headers: [
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          // Clickjacking: nothing legitimate frames Campfire cross-origin.
+          { key: "X-Frame-Options", value: "SAMEORIGIN" },
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+          // Voice/video/screen-share stay first-party; embedded content gets none.
+          {
+            key: "Permissions-Policy",
+            value: "camera=(self), microphone=(self), display-capture=(self), geolocation=()",
+          },
+        ],
+      },
+    ];
+  },
 };
 
 export default nextConfig;

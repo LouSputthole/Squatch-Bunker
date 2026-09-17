@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { downloadText } from "@/lib/download";
+import { journalMarkdown } from "@/lib/journal";
 
 interface JournalEntry {
   id: string;
@@ -71,7 +73,17 @@ export default function CampJournalPanel({
           <h2 className="text-sm font-semibold text-[var(--text)]">Camp Journal</h2>
           <p className="text-[10px] text-[var(--muted)]">Private keepsakes from this camp</p>
         </div>
-        <button onClick={onClose} className="text-[var(--muted)] hover:text-[var(--text)] text-lg" aria-label="Close Camp Journal">&times;</button>
+        <div className="flex items-center gap-3">
+          {entries.length > 0 && (
+            <button
+              onClick={() => downloadText("camp-journal.md", "text/markdown", journalMarkdown(entries))}
+              className="text-xs text-[var(--muted)] hover:text-[var(--text)]"
+            >
+              Export
+            </button>
+          )}
+          <button onClick={onClose} className="text-[var(--muted)] hover:text-[var(--text)] text-lg" aria-label="Close Camp Journal">&times;</button>
+        </div>
       </div>
       <div className="flex-1 overflow-y-auto p-3 space-y-3">
         {loading ? (

@@ -1,6 +1,7 @@
 "use client";
 
-import { gatheringTiming, type GatheringRsvpStatus } from "@/lib/gatherings";
+import { downloadText } from "@/lib/download";
+import { gatheringIcs, gatheringTiming, type GatheringRsvpStatus } from "@/lib/gatherings";
 
 export interface GatheringView {
   id: string;
@@ -132,7 +133,13 @@ export default function GatheringCard({
             {label} · {gathering.participantCounts[status]}
           </button>
         ))}
-        <span className="ml-auto text-xs text-[var(--muted)]">
+        <button
+          onClick={() => downloadText(`${gathering.title}.ics`, "text/calendar", gatheringIcs(gathering))}
+          className="ml-auto text-xs text-[var(--muted)] underline-offset-2 hover:text-[var(--text)] hover:underline"
+        >
+          Add to calendar
+        </button>
+        <span className="text-xs text-[var(--muted)]">
           {gathering.participantCount} going
         </span>
         {active && gathering.channel && (
