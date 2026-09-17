@@ -22,6 +22,8 @@ export const FEATURES: Record<string, FeatureDefinition> = {
   camp_votes: { name: "Camp Votes", description: "Realtime single- and multi-choice polls", tier: "free" },
   camp_gatherings: { name: "Camp Gatherings", description: "Events, reminders, and RSVP tracking", tier: "free" },
   voice_facilitation: { name: "Voice Facilitation", description: "Pass the Lantern and Offshoot side rooms", tier: "free" },
+  fireside_stage: { name: "Fireside Stage", description: "Listener/speaker rooms with a raise-hand queue", tier: "free" },
+  ember_inbox: { name: "Ember Inbox", description: "Durable notification center with quiet hours", tier: "free" },
   retention_rooms: { name: "Leave-no-trace Rooms", description: "Optional 1, 7, or 30 day message retention", tier: "free" },
 
   custom_emoji: { name: "Custom Emoji", description: "Upload custom emoji for your server", tier: "premium" },

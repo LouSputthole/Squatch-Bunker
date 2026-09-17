@@ -28,6 +28,8 @@ model User {
   billingEventAt           DateTime?
   resetToken               String?
   resetExpiry              DateTime?
+  quietHoursStart          Int?
+  quietHoursEnd            Int?
   createdAt                DateTime  @default(now())
   updatedAt                DateTime  @updatedAt
 
@@ -45,6 +47,7 @@ model User {
   oauthAccounts           OAuthAccount[]
   scheduledMessages       ScheduledMessage[]
   notificationPreferences NotificationPreference[]
+  notifications           Notification[]
   authoredNotes           UserNote[]               @relation("NoteAuthor")
   targetedNotes           UserNote[]               @relation("NoteTarget")
   reportsFiled            Report[]                 @relation("ReportsFiled")
@@ -410,6 +413,26 @@ model NotificationPreference {
   user User @relation(fields: [userId], references: [id])
 
   @@unique([userId, serverId, channelId])
+}
+
+model Notification {
+  id             String    @id @default(uuid())
+  userId         String
+  type           String
+  title          String
+  body           String
+  serverId       String?
+  channelId      String?
+  conversationId String?
+  messageId      String?
+  actorId        String?
+  readAt         DateTime?
+  createdAt      DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt])
+  @@index([userId, createdAt])
 }
 
 model UserNote {

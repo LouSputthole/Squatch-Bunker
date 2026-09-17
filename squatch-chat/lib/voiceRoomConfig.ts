@@ -4,6 +4,7 @@ export const VOICE_ROOM_MODES = [
   { id: "quiet-room", label: "Quiet Room", description: "Low-pressure company for focus or winding down", defaultScene: "rain" },
   { id: "workshop", label: "Workshop", description: "Build, teach, review, and share screens together", defaultScene: "cave" },
   { id: "story-time", label: "Story Time", description: "A listening circle made for Pass the Lantern", defaultScene: "forest" },
+  { id: "fireside-stage", label: "Fireside Stage", description: "Speakers up front, listeners in the circle — raise a hand to join the stage", defaultScene: "night" },
 ] as const;
 
 export const VOICE_ROOM_SCENES = [
