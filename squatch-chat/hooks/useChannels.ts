@@ -57,6 +57,18 @@ export function useChannels(activeServer: Server | null) {
     saveUnreads(unreadCounts);
   }, [unreadCounts]);
 
+  // Surface unreads in the tab title so a backgrounded tab still signals activity.
+  // Only channels that exist in the active server count, like the sidebar badges:
+  // stored entries for deleted channels or a previous account must not pin "(n)".
+  useEffect(() => {
+    let total = 0;
+    for (const channel of activeServer?.channels ?? []) {
+      total += unreadCounts.get(channel.id) ?? 0;
+    }
+    document.title = total > 0 ? `(${total > 99 ? "99+" : total}) Campfire` : "Campfire";
+    return () => { document.title = "Campfire"; };
+  }, [unreadCounts, activeServer]);
+
   // URL sync
   const updateUrl = useCallback((serverId?: string, channelId?: string) => {
     const params = new URLSearchParams();

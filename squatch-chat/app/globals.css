@@ -126,3 +126,16 @@ body {
 .skip-link:focus {
   top: 0;
 }
+
+/* Respect the OS "reduce motion" setting: embers, pulses, slides and smooth
+   scrolling all collapse to instant. Covers inline/Tailwind animations too. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

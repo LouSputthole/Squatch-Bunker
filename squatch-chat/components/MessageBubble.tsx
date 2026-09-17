@@ -456,6 +456,9 @@ export default function MessageBubble({ message, isOwn, currentUserId, authorCol
       <div
       className={`flex gap-3 py-1 group hover:bg-[var(--panel)]/30 px-1 rounded relative ${glowing ? "animate-search-highlight" : ""}`}
       onMouseEnter={() => setShowActions(true)}
+      // Keyboard users: tabbing into the message reveals the hover-only action bar.
+      onFocus={() => setShowActions(true)}
+      onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setShowActions(false); }}
       onMouseLeave={() => { setShowActions(false); setShowEmojiPicker(false); setEmojiSearch(""); }}
       onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setContextMenu({ x: e.clientX, y: e.clientY }); }}
     >
@@ -591,6 +594,8 @@ export default function MessageBubble({ message, isOwn, currentUserId, authorCol
                       : "bg-[var(--panel-2)] border border-[var(--accent-2)]/30 text-[var(--muted)] hover:border-[var(--accent-2)]"
                   }`}
                   title={data.users.map((u) => displayName(u)).join(", ")}
+                  aria-label={`${emoji} ${data.count} ${data.count === 1 ? "reaction" : "reactions"}`}
+                  aria-pressed={iMine}
                 >
                   <span>{emoji}</span>
                   <span className="font-medium">{data.count}</span>
@@ -613,6 +618,8 @@ export default function MessageBubble({ message, isOwn, currentUserId, authorCol
             onClick={() => setShowEmojiPicker(!showEmojiPicker)}
             className="text-xs text-[var(--muted)] hover:text-[var(--text)] px-1.5 py-0.5"
             title="React"
+            aria-label="Add reaction"
+            aria-expanded={showEmojiPicker}
           >
             😀
           </button>
@@ -620,6 +627,7 @@ export default function MessageBubble({ message, isOwn, currentUserId, authorCol
             onClick={() => onReply?.(message)}
             className="text-xs text-[var(--muted)] hover:text-[var(--text)] px-1.5 py-0.5"
             title="Reply"
+            aria-label="Reply"
           >
             ↩
           </button>
@@ -628,6 +636,7 @@ export default function MessageBubble({ message, isOwn, currentUserId, authorCol
               onClick={handleTranslate}
               disabled={translating}
               title={translated ? "Hide translation" : "Translate to English"}
+              aria-label={translated ? "Hide translation" : "Translate to English"}
               className="text-xs text-[var(--muted)] hover:text-[var(--text)] px-1.5 py-0.5 disabled:opacity-50"
             >
               {translating ? "..." : "🌐"}
@@ -638,6 +647,7 @@ export default function MessageBubble({ message, isOwn, currentUserId, authorCol
               onClick={() => onPin?.(message.id, !message.pinned)}
               className={`text-xs px-1.5 py-0.5 ${message.pinned ? "text-yellow-400 hover:text-[var(--muted)]" : "text-[var(--muted)] hover:text-yellow-400"}`}
               title={message.pinned ? "Unpin" : "Pin"}
+              aria-label={message.pinned ? "Unpin message" : "Pin message"}
             >
               📌
             </button>
@@ -656,6 +666,7 @@ export default function MessageBubble({ message, isOwn, currentUserId, authorCol
               onClick={() => onBookmark(message.id, !isBookmarked)}
               className={`text-xs px-1.5 py-0.5 ${isBookmarked ? "text-yellow-400" : "text-[var(--muted)] hover:text-yellow-400"}`}
               title={isBookmarked ? "Remove bookmark" : "Bookmark"}
+              aria-label={isBookmarked ? "Remove bookmark" : "Bookmark message"}
             >
               ★
             </button>

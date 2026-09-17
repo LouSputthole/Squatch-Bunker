@@ -187,6 +187,26 @@ interface ChatPanelProps {
   blockedUserIds?: ReadonlySet<string>;
 }
 
+// Unsent composer text survives channel switches (ChatPanelContent remounts
+// per channel) and reloads. Keyed per user so a shared browser never shows
+// one account's draft to the next.
+function loadDraft(key: string): string {
+  try {
+    return localStorage.getItem(key) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function saveDraft(key: string, text: string) {
+  try {
+    if (text.trim()) localStorage.setItem(key, text);
+    else localStorage.removeItem(key);
+  } catch {
+    // ignore
+  }
+}
+
 export default function ChatPanel(props: ChatPanelProps) {
   return <ChatPanelContent key={props.channelId} {...props} />;
 }
@@ -207,7 +227,8 @@ function ChatPanelContent({
   const topicBaseline = channelTopic ?? "";
   const [messages, setMessages] = useState<Message[]>([]);
   const [bookmarkedMessageIds, setBookmarkedMessageIds] = useState<Set<string>>(new Set());
-  const [newMessage, setNewMessage] = useState("");
+  const draftKey = `squatch:draft:${currentUserId}:${channelId}`;
+  const [newMessage, setNewMessage] = useState(() => loadDraft(draftKey));
   const [loading, setLoading] = useState(true);
   const [typingUsers, setTypingUsers] = useState<Map<string, string>>(new Map());
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
@@ -286,6 +307,10 @@ function ChatPanelContent({
   }, []);
 
 
+
+  useEffect(() => {
+    saveDraft(draftKey, newMessage);
+  }, [draftKey, newMessage]);
 
   // Fetch server members for @mention autocomplete
   useEffect(() => {
@@ -876,55 +901,17 @@ function ChatPanelContent({
     }
   }
 
-  async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+  function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
-    if (!file) return;
     if (fileInputRef.current) fileInputRef.current.value = "";
-
-    if (file.size > 10 * 1024 * 1024) {
-      alert("File too large. Maximum size is 10MB. Videos are supported but must be under 10MB.");
-      return;
-    }
-
-    setUploadProgress(1);
-    try {
-      const formData = new FormData();
-      formData.append("file", file);
-      let uploadResult: { attachmentId: string; url: string; name: string };
-      try {
-        uploadResult = await uploadWithProgress(formData, (pct) => setUploadProgress(pct));
-      } catch {
-        alert("Upload failed");
-        return;
-      }
-      const { attachmentId } = uploadResult;
-
-      // Create message with attachment
-      const res = await fetch("/api/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          channelId,
-          content: "",
-          attachmentId,
-        }),
-      });
-
-      if (res.ok) {
-        const { message } = await res.json();
-        setMessages((prev) => [...prev, message]);
-        setTimeout(scrollToBottom, 50);
-        const socket = getSocket();
-        socket.emit("message:send", { channelId, message });
-      }
-    } catch {
-      alert("Upload failed. Please try again.");
-    } finally {
-      setUploadProgress(0);
-    }
+    if (file) void handleFileDrop(file);
   }
 
   async function handleFileDrop(file: File) {
+    if (slowRemaining > 0) {
+      alert(`Slow mode: wait ${slowRemaining}s to send again`);
+      return;
+    }
     if (file.size > 10 * 1024 * 1024) {
       alert("File too large. Maximum size is 10MB. Videos are supported but must be under 10MB.");
       return;
@@ -946,15 +933,19 @@ function ChatPanelContent({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ channelId, content: "", attachmentId }),
       });
-      if (res.ok) {
-        const { message } = await res.json();
-        setMessages((prev) => [...prev, message]);
-        setTimeout(scrollToBottom, 50);
-        const socket = getSocket();
-        socket.emit("message:send", { channelId, message });
+      if (!res.ok) {
+        // Surface the server's reason (slow mode, revoked access) instead of
+        // letting a finished upload vanish without a message.
+        const body = (await res.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(body?.error || "Upload failed. Please try again.");
       }
-    } catch {
-      alert("Upload failed. Please try again.");
+      const { message } = await res.json();
+      setMessages((prev) => [...prev, message]);
+      setTimeout(scrollToBottom, 50);
+      const socket = getSocket();
+      socket.emit("message:send", { channelId, message });
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Upload failed. Please try again.");
     } finally {
       setUploadProgress(0);
     }
@@ -1289,7 +1280,7 @@ function ChatPanelContent({
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            disabled={uploading}
+            disabled={uploading || slowRemaining > 0}
             className="px-3 py-3 text-[var(--muted)] hover:text-[var(--text)] transition-colors disabled:opacity-30"
             title="Upload file"
             aria-label="Upload file"
@@ -1316,6 +1307,14 @@ function ChatPanelContent({
             ref={inputRef}
             value={newMessage}
             onChange={handleInputChange}
+            onPaste={(e) => {
+              // Pasted screenshot/file → upload. Anything carrying plain text
+              // (incl. spreadsheet cells, which also carry an image) pastes as text.
+              const file = e.clipboardData.files[0];
+              if (!file || e.clipboardData.getData("text/plain")) return;
+              e.preventDefault();
+              void handleFileDrop(file);
+            }}
             onKeyDown={(e) => {
               const mod = e.ctrlKey || e.metaKey;
               if (mod && e.key === "b") {

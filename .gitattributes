@@ -1,0 +1,7 @@
+# Keep LF in the working tree on every OS: a CRLF shebang breaks vitest
+# imports of scripts/*.mjs on Windows and makes postinstall-written files
+# show as phantom-modified.
+* text=auto eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
