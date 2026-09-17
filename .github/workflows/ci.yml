@@ -55,8 +55,11 @@ jobs:
 
       - name: Check release metadata
         run: npm run release:check
+      # `npm audit` is unusable while the registry's bulk advisory endpoint
+      # returns unlabeled gzip and the quick-audit fallback is retired; the
+      # script queries the bulk endpoint directly and gunzips the response.
       - name: Audit production dependencies
-        run: npm audit --audit-level=high
+        run: npm run audit:deps
 
       - name: Check SQLite and PostgreSQL schemas
         run: npm run db:check

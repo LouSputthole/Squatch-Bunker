@@ -9,6 +9,7 @@ import { getSocket } from "@/lib/socket";
 import { voiceRoomModeLabel } from "@/lib/voiceRoomConfig";
 import AmbientSounds from "@/components/AmbientSounds";
 import SoundBoard from "@/components/SoundBoard";
+import FiresideStage, { type StageState } from "@/components/FiresideStage";
 import type { ScreenShareInfo } from "@/components/VoicePanel";
 
 interface VoiceParticipant {
@@ -361,6 +362,8 @@ export default function VoiceRoom({
   const [roomThemeId, setRoomThemeId] = useState(() => ROOM_THEMES.some((theme) => theme.id === roomScene) ? roomScene! : "campfire");
   const [themePickerOpen, setThemePickerOpen] = useState(false);
   const [lantern, setLantern] = useState<LanternRoomState | null>(null);
+  const [stage, setStage] = useState<StageState | null>(null);
+  const [stageError, setStageError] = useState<string | null>(null);
   const [offshootState, setOffshootState] = useState<OffshootState | null>(null);
   const [offshootError, setOffshootError] = useState<string | null>(null);
   const [roomConfigError, setRoomConfigError] = useState<string | null>(null);
@@ -383,6 +386,11 @@ export default function VoiceRoom({
     !!activeLantern &&
     (activeLantern.hostId === currentUserId || canModerateVoice);
   const nextLanternCamper = activeLantern?.queue[0];
+  const activeStage = stage?.channelId === channelId && stage.active ? stage : null;
+  const stageSpeakerIds = new Set(activeStage?.speakers.map((entry) => entry.userId) ?? []);
+  const isStageSpeaker = !activeStage || stageSpeakerIds.has(currentUserId);
+  const canControlStage =
+    !!activeStage && (activeStage.hostId === currentUserId || canModerateVoice);
   const activeOffshootState = offshootState?.channelId === channelId ? offshootState : null;
   const offshoots = activeOffshootState?.offshoots ?? EMPTY_OFFSHOOTS;
   const currentOffshoot = offshoots.find((room) => room.members.some((member) => member.userId === currentUserId));
@@ -439,18 +447,41 @@ export default function VoiceRoom({
       if (error.channelId !== channelId) return;
       setOffshootError(error.message);
     }
+    function handleStageUpdate(state: StageState) {
+      if (state.channelId !== channelId) return;
+      setStage(state.active ? state : null);
+      setStageError(null);
+    }
+    function handleStageError(error: { channelId: string; message: string }) {
+      if (error.channelId !== channelId) return;
+      setStageError(error.message);
+    }
 
     socket.on("lantern:update", handleLanternUpdate);
     socket.on("offshoot:update", handleOffshootUpdate);
     socket.on("offshoot:error", handleOffshootError);
+    socket.on("stage:update", handleStageUpdate);
+    socket.on("stage:error", handleStageError);
     socket.emit("lantern:state", channelId);
     socket.emit("offshoot:state", channelId);
+    socket.emit("stage:state", channelId);
     return () => {
       socket.off("lantern:update", handleLanternUpdate);
       socket.off("offshoot:update", handleOffshootUpdate);
       socket.off("offshoot:error", handleOffshootError);
+      socket.off("stage:update", handleStageUpdate);
+      socket.off("stage:error", handleStageError);
     };
   }, [channelId]);
+
+  // Audience members keep themselves muted; the stage is who may speak.
+  // Client-enforced only — the same advisory trust boundary as the Lantern.
+  useEffect(() => {
+    if (activeStage && !isStageSpeaker && !muted) {
+      onToggleMute();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeStage, isStageSpeaker, muted]);
 
   function startLantern() {
     getSocket().emit("lantern:start", channelId);
@@ -733,7 +764,20 @@ export default function VoiceRoom({
         )}
       </div>
 
-      {!activeLantern ? (
+      {activeStage ? (
+        <FiresideStage
+          stage={activeStage}
+          audience={participants.filter((p) => !stageSpeakerIds.has(p.userId))}
+          currentUserId={currentUserId}
+          canControl={canControlStage}
+          error={stageError}
+          displayName={displayName}
+          onRequest={() => getSocket().emit("stage:request", channelId)}
+          onWithdraw={() => getSocket().emit("stage:withdraw", channelId)}
+          onPromote={(targetUserId) => getSocket().emit("stage:promote", { channelId, targetUserId })}
+          onDemote={(targetUserId) => getSocket().emit("stage:demote", { channelId, targetUserId })}
+        />
+      ) : !activeLantern ? (
         <div className="flex items-center justify-center gap-2 px-4 py-1.5 bg-amber-950/20 border-b border-amber-600/10 text-xs shrink-0">
           <span className="text-amber-200/80">Taking turns for a story or recap?</span>
           <button
@@ -789,6 +833,11 @@ export default function VoiceRoom({
       {/* Main stage: screen share > campfire circle / standard grid */}
       {(() => {
         const screenActive = !!(incomingScreenShares && incomingScreenShares.length > 0);
+        // In a stage room, the circle and grid show the speakers; the
+        // audience lives in the stage banner strip.
+        const stagedParticipants = activeStage
+          ? participants.filter((p) => stageSpeakerIds.has(p.userId))
+          : participants;
         const handleCtx = (e: React.MouseEvent, p: VoiceParticipant) => {
           if (canModerateVoice) {
             setModMenu({ userId: p.userId, username: p.username, x: e.clientX, y: e.clientY, muted: p.muted, deafened: p.deafened });
@@ -827,7 +876,7 @@ export default function VoiceRoom({
         if (viewMode === "campfire") {
           return (
             <CircleView
-              participants={participants}
+              participants={stagedParticipants}
               currentUserId={currentUserId}
               image={roomTheme.img}
               seats={SEATS_BY_THEME[roomThemeId] || DEFAULT_SEATS}
@@ -844,7 +893,7 @@ export default function VoiceRoom({
         return (
           <div className="flex-1 overflow-y-auto p-4 min-h-0">
             <div className="grid gap-3 content-center min-h-full" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
-              {participants.map((p) => {
+              {stagedParticipants.map((p) => {
                 const isSelf = p.userId === currentUserId;
                 const stream = isSelf ? (cameraOn ? localCameraStream : null) : (remoteVideoStreams?.get(p.userId) || null);
                 const isSpeaking = p.speaking && !p.muted;

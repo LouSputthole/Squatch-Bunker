@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { usersHaveBlock } from "@/lib/userBlocks";
+import {
+  createFriendRequestNotification,
+  emitNotification,
+  type NotificationRecord,
+} from "@/lib/notifications";
 
 // GET — list all friendships (accepted, pending incoming, pending outgoing)
 export async function GET() {
@@ -90,7 +95,11 @@ export async function POST(request: Request) {
     // response. `requesterId`/`addresseeId` still record the real
     // sender/recipient so incoming vs outgoing display is preserved.
     const result = await prisma.$transaction(
-      async (tx): Promise<{ status: number; body: Record<string, unknown> }> => {
+      async (tx): Promise<{
+        status: number;
+        body: Record<string, unknown>;
+        notification?: NotificationRecord;
+      }> => {
         // Recheck inside the write transaction so a block created between the
         // initial lookup and this transaction cannot leave a new friendship.
         const block = await tx.userBlock.findFirst({
@@ -139,10 +148,20 @@ export async function POST(request: Request) {
           data: { requesterId: session.userId, addresseeId: target.id },
         });
 
-        return { status: 200, body: { friendship } };
+        const notification = await createFriendRequestNotification(
+          session.userId,
+          session.username,
+          target.id,
+          tx,
+        );
+
+        return { status: 200, body: { friendship }, notification };
       },
     );
 
+    if (result.notification) {
+      emitNotification(target.id, result.notification);
+    }
     return NextResponse.json(result.body, { status: result.status });
   } catch (err) {
     const prismaErr = err as { code?: string };
