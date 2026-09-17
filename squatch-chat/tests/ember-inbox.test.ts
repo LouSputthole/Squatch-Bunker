@@ -166,6 +166,32 @@ describe("channel message notifications", () => {
     expect(created[0].title).toContain("#ember-general");
   });
 
+  it("matches mixed-case usernames and guest #tags as the composer inserts them", async () => {
+    const [caps, guest, otherGuest] = await Promise.all([
+      prisma.user.create({
+        data: { email: "ember-caps@t.local", username: "EmberCaps", passwordHash: "x" },
+      }),
+      prisma.user.create({
+        data: { email: "ember-guest@t.local", username: "Camper#ab12cd34", passwordHash: "x" },
+      }),
+      prisma.user.create({
+        data: { email: "ember-guest2@t.local", username: "Camper#zz99yy88", passwordHash: "x" },
+      }),
+    ]);
+    await prisma.serverMember.createMany({
+      data: [caps, guest, otherGuest].map((user) => ({ serverId, userId: user.id, role: "member" })),
+    });
+
+    const tagged = await createChannelMessageNotifications(
+      baseMessageInput("hey @EmberCaps and @Camper#ab12cd34"),
+    );
+    expect(tagged.map((n) => n.userId).sort()).toEqual([caps.id, guest.id].sort());
+
+    // A bare display name reaches every member who shows up under it.
+    const bare = await createChannelMessageNotifications(baseMessageInput("hey @camper"));
+    expect(bare.map((n) => n.userId).sort()).toEqual([guest.id, otherGuest.id].sort());
+  });
+
   it("creates a reply notification and prefers mention when both apply", async () => {
     const reply = await createChannelMessageNotifications({
       ...baseMessageInput("responding to your point"),

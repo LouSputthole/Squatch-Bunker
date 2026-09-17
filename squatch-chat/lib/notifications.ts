@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import type { Prisma } from "@/generated/prisma/client";
 import { resolveChannelAccess } from "@/lib/channelAccess";
+import { displayName } from "@/lib/utils";
 
 /**
  * Ember Inbox — durable, per-user notifications.
@@ -17,7 +18,9 @@ export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
 
 export const MAX_MENTION_TARGETS = 10;
 const BODY_PREVIEW_LENGTH = 140;
-const MENTION_PATTERN = /@(\w{1,32})/g;
+// Guests are stored as "Name#tag" and the composer inserts the full username,
+// so the optional tag must be part of the token.
+const MENTION_PATTERN = /@(\w{1,32}(?:#\w{1,16})?)/g;
 
 type NotificationDatabase = Pick<
   Prisma.TransactionClient,
@@ -131,13 +134,20 @@ export async function createChannelMessageNotifications(
 
   const usernames = extractMentionedUsernames(input.content);
   if (usernames.length > 0) {
-    const mentioned = await database.user.findMany({
-      where: { username: { in: usernames } },
-      select: { id: true, username: true },
+    // Match in JS, not SQL: usernames keep their case and guests carry a #tag,
+    // and case-insensitive equality is not portable across SQLite/PostgreSQL.
+    // "@name#tag" is exact; a bare "@name" matches by display name.
+    // ponytail: loads the server's member list per mentioning message; add a
+    // normalized-username column if large servers make this hot.
+    const members = await database.serverMember.findMany({
+      where: { serverId: input.serverId, banned: false },
+      select: { user: { select: { id: true, username: true } } },
     });
     const wanted = new Set(usernames);
-    for (const user of mentioned) {
-      if (user.id !== input.authorId && wanted.has(user.username.toLowerCase())) {
+    for (const { user } of members) {
+      if (user.id === input.authorId) continue;
+      const full = user.username.toLowerCase();
+      if (wanted.has(full) || wanted.has(displayName(user.username).toLowerCase())) {
         candidates.set(user.id, "mention");
       }
     }
@@ -170,8 +180,8 @@ export async function createChannelMessageNotifications(
         userId: recipientId,
         type,
         title: type === "mention"
-          ? `${input.authorUsername} mentioned you in #${input.channelName}`
-          : `${input.authorUsername} replied to you in #${input.channelName}`,
+          ? `${displayName(input.authorUsername)} mentioned you in #${input.channelName}`
+          : `${displayName(input.authorUsername)} replied to you in #${input.channelName}`,
         body: previewOf(input.content),
         serverId: input.serverId,
         channelId: input.channelId,
@@ -199,7 +209,7 @@ export async function upsertDmNotification(
   input: DmNotificationInput,
   database: NotificationDatabase = prisma,
 ): Promise<NotificationRecord> {
-  const title = `New message from ${input.authorUsername}`;
+  const title = `New message from ${displayName(input.authorUsername)}`;
   const body = previewOf(input.content);
 
   const existing = await database.notification.findFirst({
@@ -239,7 +249,7 @@ export async function createFriendRequestNotification(
     data: {
       userId: addresseeId,
       type: "friend_request",
-      title: `${requesterUsername} sent you a friend request`,
+      title: `${displayName(requesterUsername)} sent you a friend request`,
       body: "Open the Friends panel to accept or decline.",
       actorId: requesterId,
     },
