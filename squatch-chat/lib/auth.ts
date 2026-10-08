@@ -66,13 +66,15 @@ export async function validateSessionToken(
 
   // Stateful checks: load the user to enforce token revocation (tokenVersion)
   // and guest-session expiry. Fail closed if the user is gone or the DB errors.
+  let currentUsername: string | undefined;
   try {
     const { prisma } = await import("@/lib/db");
     const user = await prisma.user.findUnique({
       where: { id: payload.userId },
-      select: { tokenVersion: true, isGuest: true, guestExpiresAt: true },
+      select: { tokenVersion: true, isGuest: true, guestExpiresAt: true, username: true },
     });
     if (!user) return null;
+    currentUsername = user.username;
     if ((payload.tokenVersion ?? 0) !== user.tokenVersion) return null;
     if (
       user.isGuest &&
@@ -89,7 +91,9 @@ export async function validateSessionToken(
     return null;
   }
 
-  return payload;
+  // The username claim is frozen at mint time; after a rename, older devices'
+  // tokens must not keep acting under the old (possibly re-registered) name.
+  return { ...payload, username: currentUsername ?? payload.username };
 }
 
 export async function getSession(): Promise<TokenPayload | null> {
@@ -103,6 +107,13 @@ export function setTokenCookie(response: Response, token: string): void {
   response.headers.append(
     "Set-Cookie",
     `${COOKIE_NAME}=${token}; ${config.cookieFlags}`
+  );
+}
+
+export function clearTokenCookie(response: Response): void {
+  response.headers.append(
+    "Set-Cookie",
+    `${COOKIE_NAME}=; ${config.cookieScopeFlags} Max-Age=0`
   );
 }
 

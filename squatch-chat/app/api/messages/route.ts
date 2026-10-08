@@ -9,8 +9,8 @@ import {
   privateAttachmentUrl,
   PrivateUploadClaimError,
 } from "@/lib/privateUploads";
-
-const MAX_MESSAGE_LENGTH = 4000;
+import { MAX_MESSAGE_LENGTH } from "@/lib/inputLimits";
+import { channelMessageInclude, toChannelMessagePayload } from "@/lib/messagePayload";
 
 export async function GET(request: Request) {
   const session = await getSession();
@@ -43,55 +43,40 @@ export async function GET(request: Request) {
       );
     }
 
-    const messages = await prisma.message.findMany({
+    // Paging is newest-first by (createdAt, id); `cursor` is the oldest
+    // message the client already holds and nextCursor is this page's oldest.
+    if (cursor) {
+      const cursorMessage = await prisma.message.findFirst({
+        where: { id: cursor, channelId },
+        select: { id: true },
+      });
+      if (!cursorMessage) {
+        return NextResponse.json({ error: "Invalid cursor" }, { status: 400 });
+      }
+    }
+
+    // One extra row tells us whether anything older exists.
+    const rows = await prisma.message.findMany({
       where: {
         channelId,
         ...(pinned === "true" ? { pinned: true } : {}),
         parentMessageId: pinned === "true" ? null : (parentId ?? null),
       },
-      include: {
-        author: { select: { id: true, username: true, avatar: true } },
-        reactions: {
-          select: { emoji: true, userId: true, user: { select: { username: true } } },
-        },
-        replyTo: {
-          select: {
-            id: true,
-            content: true,
-            author: { select: { id: true, username: true } },
-          },
-        },
-        poll: {
-          include: {
-            options: { orderBy: { position: "asc" }, include: { votes: { select: { userId: true } } } },
-            votes: { select: { userId: true, optionId: true } },
-          },
-        },
-      },
-      orderBy: { createdAt: "desc" },
-      take: limit,
+      include: channelMessageInclude,
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: limit + 1,
       ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
     });
-
-    // Group reactions by emoji per message
-    const messagesWithGroupedReactions = messages.map((m) => {
-      const grouped: Record<string, { count: number; users: string[]; userIds: string[] }> = {};
-      for (const r of m.reactions) {
-        if (!grouped[r.emoji]) grouped[r.emoji] = { count: 0, users: [], userIds: [] };
-        grouped[r.emoji].count++;
-        grouped[r.emoji].users.push(r.user.username);
-        grouped[r.emoji].userIds.push(r.userId);
-      }
-      return { ...m, reactions: grouped };
-    });
+    const hasOlder = rows.length > limit;
+    const messages = hasOlder ? rows.slice(0, limit) : rows;
 
     return NextResponse.json({
-      messages: messagesWithGroupedReactions.reverse(),
-      nextCursor: messages.length === limit ? messages[0]?.id : null,
+      messages: messages.map(toChannelMessagePayload).reverse(),
+      nextCursor: hasOlder ? messages[messages.length - 1].id : null,
     });
   } catch (err) {
     console.error("[Campfire] Failed to fetch messages:", err);
-    return NextResponse.json({ messages: [], nextCursor: null });
+    return NextResponse.json({ error: "Failed to load messages" }, { status: 500 });
   }
 }
 

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import EmojiPicker from "./EmojiPicker";
+import type { CustomEmojiMap } from "@/lib/customEmoji";
 
 interface MessageContextMenuProps {
   x: number;
@@ -21,8 +22,13 @@ interface MessageContextMenuProps {
   onReact: (emoji: string) => void;
   onCopyText: () => void;
   onBookmark: () => void;
+  isBookmarked?: boolean;
   onJournal?: () => void;
   onTranslate?: () => void;
+  /** Report this message to the instance operator (hidden on your own messages). */
+  onReport?: () => void;
+  /** This server's custom emoji, offered in the full reaction picker. */
+  customEmojis?: CustomEmojiMap;
   onClose: () => void;
 }
 
@@ -44,8 +50,11 @@ export default function MessageContextMenu({
   onReact,
   onCopyText,
   onBookmark,
+  isBookmarked = false,
   onJournal,
   onTranslate,
+  onReport,
+  customEmojis,
   onClose,
 }: MessageContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
@@ -63,9 +72,10 @@ export default function MessageContextMenu({
     if (onJournal) items.push("journal");
     if (onTranslate && message.content) items.push("translate");
     if (canPin) items.push("pin");
-    if (isOwn && onDelete) items.push("delete");
+    if (!isOwn && onReport) items.push("report");
+    if (onDelete) items.push("delete");
     return items;
-  }, [isOwn, canPin, onEdit, onDelete, onJournal, onTranslate, message.content]);
+  }, [isOwn, canPin, onEdit, onDelete, onJournal, onTranslate, onReport, message.content]);
 
   // Flip position to avoid viewport overflow
   useEffect(() => {
@@ -188,6 +198,7 @@ export default function MessageContextMenu({
       {showFullPicker && (
         <div className="absolute left-full top-0 ml-1 z-[10000]" onMouseDown={(e) => e.stopPropagation()}>
           <EmojiPicker
+            customEmojis={customEmojis}
             onSelect={(emoji) => { onReact(emoji); onClose(); }}
             onClose={() => setShowFullPicker(false)}
           />
@@ -213,7 +224,7 @@ export default function MessageContextMenu({
       {/* 6. Bookmark */}
       <button className={ITEM_CLASS} onClick={wrap(onBookmark)} {...itemProps("bookmark")}>
         <span>★</span>
-        <span>Bookmark</span>
+        <span>{isBookmarked ? "Remove from Saved" : "Save message"}</span>
       </button>
 
       {onJournal && (
@@ -248,10 +259,18 @@ export default function MessageContextMenu({
         </button>
       )}
 
-      <hr className="border-[var(--accent-2)]/20 my-1" />
+      {((!isOwn && onReport) || onDelete) && <hr className="border-[var(--accent-2)]/20 my-1" />}
 
-      {/* 9. Delete — only if own message, danger color */}
-      {isOwn && onDelete && (
+      {/* Report — never on your own messages */}
+      {!isOwn && onReport && (
+        <button className={ITEM_CLASS} onClick={wrap(onReport)} {...itemProps("report")}>
+          <span>🚩</span>
+          <span>Report message</span>
+        </button>
+      )}
+
+      {/* 9. Delete — own message, or moderators (caller decides), danger color */}
+      {onDelete && (
         <button
           className="px-3 py-1.5 text-sm text-[var(--danger)] hover:bg-[var(--accent-2)]/20 cursor-pointer flex items-center gap-2 w-full text-left outline-none focus:bg-[var(--accent-2)]/20"
           onClick={wrap(onDelete)}

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import Avatar from "@/components/Avatar";
+import { useEscape } from "@/hooks/useEscape";
 
 interface AuditEntry {
   id: string;
@@ -19,15 +20,18 @@ interface AuditLogViewerProps {
 }
 
 const ACTION_LABELS: Record<string, { label: string; icon: string; color: string }> = {
-  message_purge: { label: "Purged Messages", icon: "🗑️", color: "text-red-400" },
-  channel_permission_update: { label: "Updated Permissions", icon: "🔒", color: "text-yellow-400" },
-  member_ban: { label: "Banned Member", icon: "🚫", color: "text-red-400" },
-  member_unban: { label: "Unbanned Member", icon: "✅", color: "text-green-400" },
-  member_kick: { label: "Kicked Member", icon: "👢", color: "text-orange-400" },
-  member_role_change: { label: "Changed Role", icon: "👑", color: "text-purple-400" },
-  channel_create: { label: "Created Channel", icon: "📝", color: "text-blue-400" },
-  channel_delete: { label: "Deleted Channel", icon: "🗑️", color: "text-red-400" },
-  server_update: { label: "Updated Server", icon: "⚙️", color: "text-blue-400" },
+  message_purge: { label: "Purged Messages", icon: "🗑️", color: "text-[var(--danger)]" },
+  channel_permission_update: { label: "Updated Permissions", icon: "🔒", color: "text-[var(--accent-2)]" },
+  member_ban: { label: "Banned Member", icon: "🚫", color: "text-[var(--danger)]" },
+  member_unban: { label: "Unbanned Member", icon: "✅", color: "text-[var(--accent)]" },
+  member_kick: { label: "Kicked Member", icon: "👢", color: "text-[var(--danger)]" },
+  member_role_change: { label: "Changed Role", icon: "👑", color: "text-[var(--accent)]" },
+  channel_create: { label: "Created Channel", icon: "📝", color: "text-[var(--accent)]" },
+  channel_update: { label: "Updated Channel", icon: "✏️", color: "text-[var(--accent)]" },
+  channel_delete: { label: "Deleted Channel", icon: "🗑️", color: "text-[var(--danger)]" },
+  server_update: { label: "Updated Server", icon: "⚙️", color: "text-[var(--accent-2)]" },
+  report_resolve: { label: "Resolved Report", icon: "🛡️", color: "text-[var(--accent)]" },
+  report_dismiss: { label: "Dismissed Report", icon: "🧹", color: "text-[var(--muted)]" },
 };
 
 function formatAction(action: string) {
@@ -50,9 +54,13 @@ export default function AuditLogViewer({ serverId, open, onClose }: AuditLogView
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [actionFilter, setActionFilter] = useState("");
+  const [error, setError] = useState("");
+
+  useEscape(onClose, open);
 
   const fetchLogs = useCallback(async () => {
     setLoading(true);
+    setError("");
     try {
       let url = `/api/servers/${serverId}/audit-log?page=${page}&limit=25`;
       if (actionFilter) url += `&action=${encodeURIComponent(actionFilter)}`;
@@ -61,8 +69,15 @@ export default function AuditLogViewer({ serverId, open, onClose }: AuditLogView
         const data = await res.json();
         setEntries(data.entries || []);
         setTotalPages(data.pages || 1);
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setEntries([]);
+        setError(typeof data.error === "string" && data.error ? data.error : "Couldn't load the audit log");
       }
-    } catch { /* ignore */ }
+    } catch {
+      setEntries([]);
+      setError("Couldn't load the audit log");
+    }
     setLoading(false);
   }, [serverId, page, actionFilter]);
 
@@ -77,20 +92,24 @@ export default function AuditLogViewer({ serverId, open, onClose }: AuditLogView
   const actionTypes = Object.keys(ACTION_LABELS);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="audit-log-title"
         className="w-full max-w-2xl bg-[var(--panel)] rounded-xl border border-[var(--accent-2)]/30 shadow-2xl overflow-hidden"
         style={{ maxHeight: "80vh" }}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--accent-2)]/20">
-          <h2 className="text-lg font-bold text-[var(--text)]">Audit Log</h2>
-          <button onClick={onClose} className="text-[var(--muted)] hover:text-[var(--text)] text-xl leading-none">&times;</button>
+          <h2 id="audit-log-title" className="text-lg font-bold text-[var(--text)]">Audit Log</h2>
+          <button onClick={onClose} autoFocus aria-label="Close audit log" className="text-[var(--muted)] hover:text-[var(--text)] text-xl leading-none">&times;</button>
         </div>
 
         {/* Filter bar */}
         <div className="px-5 py-2 border-b border-[var(--accent-2)]/10 flex items-center gap-2">
           <select
+            aria-label="Filter by action"
             value={actionFilter}
             onChange={(e) => { setActionFilter(e.target.value); setPage(1); }}
             className="text-xs px-2 py-1.5 bg-[var(--panel-2)] text-[var(--text)] border border-[var(--accent-2)]/30 rounded-lg focus:outline-none"
@@ -101,7 +120,7 @@ export default function AuditLogViewer({ serverId, open, onClose }: AuditLogView
             ))}
           </select>
           <button
-            onClick={fetchLogs}
+            onClick={() => void fetchLogs()}
             className="text-xs text-[var(--accent-2)] hover:text-[var(--accent)] transition-colors ml-auto"
           >
             Refresh
@@ -114,7 +133,16 @@ export default function AuditLogViewer({ serverId, open, onClose }: AuditLogView
             <div className="px-5 py-8 text-center text-sm text-[var(--muted)]">Loading...</div>
           )}
 
-          {!loading && entries.length === 0 && (
+          {!loading && error && (
+            <div role="alert" className="px-5 py-8 text-center text-sm text-[var(--muted)]">
+              <p>{error}</p>
+              <button onClick={() => void fetchLogs()} className="mt-2 text-xs text-[var(--accent)] hover:underline">
+                Try again
+              </button>
+            </div>
+          )}
+
+          {!loading && !error && entries.length === 0 && (
             <div className="px-5 py-8 text-center text-sm text-[var(--muted)]">No audit log entries</div>
           )}
 

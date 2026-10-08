@@ -19,7 +19,8 @@ export function useAuth() {
       }
       const data = await res.json();
       setUser(data.user);
-      setLoading(false);
+      // loading stays true until the caller has also loaded servers — flipping it here
+      // flashed the zero-servers onboarding wizard on every page load.
       return data.user;
     } catch {
       router.push("/login");
@@ -37,5 +38,9 @@ export function useAuth() {
     setUser((prev) => prev ? { ...prev, avatar } : prev);
   }, []);
 
-  return { user, loading, setLoading, fetchUser, logout, updateAvatar };
+  const updateUser = useCallback((fields: Partial<User>) => {
+    setUser((prev) => prev ? { ...prev, ...fields } : prev);
+  }, []);
+
+  return { user, loading, setLoading, fetchUser, logout, updateAvatar, updateUser };
 }

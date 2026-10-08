@@ -3,7 +3,11 @@ import { getSession } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { getTier, hasFeature } from "@/lib/features";
 import { checkWeightedLimit } from "@/lib/rateLimit";
-import { evaluateUploadPolicy } from "@/lib/uploadPolicy";
+import {
+  evaluateUploadPolicy,
+  EXTENDED_UPLOAD_MAX_BYTES,
+  STANDARD_UPLOAD_MAX_BYTES,
+} from "@/lib/uploadPolicy";
 import { getUserMediaRoot } from "@/lib/userMedia";
 import { writeFile, mkdir } from "fs/promises";
 import path from "path";
@@ -14,8 +18,6 @@ import crypto from "crypto";
 // folder is read-only when installed) and serves /uploads/* from there.
 const UPLOAD_BASE = getUserMediaRoot();
 const UPLOAD_DIR = path.join(UPLOAD_BASE, "uploads");
-const FREE_MAX_SIZE = 10 * 1024 * 1024; // 10MB (free tier)
-const PREMIUM_MAX_SIZE = 100 * 1024 * 1024; // 100MB (premium "extended_upload")
 // Per-account hourly abuse brakes (all tiers — generous for humans, a wall
 // for scripts). In-memory: see checkWeightedLimit's multi-node note.
 const UPLOADS_PER_HOUR = 30;
@@ -39,8 +41,8 @@ export async function POST(req: NextRequest) {
       select: { tier: true, tierExpiresAt: true },
     });
     const maxSize = hasFeature(getTier(user), "extended_upload")
-      ? PREMIUM_MAX_SIZE
-      : FREE_MAX_SIZE;
+      ? EXTENDED_UPLOAD_MAX_BYTES
+      : STANDARD_UPLOAD_MAX_BYTES;
     const maxLabel = `${Math.round(maxSize / (1024 * 1024))}MB`;
     const byteCap = maxSize + MULTIPART_OVERHEAD;
 

@@ -2,10 +2,24 @@ import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { sfuConfigured } from "@/lib/sfu";
 import { billingConfiguration, getEdition } from "@/lib/edition";
+import { emailConfiguration } from "@/lib/email";
+import { assertFeature, getTier, hasFeature } from "@/lib/features";
+import {
+  EXTENDED_UPLOAD_MAX_BYTES,
+  STANDARD_UPLOAD_MAX_BYTES,
+} from "@/lib/uploadPolicy";
 import {
   assertTurnConfiguration,
   mintTurnCredentials,
 } from "@/lib/turnCredentials";
+
+/** Same check as /api/auth/oauth/[provider]: both client id and secret set. */
+function configuredOAuthProviders(): string[] {
+  const providers: string[] = [];
+  if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET) providers.push("github");
+  if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) providers.push("google");
+  return providers;
+}
 
 /**
  * Runtime config endpoint. Returns connection URLs derived from the request.
@@ -53,6 +67,17 @@ export async function GET(request: Request) {
     turnCredential = turnConfiguration.credential;
   }
 
+  // The attachment ceiling /api/attachments enforces for this caller: their
+  // own tier when signed in, otherwise this edition's default.
+  let extendedUpload = hasFeature(getTier(null), "extended_upload");
+  if (session) {
+    try {
+      extendedUpload = await assertFeature(session.userId, "extended_upload");
+    } catch (error) {
+      console.error("[Campfire] Config upload-limit lookup failed:", error);
+    }
+  }
+
   const response = NextResponse.json({
     edition: getEdition(),
     billingEnabled: billingConfiguration().enabled,
@@ -65,6 +90,9 @@ export async function GET(request: Request) {
     turnCredential,
     turnExpiresAt,
     sfuAvailable: sfuConfigured(),
+    oauthProviders: configuredOAuthProviders(),
+    passwordResetEnabled: emailConfiguration().enabled,
+    maxUploadBytes: extendedUpload ? EXTENDED_UPLOAD_MAX_BYTES : STANDARD_UPLOAD_MAX_BYTES,
   });
   response.headers.set("Cache-Control", "private, no-store");
   response.headers.set("Vary", "Cookie");

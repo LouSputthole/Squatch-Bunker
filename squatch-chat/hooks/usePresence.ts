@@ -25,10 +25,15 @@ export function usePresence(activeServer: Server | null, user: User | null) {
   const [userAccess, setUserAccess] = useState<UserServerAccess | null>(null);
   const [myStatus, setMyStatus] = useState<PresenceStatus>("online");
   const activeServerIdRef = useRef<string | null>(null);
+  const myStatusRef = useRef<PresenceStatus>("online");
+  // Key effects on ids: the server object is recreated on every channel
+  // create/rename/reorder, which used to leave + rejoin the server room.
+  const activeServerId = activeServer?.id ?? null;
+  const userId = user?.id ?? null;
   const currentUserAccess =
     userAccess !== null &&
-    userAccess.serverId === activeServer?.id &&
-    userAccess.userId === user?.id
+    userAccess.serverId === activeServerId &&
+    userAccess.userId === userId
       ? userAccess
       : null;
   const userRole = currentUserAccess?.role ?? "member";
@@ -36,17 +41,36 @@ export function usePresence(activeServer: Server | null, user: User | null) {
     currentUserAccess?.canManageChannels ?? false;
 
   useEffect(() => {
-    activeServerIdRef.current = activeServer?.id ?? null;
-  }, [activeServer]);
+    activeServerIdRef.current = activeServerId;
+  }, [activeServerId]);
+
+  useEffect(() => {
+    myStatusRef.current = myStatus;
+  }, [myStatus]);
+
+  // A reconnect gets a fresh server-side socket: re-send a chosen non-default
+  // status (the server starts new users at "online" and keeps an existing one).
+  useEffect(() => {
+    const socket = getSocket();
+    function resendStatus() {
+      if (myStatusRef.current !== "online") socket.emit("presence:status", myStatusRef.current);
+    }
+    socket.on("connect", resendStatus);
+    return () => { socket.off("connect", resendStatus); };
+  }, []);
 
   // Server join/leave + presence listener + role fetch
   useEffect(() => {
-    if (!activeServer) return;
+    if (!activeServerId) return;
     const socket = getSocket();
     const controller = new AbortController();
-    const serverId = activeServer.id;
-    // Send role with server join so realtime server can enforce mod permissions
-    if (user) {
+    const serverId = activeServerId;
+    let role = "member";
+    // The role is advisory (the realtime server reads it from the DB).
+    function joinServerRoom() {
+      socket.emit("server:join", { serverId, role });
+    }
+    if (userId) {
       fetch(`/api/servers/${serverId}/members`, {
         signal: controller.signal,
       })
@@ -56,27 +80,26 @@ export function usePresence(activeServer: Server | null, user: User | null) {
             return;
           }
           if (data?.members) {
-            const me = data.members.find((m: { id: string; role?: string }) => m.id === user.id);
-            const role = me?.role || "member";
+            const me = data.members.find((m: { id: string; role?: string }) => m.id === userId);
+            role = me?.role || "member";
             const canManageChannels =
               Array.isArray(data.currentUserPermissions) &&
               data.currentUserPermissions.includes("MANAGE_CHANNELS");
             setUserAccess({
               serverId,
-              userId: user.id,
+              userId,
               role,
               canManageChannels,
             });
-            socket.emit("server:join", { serverId, role });
           } else {
             setUserAccess({
               serverId,
-              userId: user.id,
+              userId,
               role: "member",
               canManageChannels: false,
             });
-            socket.emit("server:join", { serverId, role: "member" });
           }
+          joinServerRoom();
         })
         .catch(() => {
           if (controller.signal.aborted || activeServerIdRef.current !== serverId) {
@@ -84,35 +107,37 @@ export function usePresence(activeServer: Server | null, user: User | null) {
           }
           setUserAccess({
             serverId,
-            userId: user.id,
+            userId,
             role: "member",
             canManageChannels: false,
           });
-          socket.emit("server:join", { serverId, role: "member" });
+          joinServerRoom();
         });
     } else {
-      socket.emit("server:join", { serverId, role: "member" });
+      joinServerRoom();
     }
 
     function handlePresence(data: { serverId: string; members: MemberPresence[] }) {
       if (data.serverId !== activeServerIdRef.current) return;
       // Filter out invisible users (unless it's ourselves)
-      const visible = data.members.filter((m) => m.status !== "invisible" || m.userId === user?.id);
+      const visible = data.members.filter((m) => m.status !== "invisible" || m.userId === userId);
       const ids = new Set(visible.map((m) => m.userId));
       // Always include current user as online (they're using the app)
-      if (user) ids.add(user.id);
+      if (userId) ids.add(userId);
       setOnlineMembers(ids);
       setMemberStatuses(new Map(data.members.map((m) => [m.userId, m.status])));
     }
     socket.on("presence:update", handlePresence);
-
+    // A reconnected socket is only in its user room; rejoin the viewed server.
+    socket.on("connect", joinServerRoom);
 
     return () => {
       controller.abort();
       socket.off("presence:update", handlePresence);
+      socket.off("connect", joinServerRoom);
       socket.emit("server:leave", serverId);
     };
-  }, [activeServer, user]);
+  }, [activeServerId, userId]);
 
   // Auto-idle after 5 minutes of inactivity
   useEffect(() => {

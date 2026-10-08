@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback, forwardRef, useImperativeHandle, useEffectEvent } from "react";
 import { getSocket } from "@/lib/socket";
 import { sounds } from "@/lib/sounds";
+import { toast } from "@/lib/toast";
 import {
   ensureRuntimeConfig,
   invalidateRuntimeConfig,
@@ -29,8 +30,18 @@ interface VoiceParticipant {
   muted: boolean;
   deafened?: boolean;
   speaking?: boolean;
+  camera?: boolean;
+  avatar?: string | null;
+  /** Set by a moderator; the user cannot unmute/undeafen until it is lifted. */
+  serverMuted?: boolean;
+  serverDeafened?: boolean;
   connectionQuality?: "good" | "fair" | "poor" | "unknown";
   pingMs?: number;
+}
+
+interface OffshootRoute {
+  id: string;
+  members: { userId: string }[];
 }
 
 interface VoicePanelProps {
@@ -40,9 +51,11 @@ interface VoicePanelProps {
   currentUserId: string;
   currentUsername: string;
   currentUserAvatar?: string | null;
+  /** Push-to-talk, owned by useVoice; survives this panel remounting. */
+  pttMode?: boolean;
   onParticipantsChange?: (channelId: string, participants: VoiceParticipant[]) => void;
   onDisconnect?: () => void;
-  onStateChange?: (state: { muted: boolean; deafened: boolean; reconnecting: boolean; participants: VoiceParticipant[]; sharing: boolean; cameraOn: boolean }) => void;
+  onStateChange?: (state: { muted: boolean; deafened: boolean; reconnecting: boolean; participants: VoiceParticipant[]; sharing: boolean; cameraOn: boolean; serverMuted: boolean; serverDeafened: boolean }) => void;
   onScreenShareChange?: (shares: ScreenShareInfo[]) => void;
   onVideoStreamsChange?: (streams: Map<string, MediaStream>) => void;
 }
@@ -57,7 +70,7 @@ export interface VoicePanelHandle {
   toggleMute: () => void;
   toggleDeafen: () => void;
   disconnect: () => void;
-  togglePTT: () => void;
+  setPTT: (enabled: boolean) => void;
   isPTT: () => boolean;
   setUserVolume: (userId: string, volume: number) => void;
   setUserRoutingMuted: (userId: string, muted: boolean) => void;
@@ -104,6 +117,59 @@ function clearUnavailableMediaDevice(
   saveAudioSettings({ ...settings, [setting]: "" });
 }
 
+// Keep "speaking" lit briefly after the level dips so pauses between words
+// don't flip the indicator (and emit voice:speaking) every 100ms poll.
+const VAD_HANGOVER_MS = 300;
+
+function clampSetting(value: unknown, fallback: number, min: number, max: number): number {
+  const number = typeof value === "number" && Number.isFinite(value) ? value : fallback;
+  return Math.max(min, Math.min(max, number));
+}
+
+interface InputGainPipeline {
+  context: AudioContext;
+  gain: GainNode;
+  raw: MediaStream;
+}
+
+/**
+ * Applies the saved Input Volume by routing the mic through a GainNode. At
+ * 100%, or when audio processing cannot start (e.g. an AudioContext still
+ * blocked by autoplay policy on a call restored at page load), the raw mic is
+ * sent unchanged so a call is never silent because of this setting.
+ */
+async function applyInputGain(
+  raw: MediaStream,
+  volume: number,
+): Promise<{ stream: MediaStream; pipeline: InputGainPipeline | null }> {
+  if (volume === 1 || typeof AudioContext === "undefined") return { stream: raw, pipeline: null };
+  let context: AudioContext | null = null;
+  try {
+    context = new AudioContext();
+    if (context.state !== "running") {
+      await Promise.race([
+        context.resume(),
+        new Promise((resolve) => setTimeout(resolve, 250)),
+      ]);
+      if ((context.state as AudioContextState) !== "running") throw new Error("AudioContext suspended");
+    }
+    const gain = context.createGain();
+    gain.gain.value = volume;
+    const destination = context.createMediaStreamDestination();
+    context.createMediaStreamSource(raw).connect(gain).connect(destination);
+    return { stream: destination.stream, pipeline: { context, gain, raw } };
+  } catch {
+    if (context) void context.close().catch(() => {});
+    return { stream: raw, pipeline: null };
+  }
+}
+
+function releaseInputGain(pipeline: InputGainPipeline | null) {
+  if (!pipeline) return;
+  pipeline.raw.getTracks().forEach((track) => track.stop());
+  void pipeline.context.close().catch(() => {});
+}
+
 
 function SettingsIcon() {
   return (
@@ -122,6 +188,7 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
   currentUserId,
   currentUsername,
   currentUserAvatar,
+  pttMode = false,
   onParticipantsChange,
   onDisconnect,
   onScreenShareChange,
@@ -132,9 +199,22 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
   const joinedRef = useRef(false);
   const [muted, setMuted] = useState(false);
   const [deafened, setDeafened] = useState(false);
+  // Remote audio created after deafening (late joiners, reconnects) must start muted.
+  const deafenedRef = useRef(false);
   const [participants, setParticipants] = useState<VoiceParticipant[]>([]);
   const [reconnecting, setReconnecting] = useState(false);
   const [sharing, setSharing] = useState(false);
+  const [offshootRooms, setOffshootRooms] = useState<OffshootRoute[] | null>(null);
+
+  // Moderator state comes from the authoritative roster, so it also survives
+  // rejoin and reconnect.
+  const selfParticipant = participants.find((p) => p.userId === currentUserId);
+  const selfServerMuted = !!selfParticipant?.serverMuted;
+  const selfServerDeafened = !!selfParticipant?.serverDeafened;
+  const serverMutedRef = useRef(false);
+  useEffect(() => {
+    serverMutedRef.current = selfServerMuted || selfServerDeafened;
+  }, [selfServerMuted, selfServerDeafened]);
 
   const [speakingUsers, setSpeakingUsers] = useState<Set<string>>(new Set());
 
@@ -154,7 +234,12 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
   const userVolumesRef = useRef<Map<string, number>>(new Map());
   const routingMutedUsersRef = useRef<Set<string>>(new Set());
   const socketToUserRef = useRef<Map<string, string>>(new Map());
+  // Saved Settings > Voice levels; applied on mount and whenever they change.
   const vadThresholdRef = useRef(15);
+  const outputVolumeRef = useRef(1);
+  const inputVolumeRef = useRef(1);
+  const inputGainRef = useRef<InputGainPipeline | null>(null);
+  const autoRoutedUsersRef = useRef<Set<string>>(new Set());
   const mediaDeviceSettingsRef = useRef<MediaDeviceSettings>({
     inputDevice: "",
     outputDevice: "",
@@ -186,6 +271,29 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
     audioElementsRef.current.clear();
   }, []);
 
+  // Per-user volume x routing (side fires) x saved Output Volume. Media
+  // elements cap at 1.0, so Output Volume above 100% plays at 100%.
+  const applyRemoteVolume = useCallback((audio: HTMLAudioElement, userId?: string) => {
+    const preferred = userId
+      ? effectiveUserVolume(userVolumesRef.current.get(userId), routingMutedUsersRef.current.has(userId))
+      : 1;
+    audio.volume = Math.max(0, Math.min(1, preferred * outputVolumeRef.current));
+  }, []);
+
+  const applyUserVolumes = useCallback((userId: string) => {
+    for (const [socketId, uid] of socketToUserRef.current) {
+      if (uid !== userId) continue;
+      const audio = audioElementsRef.current.get(socketId);
+      if (audio) applyRemoteVolume(audio, uid);
+    }
+  }, [applyRemoteVolume]);
+
+  const applyRoutingMuted = useCallback((userId: string, routingMuted: boolean) => {
+    if (routingMuted) routingMutedUsersRef.current.add(userId);
+    else routingMutedUsersRef.current.delete(userId);
+    applyUserVolumes(userId);
+  }, [applyUserVolumes]);
+
   const startVAD = useCallback((stream: MediaStream) => {
     try {
       const ctx = new AudioContext();
@@ -199,13 +307,16 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
 
       const data = new Uint8Array(analyser.frequencyBinCount);
       const socket = getSocket();
+      let lastLoudAt = -Infinity;
 
       vadIntervalRef.current = setInterval(() => {
         analyser.getByteFrequencyData(data);
         let sum = 0;
         for (let i = 0; i < data.length; i++) sum += data[i];
         const avg = sum / data.length;
-        const isSpeaking = avg > vadThresholdRef.current;
+        const now = performance.now();
+        if (avg > vadThresholdRef.current) lastLoudAt = now;
+        const isSpeaking = now - lastLoudAt < VAD_HANGOVER_MS;
 
         if (isSpeaking !== wasSpeakingRef.current) {
           wasSpeakingRef.current = isSpeaking;
@@ -252,13 +363,19 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
       return;
     }
 
+    const { stream: outgoingStream, pipeline } = await applyInputGain(
+      replacementStream,
+      inputVolumeRef.current,
+    );
     const currentStream = localStreamRef.current;
     if (
       requestId !== microphoneChangeIdRef.current
       || !joinedRef.current
       || !currentStream
     ) {
+      outgoingStream.getTracks().forEach((track) => track.stop());
       replacementStream.getTracks().forEach((track) => track.stop());
+      releaseInputGain(pipeline);
       return;
     }
 
@@ -266,23 +383,29 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
       .flatMap((peer) => peer.getSenders());
     const replaced = await replaceActiveAudioTrack(
       currentStream,
-      replacementStream,
+      outgoingStream,
       senders,
     );
 
     if (!replaced) {
+      releaseInputGain(pipeline);
       console.error("[Voice] Could not replace every outgoing audio track; keeping the current microphone.");
       return;
     }
 
     if (!joinedRef.current) {
-      replacementStream.getTracks().forEach((track) => track.stop());
+      outgoingStream.getTracks().forEach((track) => track.stop());
+      releaseInputGain(pipeline);
       return;
     }
 
+    // The previous processed track was stopped by replaceActiveAudioTrack;
+    // its raw mic and AudioContext go with it.
+    releaseInputGain(inputGainRef.current);
+    inputGainRef.current = pipeline;
     stopVAD();
-    localStreamRef.current = replacementStream;
-    startVAD(replacementStream);
+    localStreamRef.current = outgoingStream;
+    startVAD(outgoingStream);
     if (usedDefault) {
       mediaDeviceSettingsRef.current = {
         ...mediaDeviceSettingsRef.current,
@@ -325,14 +448,42 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
       return { inputChanged, outputChanged };
     }
 
+    // Sensitivity, Input Volume and Output Volume from the same saved settings
+    // SettingsModal writes (previously only applied once Settings was opened).
+    function applyLevelSettings() {
+      const settings = readAudioSettings();
+      vadThresholdRef.current = clampSetting(settings.inputSensitivity, 15, 1, 100);
+
+      const output = clampSetting(settings.outputVolume, 100, 0, 200) / 100;
+      if (output !== outputVolumeRef.current) {
+        outputVolumeRef.current = output;
+        audioElementsRef.current.forEach((audio, socketId) => {
+          applyRemoteVolume(audio, socketToUserRef.current.get(socketId));
+        });
+      }
+
+      const input = clampSetting(settings.inputVolume, 100, 0, 200) / 100;
+      if (input !== inputVolumeRef.current) {
+        inputVolumeRef.current = input;
+        if (inputGainRef.current) {
+          inputGainRef.current.gain.gain.value = input;
+        } else if (input !== 1 && joinedRef.current && localStreamRef.current) {
+          // Live call on the raw mic: rebuild it through the gain stage.
+          queueMicrophoneChange(mediaDeviceSettingsRef.current.inputDevice);
+        }
+      }
+    }
+
     function handleDeviceSettingsChange(event: Event) {
       const nextSettings = (event as CustomEvent<MediaDeviceSettings>).detail;
       applyDeviceSettings(nextSettings ?? readMediaDeviceSettings());
+      applyLevelSettings();
     }
 
     function handleStorage(event: StorageEvent) {
       if (event.key === AUDIO_SETTINGS_STORAGE_KEY || event.key === null) {
         applyDeviceSettings(readMediaDeviceSettings());
+        applyLevelSettings();
       }
     }
 
@@ -379,6 +530,7 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
     }
 
     applyDeviceSettings(readMediaDeviceSettings());
+    applyLevelSettings();
     window.addEventListener(MEDIA_DEVICE_SETTINGS_EVENT, handleDeviceSettingsChange);
     window.addEventListener("storage", handleStorage);
     navigator.mediaDevices.addEventListener("devicechange", handleDeviceChange);
@@ -387,7 +539,7 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
       window.removeEventListener("storage", handleStorage);
       navigator.mediaDevices.removeEventListener("devicechange", handleDeviceChange);
     };
-  }, [queueMicrophoneChange]);
+  }, [queueMicrophoneChange, applyRemoteVolume]);
 
   // ─── Screen Share Logic ───
 
@@ -627,12 +779,13 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
     onVideoStreamsChange?.(remoteVideoStreams);
   }, [remoteVideoStreams, onVideoStreamsChange]);
 
-  const pttModeRef = useRef(false);
+  // Seeded from useVoice's pttMode (the source of truth) so a remount keeps it.
+  const pttModeRef = useRef(pttMode);
+  useEffect(() => { pttModeRef.current = pttMode; }, [pttMode]);
 
-  const togglePTT = useCallback(() => {
-    const next = !pttModeRef.current;
-    pttModeRef.current = next;
-    if (next && localStreamRef.current) {
+  const setPTT = useCallback((enabled: boolean) => {
+    pttModeRef.current = enabled;
+    if (enabled && localStreamRef.current) {
       // Entering PTT: mute mic by default
       localStreamRef.current.getAudioTracks().forEach((t) => { t.enabled = false; });
       setMuted(true);
@@ -651,6 +804,8 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
       if ((e.target as HTMLElement)?.tagName === "INPUT" || (e.target as HTMLElement)?.tagName === "TEXTAREA") return;
       e.preventDefault();
       if (e.repeat) return;
+      // A server mute outranks push-to-talk.
+      if (serverMutedRef.current) return;
       // Unmute while key held
       if (localStreamRef.current) {
         localStreamRef.current.getAudioTracks().forEach((t) => { t.enabled = true; });
@@ -706,6 +861,13 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
           pc.addTrack(track, localStreamRef.current!);
         });
       }
+      // A camera that is already live goes to new peers too, not only to the
+      // peers present when it was switched on.
+      const cameraStream = cameraStreamRef.current;
+      const cameraTrack = cameraStream?.getVideoTracks()[0];
+      if (cameraStream && cameraTrack?.readyState === "live") {
+        videoSendersRef.current.set(remoteSocketId, pc.addTrack(cameraTrack, cameraStream));
+      }
 
       pc.ontrack = (event) => {
         const [stream] = event.streams;
@@ -720,12 +882,10 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
             audioElementsRef.current.set(remoteSocketId, audio);
           }
           audio.srcObject = stream;
+          audio.muted = deafenedRef.current;
           void applyAudioOutputDevice(audio, mediaDeviceSettingsRef.current.outputDevice);
-          // Apply saved volume for this user
-          const uid = socketToUserRef.current.get(remoteSocketId);
-          if (uid) {
-            audio.volume = effectiveUserVolume(userVolumesRef.current.get(uid), routingMutedUsersRef.current.has(uid));
-          }
+          // Apply saved per-user and output volume
+          applyRemoteVolume(audio, socketToUserRef.current.get(remoteSocketId));
         } else if (track.kind === "video") {
           const uid = socketToUserRef.current.get(remoteSocketId) || remoteSocketId;
           // Create a new stream with just this video track
@@ -834,7 +994,7 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
 
       return pc;
     },
-    [channelId]
+    [channelId, applyRemoteVolume]
   );
 
   const autoJoin = useEffectEvent(async (isCancelled: () => boolean) => {
@@ -846,7 +1006,7 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
       if (isCancelled()) return;
       const deviceSettings = readMediaDeviceSettings();
       mediaDeviceSettingsRef.current = deviceSettings;
-      const { stream, usedDefault } = await requestVoiceStream(
+      const { stream: micStream, usedDefault } = await requestVoiceStream(
         navigator.mediaDevices,
         deviceSettings.inputDevice,
       );
@@ -857,18 +1017,31 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
         };
         clearUnavailableMediaDevice("inputDevice");
       }
-      if (isCancelled()) { stream.getTracks().forEach((track) => track.stop()); return; }
+      if (isCancelled()) { micStream.getTracks().forEach((track) => track.stop()); return; }
+      const { stream, pipeline } = await applyInputGain(micStream, inputVolumeRef.current);
+      if (isCancelled()) {
+        stream.getTracks().forEach((track) => track.stop());
+        micStream.getTracks().forEach((track) => track.stop());
+        releaseInputGain(pipeline);
+        return;
+      }
+      // Push-to-talk joins with the mic closed; the server learns the initial
+      // state with the join itself.
+      const startMuted = pttModeRef.current;
+      if (startMuted) stream.getAudioTracks().forEach((track) => { track.enabled = false; });
       localStreamRef.current = stream;
+      inputGainRef.current = pipeline;
       startVAD(stream);
       const socket = getSocket();
-      socket.emit("voice:join", { channelId, serverId, avatar: currentUserAvatar });
+      socket.emit("voice:join", { channelId, serverId, avatar: currentUserAvatar, muted: startMuted });
       joinedChannelRef.current = channelId;
+      if (startMuted) setMuted(true);
       setJoined(true);
       joinedRef.current = true;
       sounds.voiceJoin();
     } catch (err) {
       console.error("[Voice] Mic access failed:", err);
-      alert("Could not access microphone. Check browser permissions.");
+      toast("Could not access your microphone. Check browser permissions.", "error");
       onDisconnect?.();
     }
   });
@@ -884,15 +1057,21 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
 
   const leaveVoice = useCallback(() => {
     const socket = getSocket();
-    if (joinedChannelRef.current) {
-      socket.emit("voice:leave", joinedChannelRef.current);
-    }
-    // Stop screen share if active
+    const leavingChannel = joinedChannelRef.current;
+    // Stop screen share if active. screen:stop must precede voice:leave: the
+    // server only relays it from a current room member.
     if (screenStreamRef.current) {
-      screenStreamRef.current.getTracks().forEach((t) => t.stop());
+      if (leavingChannel) socket.emit("screen:stop", { channelId: leavingChannel });
+      screenStreamRef.current.getTracks().forEach((t) => {
+        t.onended = null;
+        t.stop();
+      });
       screenStreamRef.current = null;
       cleanupScreenPeers();
       setSharing(false);
+    }
+    if (leavingChannel) {
+      socket.emit("voice:leave", leavingChannel);
     }
     // Stop camera if active
     if (cameraStreamRef.current) {
@@ -908,6 +1087,8 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
     stopVAD();
     localStreamRef.current?.getTracks().forEach((t) => t.stop());
     localStreamRef.current = null;
+    releaseInputGain(inputGainRef.current);
+    inputGainRef.current = null;
     cleanupPeers();
     joinedChannelRef.current = null;
     setJoined(false);
@@ -915,7 +1096,9 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
     microphoneChangeIdRef.current += 1;
     setMuted(false);
     setDeafened(false);
+    deafenedRef.current = false;
     setParticipants([]);
+    setOffshootRooms(null);
     setSpeakingUsers(new Set());
     sounds.voiceLeave();
     onDisconnect?.();
@@ -924,15 +1107,24 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
   const toggleMute = useCallback(() => {
     if (!localStreamRef.current) return;
     const newMuted = !muted;
+    if (!newMuted && (selfServerMuted || selfServerDeafened)) {
+      toast("A moderator has server-muted you.", "error");
+      return;
+    }
     localStreamRef.current.getAudioTracks().forEach((t) => { t.enabled = !newMuted; });
     setMuted(newMuted);
     const socket = getSocket();
     socket.emit("voice:mute", { channelId, muted: newMuted });
-  }, [muted, channelId]);
+  }, [muted, channelId, selfServerMuted, selfServerDeafened]);
 
   const toggleDeafen = useCallback(() => {
     const newDeafened = !deafened;
+    if (!newDeafened && selfServerDeafened) {
+      toast("A moderator has server-deafened you.", "error");
+      return;
+    }
     setDeafened(newDeafened);
+    deafenedRef.current = newDeafened;
     audioElementsRef.current.forEach((audio) => { audio.muted = newDeafened; });
     const socket = getSocket();
     socket.emit("voice:deafen", { channelId, deafened: newDeafened });
@@ -942,37 +1134,20 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
       setMuted(true);
       socket.emit("voice:mute", { channelId, muted: true });
     }
-  }, [deafened, muted, channelId]);
+  }, [deafened, muted, channelId, selfServerDeafened]);
 
   // Expose controls to parent via ref
   useImperativeHandle(ref, () => ({
     toggleMute,
     toggleDeafen,
     disconnect: leaveVoice,
-    togglePTT,
+    setPTT,
     isPTT: () => pttModeRef.current,
     setUserVolume: (userId: string, volume: number) => {
-      const clamped = Math.max(0, Math.min(1, volume));
-      userVolumesRef.current.set(userId, clamped);
-      // Apply to active audio element
-      for (const [socketId, uid] of socketToUserRef.current) {
-        if (uid === userId) {
-          const audio = audioElementsRef.current.get(socketId);
-          if (audio) audio.volume = effectiveUserVolume(clamped, routingMutedUsersRef.current.has(userId));
-        }
-      }
+      userVolumesRef.current.set(userId, Math.max(0, Math.min(1, volume)));
+      applyUserVolumes(userId);
     },
-    setUserRoutingMuted: (userId: string, routingMuted: boolean) => {
-      if (routingMuted) routingMutedUsersRef.current.add(userId);
-      else routingMutedUsersRef.current.delete(userId);
-      const preferredVolume = userVolumesRef.current.get(userId);
-      for (const [socketId, uid] of socketToUserRef.current) {
-        if (uid === userId) {
-          const audio = audioElementsRef.current.get(socketId);
-          if (audio) audio.volume = effectiveUserVolume(preferredVolume, routingMuted);
-        }
-      }
-    },
+    setUserRoutingMuted: applyRoutingMuted,
     setInputSensitivity: (threshold: number) => {
       vadThresholdRef.current = Math.max(1, Math.min(100, threshold));
     },
@@ -988,7 +1163,7 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
     getVideoStreams: () => remoteVideoStreamsRef.current,
     getLocalCameraStream: () => cameraStreamRef.current,
     getLocalScreenStream: () => screenStreamRef.current,
-  }), [toggleMute, toggleDeafen, leaveVoice, togglePTT, muted, deafened, startScreenShare, stopScreenShare, toggleCamera]);
+  }), [toggleMute, toggleDeafen, leaveVoice, setPTT, applyUserVolumes, applyRoutingMuted, muted, deafened, startScreenShare, stopScreenShare, toggleCamera]);
 
   // Report state changes to parent — merge speaking state and connection quality into participants
   useEffect(() => {
@@ -1012,8 +1187,67 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
         pingMs: entry?.pingMs,
       };
     });
-    onStateChange?.({ muted, deafened, reconnecting, participants: withSpeaking, sharing, cameraOn });
-  }, [joined, muted, deafened, reconnecting, participants, speakingUsers, connectionQualities, sharing, cameraOn, onStateChange, currentUserId, currentUsername, currentUserAvatar]);
+    onStateChange?.({
+      muted,
+      deafened,
+      reconnecting,
+      participants: withSpeaking,
+      sharing,
+      cameraOn,
+      serverMuted: selfServerMuted,
+      serverDeafened: selfServerDeafened,
+    });
+  }, [joined, muted, deafened, reconnecting, participants, speakingUsers, connectionQualities, sharing, cameraOn, onStateChange, currentUserId, currentUsername, currentUserAvatar, selfServerMuted, selfServerDeafened]);
+
+  // The server refused this join, or evicted us after a permission/role
+  // change: leave instead of sitting in a dead room.
+  const onVoiceError = useEffectEvent((data: { channelId: string; error?: string }) => {
+    if (data.channelId !== channelId) return;
+    toast(data.error || "Could not join this voice channel.", "error");
+    leaveVoice();
+  });
+  useEffect(() => {
+    const socket = getSocket();
+    function handleVoiceError(data: { channelId: string; error?: string }) {
+      onVoiceError(data);
+    }
+    socket.on("voice:error", handleVoiceError);
+    return () => { socket.off("voice:error", handleVoiceError); };
+  }, []);
+
+  // Side fires (offshoots): only hear people in the same side fire (or the
+  // main camp). Lives here, not in VoiceRoom, so it holds while the room view
+  // is closed and you browse text channels.
+  useEffect(() => {
+    const socket = getSocket();
+    function handleOffshootUpdate(state: { channelId: string; offshoots: OffshootRoute[] }) {
+      if (state.channelId !== channelId) return;
+      setOffshootRooms(state.offshoots);
+    }
+    socket.on("offshoot:update", handleOffshootUpdate);
+    return () => { socket.off("offshoot:update", handleOffshootUpdate); };
+  }, [channelId]);
+
+  useEffect(() => {
+    const next = new Set<string>();
+    if (offshootRooms) {
+      const roomOf = (userId: string) =>
+        offshootRooms.find((room) => room.members.some((member) => member.userId === userId))?.id ?? null;
+      const myRoom = roomOf(currentUserId);
+      for (const participant of participants) {
+        if (participant.userId !== currentUserId && roomOf(participant.userId) !== myRoom) {
+          next.add(participant.userId);
+        }
+      }
+    }
+    for (const userId of autoRoutedUsersRef.current) {
+      if (!next.has(userId)) applyRoutingMuted(userId, false);
+    }
+    for (const userId of next) {
+      if (!autoRoutedUsersRef.current.has(userId)) applyRoutingMuted(userId, true);
+    }
+    autoRoutedUsersRef.current = next;
+  }, [offshootRooms, participants, currentUserId, applyRoutingMuted]);
 
   // Participant updates — register BEFORE joining so we don't miss the initial broadcast
   useEffect(() => {
@@ -1062,6 +1296,13 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
           void createPeer(p.socketId, true, p.userId).catch((error) => {
             console.error("[Voice] Could not create participant peer:", error);
           });
+          // Rejoining after a reconnect mid-share: peers dropped the old share.
+          if (screenStreamRef.current) {
+            socketToUserRef.current.set(p.socketId, p.userId);
+            void createScreenPeer(p.socketId, true).catch((error) => {
+              console.error("[Screen] Could not re-share to participant:", error);
+            });
+          }
         }
       });
     }
@@ -1077,7 +1318,7 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
       }
     }
 
-    function handleUserLeft(data: { channelId: string; socketId: string }) {
+    function handleUserLeft(data: { channelId: string; userId?: string; socketId: string }) {
       if (data.channelId !== channelId) return;
       sounds.voiceLeave();
       const reconnectTimer = reconnectTimersRef.current.get(data.socketId);
@@ -1088,8 +1329,19 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
       iceRestartingPeersRef.current.delete(data.socketId);
       const pc = peersRef.current.get(data.socketId);
       if (pc) { pc.close(); peersRef.current.delete(data.socketId); }
+      videoSendersRef.current.delete(data.socketId);
       const audio = audioElementsRef.current.get(data.socketId);
       if (audio) { audio.srcObject = null; audio.remove(); audioElementsRef.current.delete(data.socketId); }
+      // Drop their screen share and camera tile instead of leaving them frozen.
+      const screenPc = screenPeersRef.current.get(data.socketId);
+      if (screenPc) { screenPc.close(); screenPeersRef.current.delete(data.socketId); }
+      const leftUserId = data.userId ?? socketToUserRef.current.get(data.socketId);
+      if (leftUserId && incomingScreensRef.current.delete(leftUserId)) {
+        setIncomingScreens(Array.from(incomingScreensRef.current.values()));
+      }
+      if (leftUserId && remoteVideoStreamsRef.current.delete(leftUserId)) {
+        setRemoteVideoStreams(new Map(remoteVideoStreamsRef.current));
+      }
     }
 
     async function handleOffer(data: { from: string; fromUserId?: string; offer: RTCSessionDescriptionInit }) {
@@ -1099,6 +1351,16 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
         socket.emit("voice:answer", { to: data.from, channelId, answer: pc.localDescription! });
+        // Our live camera was attached in createPeer, but a joiner's audio-only
+        // offer has no slot for it: renegotiate so they actually receive it.
+        const unsentVideo = pc.getTransceivers().some(
+          (transceiver) => transceiver.sender.track?.kind === "video" && !transceiver.mid,
+        );
+        if (unsentVideo) {
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          socket.emit("voice:offer", { to: data.from, channelId, offer: pc.localDescription! });
+        }
       } catch (error) {
         console.error("[Voice] Could not answer offer:", error);
       }
@@ -1139,15 +1401,20 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
     function handleDisconnect() {
       setReconnecting(true);
       cleanupPeers();
+      // Incoming shares/cameras rode on the dropped peers; the sharers send
+      // fresh ones when we rejoin.
+      cleanupScreenPeers();
+      incomingScreensRef.current.clear();
+      setIncomingScreens([]);
+      remoteVideoStreamsRef.current.clear();
+      setRemoteVideoStreams(new Map());
     }
 
     function handleReconnect() {
       setReconnecting(false);
-      // Rejoin voice channel
-      socket.emit("voice:join", { channelId, serverId, avatar: currentUserAvatar });
-      // Re-sync mute/deafen state
-      if (muted) socket.emit("voice:mute", { channelId, muted: true });
-      if (deafened) socket.emit("voice:deafen", { channelId, deafened: true });
+      // Rejoin voice channel; mute/deafen ride along with the join (a separate
+      // voice:mute would arrive before the server finishes the async join).
+      socket.emit("voice:join", { channelId, serverId, avatar: currentUserAvatar, muted, deafened });
     }
 
     socket.on("disconnect", handleDisconnect);
@@ -1157,7 +1424,7 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
       socket.off("disconnect", handleDisconnect);
       socket.off("connect", handleReconnect);
     };
-  }, [joined, channelId, serverId, muted, deafened, cleanupPeers, currentUserAvatar]);
+  }, [joined, channelId, serverId, muted, deafened, cleanupPeers, cleanupScreenPeers, currentUserAvatar]);
 
   // ICE restart on peer connection failure
   useEffect(() => {
@@ -1245,12 +1512,18 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(function VoiceP
       joinedRef.current = false;
       microphoneChangeIdRef.current += 1;
       if (joinedChannelRef.current) {
+        // Stop a live share first; the server ignores it once we've left.
+        if (screenStreamRef.current) {
+          getSocket().emit("screen:stop", { channelId: joinedChannelRef.current });
+        }
         getSocket().emit("voice:leave", joinedChannelRef.current);
       }
       joinedChannelRef.current = null;
       stopVAD();
       localStreamRef.current?.getTracks().forEach((track) => track.stop());
       localStreamRef.current = null;
+      releaseInputGain(inputGainRef.current);
+      inputGainRef.current = null;
       screenStreamRef.current?.getTracks().forEach((track) => {
         track.onended = null;
         track.stop();

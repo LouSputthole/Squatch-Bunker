@@ -8,6 +8,7 @@ import {
   privateAttachmentUrl,
   PrivateUploadClaimError,
 } from "@/lib/privateUploads";
+import { MAX_MESSAGE_LENGTH } from "@/lib/inputLimits";
 
 // GET — fetch messages for a conversation
 export async function GET(
@@ -20,7 +21,13 @@ export async function GET(
   const { conversationId } = await params;
   const url = new URL(request.url);
   const before = url.searchParams.get("before");
-  const limit = Math.min(parseInt(url.searchParams.get("limit") || "50"), 100);
+  const cursor = url.searchParams.get("cursor");
+  const requestedLimit = parseInt(url.searchParams.get("limit") || "50", 10);
+  const limit = Number.isFinite(requestedLimit) ? Math.min(Math.max(requestedLimit, 1), 100) : 50;
+  const beforeDate = before ? new Date(before) : null;
+  if (beforeDate && Number.isNaN(beforeDate.getTime())) {
+    return NextResponse.json({ error: "Invalid before" }, { status: 400 });
+  }
 
   try {
     const { prisma } = await import("@/lib/db");
@@ -33,19 +40,37 @@ export async function GET(
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const messages = await prisma.directMessage.findMany({
+    // Same contract as channel history: `cursor` is the oldest message the
+    // client holds; nextCursor is this page's oldest, or null at the start.
+    if (cursor) {
+      const cursorMessage = await prisma.directMessage.findFirst({
+        where: { id: cursor, conversationId },
+        select: { id: true },
+      });
+      if (!cursorMessage) {
+        return NextResponse.json({ error: "Invalid cursor" }, { status: 400 });
+      }
+    }
+
+    const rows = await prisma.directMessage.findMany({
       where: {
         conversationId,
-        ...(before ? { createdAt: { lt: new Date(before) } } : {}),
+        ...(beforeDate ? { createdAt: { lt: beforeDate } } : {}),
       },
-      orderBy: { createdAt: "desc" },
-      take: limit,
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: limit + 1,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
       include: {
         author: { select: { id: true, username: true, avatar: true } },
       },
+      // readAt drives the reader's own unread badge; it is not a read receipt.
+      omit: { readAt: true },
     });
+    const hasOlder = rows.length > limit;
+    const messages = hasOlder ? rows.slice(0, limit) : rows;
+    const nextCursor = hasOlder ? messages[messages.length - 1].id : null;
 
-    return NextResponse.json({ messages: messages.reverse() });
+    return NextResponse.json({ messages: messages.reverse(), nextCursor });
   } catch (err) {
     console.error("[Campfire] Failed to fetch DMs:", err);
     return NextResponse.json({ error: "Database error" }, { status: 503 });
@@ -92,6 +117,15 @@ export async function POST(
     !remoteAttachment.url
   ) {
     return NextResponse.json({ error: "Empty message" }, { status: 400 });
+  }
+  if (content !== undefined && content !== null && typeof content !== "string") {
+    return NextResponse.json({ error: "Message content must be text" }, { status: 400 });
+  }
+  if (typeof content === "string" && content.length > MAX_MESSAGE_LENGTH) {
+    return NextResponse.json(
+      { error: `Message too long (max ${MAX_MESSAGE_LENGTH} characters)` },
+      { status: 400 },
+    );
   }
 
   try {
@@ -152,6 +186,7 @@ export async function POST(
         include: {
           author: { select: { id: true, username: true, avatar: true } },
         },
+        omit: { readAt: true },
       });
       await tx.conversation.update({
         where: { id: conversationId },

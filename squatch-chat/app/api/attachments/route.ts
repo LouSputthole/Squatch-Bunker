@@ -11,13 +11,15 @@ import {
   resolvePrivateUploadPath,
 } from "@/lib/privateUploads";
 import { checkWeightedLimit } from "@/lib/rateLimit";
-import { evaluateUploadPolicy } from "@/lib/uploadPolicy";
+import {
+  evaluateUploadPolicy,
+  EXTENDED_UPLOAD_MAX_BYTES,
+  STANDARD_UPLOAD_MAX_BYTES,
+} from "@/lib/uploadPolicy";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const FREE_MAX_SIZE = 10 * 1024 * 1024;
-const PREMIUM_MAX_SIZE = 100 * 1024 * 1024;
 const UPLOADS_PER_HOUR = 30;
 const UPLOAD_BYTES_PER_HOUR = 500 * 1024 * 1024;
 const HOUR_MS = 60 * 60 * 1000;
@@ -60,8 +62,8 @@ export async function POST(req: NextRequest) {
       select: { tier: true, tierExpiresAt: true },
     });
     const maxSize = hasFeature(getTier(user), "extended_upload")
-      ? PREMIUM_MAX_SIZE
-      : FREE_MAX_SIZE;
+      ? EXTENDED_UPLOAD_MAX_BYTES
+      : STANDARD_UPLOAD_MAX_BYTES;
     const maxLabel = `${Math.round(maxSize / (1024 * 1024))}MB`;
     const formData = await boundedFormData(req, maxSize + MULTIPART_OVERHEAD);
     if (!formData) {

@@ -67,3 +67,30 @@ export const SERVER_TEMPLATES: ServerTemplate[] = [
     ],
   },
 ];
+
+export type ServerTemplateChoice =
+  | { ok: true; template: ServerTemplate | null }
+  | { ok: false };
+
+/**
+ * Validate a client-supplied template id. Absent/empty means "no template"
+ * (the default single #campfire channel); anything else must be a known id.
+ */
+export function resolveServerTemplate(value: unknown): ServerTemplateChoice {
+  if (value === undefined || value === null || value === "") return { ok: true, template: null };
+  if (typeof value !== "string") return { ok: false };
+  const template = SERVER_TEMPLATES.find((candidate) => candidate.id === value);
+  return template ? { ok: true, template } : { ok: false };
+}
+
+/** Channel rows for a new server: the template's channels in order, or the default #campfire. */
+export function templateChannelRows(template: ServerTemplate | null) {
+  if (!template) return [{ name: "campfire", type: "text", position: 0 }];
+  return template.channels.map((channel, position) => ({
+    name: channel.name,
+    type: channel.type,
+    position,
+    ...(channel.category ? { category: channel.category } : {}),
+    ...(channel.topic ? { topic: channel.topic } : {}),
+  }));
+}

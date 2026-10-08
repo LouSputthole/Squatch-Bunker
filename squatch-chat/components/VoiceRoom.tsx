@@ -18,7 +18,10 @@ interface VoiceParticipant {
   muted: boolean;
   deafened?: boolean;
   speaking?: boolean;
+  camera?: boolean;
   avatar?: string | null;
+  serverMuted?: boolean;
+  serverDeafened?: boolean;
   connectionQuality?: "good" | "fair" | "poor" | "unknown";
   pingMs?: number;
 }
@@ -73,6 +76,7 @@ interface VoiceRoomProps {
   onTogglePTT?: () => void;
   onDisconnect: () => void;
   onUserVolumeChange?: (userId: string, volume: number) => void;
+  /** @deprecated Side-fire routing now runs in VoicePanel; ignored. */
   onUserRoutingMuted?: (userId: string, muted: boolean) => void;
   onServerMute?: (channelId: string, targetUserId: string, muted: boolean) => void;
   onServerDeafen?: (channelId: string, targetUserId: string, deafened: boolean) => void;
@@ -208,7 +212,7 @@ function ScreenShareIcon({ active }: { active: boolean }) {
   );
 }
 
-function ScreenViewer({ shares }: { shares: ScreenShareInfo[] }) {
+function ScreenViewer({ shares, deafened }: { shares: ScreenShareInfo[]; deafened?: boolean }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [activeIdx, setActiveIdx] = useState(0);
   const [fullscreen, setFullscreen] = useState(false);
@@ -246,6 +250,7 @@ function ScreenViewer({ shares }: { shares: ScreenShareInfo[] }) {
           ref={videoRef}
           autoPlay
           playsInline
+          muted={deafened}
           className="max-w-full max-h-full object-contain"
         />
         {/* Overlay controls */}
@@ -336,7 +341,6 @@ export default function VoiceRoom({
   onTogglePTT,
   onDisconnect,
   onUserVolumeChange,
-  onUserRoutingMuted,
   onServerMute,
   onServerDeafen,
   onKickFromVoice,
@@ -367,11 +371,14 @@ export default function VoiceRoom({
   const [offshootState, setOffshootState] = useState<OffshootState | null>(null);
   const [offshootError, setOffshootError] = useState<string | null>(null);
   const [roomConfigError, setRoomConfigError] = useState<string | null>(null);
-  const automaticallyMutedRef = useRef(new Set<string>());
   const prevParticipantsRef = useRef<VoiceParticipant[]>([]);
   const toastCounterRef = useRef(0);
   const isFirstRenderRef = useRef(true);
 
+  const selfEntry = participants.find((participant) => participant.userId === currentUserId);
+  // A moderator's mute/deafen: the matching button stays locked until lifted.
+  const muteLocked = muted && !!(selfEntry?.serverMuted || selfEntry?.serverDeafened);
+  const deafenLocked = deafened && !!selfEntry?.serverDeafened;
   const canModerateVoice =
     currentUserRole === "owner" ||
     currentUserRole === "admin" ||
@@ -514,42 +521,8 @@ export default function VoiceRoom({
     getSocket().emit("offshoot:close", { channelId, offshootId });
   }
 
-  useEffect(() => {
-    if (!onUserRoutingMuted) return;
-    const nextMuted = new Set<string>();
-    const myOffshootId = currentOffshoot?.id ?? null;
-
-    if (activeOffshootState) {
-      for (const participant of participants) {
-        if (participant.userId === currentUserId) continue;
-        const participantOffshootId = offshoots.find((room) =>
-          room.members.some((member) => member.userId === participant.userId)
-        )?.id ?? null;
-        if (participantOffshootId !== myOffshootId) {
-          nextMuted.add(participant.userId);
-        }
-      }
-    }
-
-    for (const userId of automaticallyMutedRef.current) {
-      if (!nextMuted.has(userId)) {
-        onUserRoutingMuted(userId, false);
-      }
-    }
-    for (const userId of nextMuted) {
-      if (!automaticallyMutedRef.current.has(userId)) {
-        onUserRoutingMuted(userId, true);
-      }
-    }
-    automaticallyMutedRef.current = nextMuted;
-  }, [activeOffshootState, currentOffshoot?.id, currentUserId, offshoots, onUserRoutingMuted, participants]);
-
-  useEffect(() => () => {
-    for (const userId of automaticallyMutedRef.current) {
-      onUserRoutingMuted?.(userId, false);
-    }
-    automaticallyMutedRef.current.clear();
-  }, [onUserRoutingMuted]);
+  // Side-fire audio routing lives in VoicePanel, which stays mounted for the
+  // whole call (this view unmounts when you browse a text channel).
   useEffect(() => {
     if (isFirstRenderRef.current) {
       isFirstRenderRef.current = false;
@@ -840,7 +813,8 @@ export default function VoiceRoom({
           : participants;
         const handleCtx = (e: React.MouseEvent, p: VoiceParticipant) => {
           if (canModerateVoice) {
-            setModMenu({ userId: p.userId, username: p.username, x: e.clientX, y: e.clientY, muted: p.muted, deafened: p.deafened });
+            // Server mute/deafen toggle the moderator flag, not the user's own mute.
+            setModMenu({ userId: p.userId, username: p.username, x: e.clientX, y: e.clientY, muted: !!p.serverMuted, deafened: !!p.serverDeafened });
             setVolumePopup(null);
           } else if (p.userId !== currentUserId) {
             setVolumePopup({ userId: p.userId, volume: 1 });
@@ -850,7 +824,7 @@ export default function VoiceRoom({
         if (screenActive) {
           return (
             <>
-              <ScreenViewer shares={incomingScreenShares!} />
+              <ScreenViewer shares={incomingScreenShares!} deafened={deafened} />
               {/* Compact participant strip under the shared screen */}
               <div className="h-24 shrink-0 overflow-x-auto overflow-y-hidden px-4 py-2 flex items-center gap-3 justify-center bg-[#1a1a1e]/50">
                 {participants.map((p) => {
@@ -895,7 +869,9 @@ export default function VoiceRoom({
             <div className="grid gap-3 content-center min-h-full" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
               {stagedParticipants.map((p) => {
                 const isSelf = p.userId === currentUserId;
-                const stream = isSelf ? (cameraOn ? localCameraStream : null) : (remoteVideoStreams?.get(p.userId) || null);
+                // A remote tile shows video only while their camera flag is on;
+                // a switched-off camera leaves a frozen last frame otherwise.
+                const stream = isSelf ? (cameraOn ? localCameraStream : null) : (p.camera ? remoteVideoStreams?.get(p.userId) || null : null);
                 const isSpeaking = p.speaking && !p.muted;
                 const holdsLantern = activeLantern?.holderId === p.userId;
                 return (
@@ -1059,23 +1035,25 @@ export default function VoiceRoom({
         <div className="flex items-center justify-center gap-3">
           <button
             onClick={onToggleMute}
-            className={`p-3 rounded-full transition-colors ${
+            disabled={muteLocked}
+            className={`p-3 rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
               muted
                 ? "bg-red-600/20 text-red-400 hover:bg-red-600/30"
                 : "bg-[var(--panel-2)] text-[var(--text)] hover:bg-[var(--accent-2)]/30"
             }`}
-            title={muted ? "Unmute" : "Mute"}
+            title={muteLocked ? "Server-muted by a moderator" : muted ? "Unmute" : "Mute"}
           >
             <MicIcon muted={muted} />
           </button>
           <button
             onClick={onToggleDeafen}
-            className={`p-3 rounded-full transition-colors ${
+            disabled={deafenLocked}
+            className={`p-3 rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
               deafened
                 ? "bg-red-600/20 text-red-400 hover:bg-red-600/30"
                 : "bg-[var(--panel-2)] text-[var(--text)] hover:bg-[var(--accent-2)]/30"
             }`}
-            title={deafened ? "Undeafen" : "Deafen"}
+            title={deafenLocked ? "Server-deafened by a moderator" : deafened ? "Undeafen" : "Deafen"}
           >
             <HeadphonesIcon deafened={deafened} />
           </button>

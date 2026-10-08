@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isSafeCustomEmojiUrl } from "@/lib/customEmoji";
 import { getSession } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { prismaErrorCode } from "@/lib/prismaErrors";
 import { assertFeature } from "@/lib/features";
 import { requireMembership } from "@/lib/membership";
 import { memberHasPermission } from "@/lib/serverRoles";
@@ -37,14 +39,22 @@ export async function POST(
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
   const { serverId } = await params;
-  const { name, url } = await req.json();
+  const body: unknown = await req.json().catch(() => null);
+  const { name, url } = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
 
-  if (!name || !url) {
+  if (typeof name !== "string" || !name || typeof url !== "string" || !url) {
     return NextResponse.json({ error: "Name and URL required" }, { status: 400 });
   }
+  // Only our own uploaded image paths — clients refuse to render anything else anyway.
+  if (!isSafeCustomEmojiUrl(url)) {
+    return NextResponse.json({ error: "Emoji image must be an uploaded PNG, JPG, GIF, or WebP" }, { status: 400 });
+  }
 
-  if (!/^[a-zA-Z0-9_]+$/.test(name)) {
-    return NextResponse.json({ error: "Name must be alphanumeric" }, { status: 400 });
+  if (!/^[a-zA-Z0-9_]{1,32}$/.test(name)) {
+    return NextResponse.json(
+      { error: "Name must be 1-32 letters, numbers, or underscores" },
+      { status: 400 },
+    );
   }
 
   if (!(await memberHasPermission(serverId, session.userId, "MANAGE_EMOJIS"))) {
@@ -62,16 +72,25 @@ export async function POST(
     return NextResponse.json({ error: "Max 50 custom emoji per server" }, { status: 400 });
   }
 
-  const emoji = await prisma.customEmoji.create({
-    data: {
-      name,
-      url,
-      serverId,
-      createdBy: session.userId,
-    },
-  });
-
-  return NextResponse.json({ emoji }, { status: 201 });
+  try {
+    const emoji = await prisma.customEmoji.create({
+      data: {
+        name,
+        url,
+        serverId,
+        createdBy: session.userId,
+      },
+    });
+    return NextResponse.json({ emoji }, { status: 201 });
+  } catch (error) {
+    if (prismaErrorCode(error) !== "P2002") throw error;
+    // No file cleanup here: `url` is client-supplied, so deleting it could
+    // remove someone else's not-yet-attached upload. An orphan is harmless.
+    return NextResponse.json(
+      { error: `An emoji named :${name}: already exists on this server` },
+      { status: 409 },
+    );
+  }
 }
 
 // DELETE: remove a custom emoji

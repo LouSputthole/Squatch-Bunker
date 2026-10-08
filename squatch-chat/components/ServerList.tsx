@@ -2,11 +2,16 @@
 
 import { useState, useRef } from "react";
 import Image from "next/image";
+import { useRouter } from "next/navigation";
+import { useEscape } from "@/hooks/useEscape";
+import { toast, toastResponseError } from "@/lib/toast";
+import { SERVER_TEMPLATES } from "@/lib/serverTemplates";
 
 interface Server {
   id: string;
   name: string;
   icon?: string | null;
+  ownerId?: string;
   channels: { id: string; name: string }[];
   _count: { members: number };
 }
@@ -17,11 +22,17 @@ interface ServerListProps {
   dmActive?: boolean;
   friendsActive?: boolean;
   unreadServerIds?: Set<string>;
+  /** Total unread direct messages; badges the DM button when > 0. */
+  dmUnreadCount?: number;
+  /** Owner-only actions (change/remove icon) are shown only for servers this user owns. */
+  currentUserId?: string;
   onDmClick?: () => void;
   onFriendsClick?: () => void;
   onServerSelect: (server: Server) => void;
   onServerCreated: (server: Server) => void;
   onServerJoined: (server: Server) => void;
+  /** Called after an icon change so the parent can refresh its server list. */
+  onServerUpdated?: (update: { id: string; icon: string | null }) => void;
 }
 
 export default function ServerList({
@@ -30,14 +41,19 @@ export default function ServerList({
   dmActive,
   friendsActive,
   unreadServerIds,
+  dmUnreadCount = 0,
+  currentUserId,
   onDmClick,
   onFriendsClick,
   onServerSelect,
   onServerCreated,
   onServerJoined,
+  onServerUpdated,
 }: ServerListProps) {
   const [showPanel, setShowPanel] = useState<"create" | "join" | null>(null);
   const [newName, setNewName] = useState("");
+  // "" = blank server (a single #campfire channel); otherwise a SERVER_TEMPLATES id.
+  const [templateId, setTemplateId] = useState("");
   const [joinCode, setJoinCode] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -45,6 +61,30 @@ export default function ServerList({
   const [iconMenu, setIconMenu] = useState<{ serverId: string; x: number; y: number } | null>(null);
   const iconInputRef = useRef<HTMLInputElement>(null);
   const iconTargetRef = useRef<string | null>(null);
+  const router = useRouter();
+  // Icons changed from this rail show immediately, without reloading the page
+  // (a reload would drop an active voice call).
+  const [iconOverrides, setIconOverrides] = useState<Record<string, string | null>>({});
+  useEscape(() => setIconMenu(null), !!iconMenu);
+
+  function iconFor(server: Server) {
+    return server.id in iconOverrides ? iconOverrides[server.id] : server.icon;
+  }
+
+  async function saveIcon(serverId: string, icon: string): Promise<boolean> {
+    const res = await fetch(`/api/servers/${serverId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ icon }),
+    });
+    if (!res.ok) {
+      await toastResponseError(res, "Failed to update server icon");
+      return false;
+    }
+    setIconOverrides((current) => ({ ...current, [serverId]: icon || null }));
+    onServerUpdated?.({ id: serverId, icon: icon || null });
+    return true;
+  }
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -56,7 +96,7 @@ export default function ServerList({
       const res = await fetch("/api/servers", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: newName.trim() }),
+        body: JSON.stringify({ name: newName.trim(), ...(templateId ? { templateId } : {}) }),
       });
 
       const data = await res.json();
@@ -67,6 +107,7 @@ export default function ServerList({
 
       onServerCreated(data.server);
       setNewName("");
+      setTemplateId("");
       setShowPanel(null);
     } catch {
       setError("Something went wrong");
@@ -119,26 +160,28 @@ export default function ServerList({
       const formData = new FormData();
       formData.append("file", file);
       const uploadRes = await fetch("/api/upload", { method: "POST", body: formData });
-      if (!uploadRes.ok) return;
+      if (!uploadRes.ok) {
+        await toastResponseError(uploadRes, "Failed to upload icon");
+        return;
+      }
       const { url } = await uploadRes.json();
-      await fetch(`/api/servers/${serverId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ icon: url }),
-      });
-      // Reload page to reflect new icon
-      window.location.reload();
+      if (await saveIcon(serverId, url)) toast("Server icon updated", "success");
+    } catch {
+      toast("Failed to update server icon", "error");
     } finally {
       setIconUploading(null);
     }
   }
+
+  const menuServer = iconMenu ? servers.find((candidate) => candidate.id === iconMenu.serverId) : undefined;
+  const menuServerIcon = menuServer ? iconFor(menuServer) : null;
 
   return (
     <>
       <input
         ref={iconInputRef}
         type="file"
-        accept="image/*"
+        accept="image/png,image/jpeg,image/gif,image/webp"
         className="hidden"
         onChange={handleIconChange}
       />
@@ -148,28 +191,40 @@ export default function ServerList({
         {/* DM button */}
         <button
           onClick={onDmClick}
-          className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all ${
+          className={`relative w-12 h-12 rounded-2xl flex items-center justify-center transition-all ${
             dmActive
-              ? "bg-amber-600/30 text-amber-300 rounded-xl"
-              : "bg-[var(--panel)] text-[var(--muted)] hover:bg-amber-600/20 hover:text-amber-300 hover:rounded-xl"
+              ? "bg-[var(--accent-2)]/30 text-[var(--accent)] rounded-xl"
+              : "bg-[var(--panel)] text-[var(--muted)] hover:bg-[var(--accent-2)]/20 hover:text-[var(--accent)] hover:rounded-xl"
           }`}
           title="Direct Messages"
+          aria-label={dmUnreadCount > 0 ? `Direct messages, ${dmUnreadCount} unread` : "Direct messages"}
+          aria-pressed={!!dmActive}
         >
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
           </svg>
+          {dmUnreadCount > 0 && (
+            <span
+              className="absolute -bottom-1 -right-1 min-w-[18px] rounded-full border-2 border-[var(--bg)] bg-[var(--danger)] px-1 text-[10px] font-bold leading-[14px] text-white"
+              aria-hidden="true"
+            >
+              {dmUnreadCount > 99 ? "99+" : dmUnreadCount}
+            </span>
+          )}
         </button>
         {/* Friends button */}
         <button
           onClick={onFriendsClick}
           className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all ${
             friendsActive
-              ? "bg-amber-600/30 text-amber-300 rounded-xl"
-              : "bg-[var(--panel)] text-[var(--muted)] hover:bg-amber-600/20 hover:text-amber-300 hover:rounded-xl"
+              ? "bg-[var(--accent-2)]/30 text-[var(--accent)] rounded-xl"
+              : "bg-[var(--panel)] text-[var(--muted)] hover:bg-[var(--accent-2)]/20 hover:text-[var(--accent)] hover:rounded-xl"
           }`}
           title="Friends"
+          aria-label="Friends"
+          aria-pressed={!!friendsActive}
         >
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
             <circle cx="9" cy="7" r="4" />
             <line x1="19" y1="8" x2="19" y2="14" />
@@ -182,18 +237,20 @@ export default function ServerList({
           const isActive = activeServerId === server.id;
           const isUploading = iconUploading === server.id;
           const hasUnread = !isActive && unreadServerIds?.has(server.id);
+          const icon = iconFor(server);
+          const isOwner = !!currentUserId && server.ownerId === currentUserId;
           return (
             <div key={server.id} className="relative flex items-center">
               {isActive && (
-                <div className="absolute -left-3 w-1 h-8 bg-white rounded-r-full" />
+                <div className="absolute -left-3 w-1 h-8 bg-[var(--text)] rounded-r-full" />
               )}
               <div className="relative">
                 <button
                   onClick={() => onServerSelect(server)}
-                  onContextMenu={(e) => {
+                  onContextMenu={isOwner ? (e) => {
                     e.preventDefault();
                     setIconMenu({ serverId: server.id, x: e.clientX, y: e.clientY });
-                  }}
+                  } : undefined}
                   disabled={isUploading}
                   className={`w-12 h-12 flex items-center justify-center text-lg font-bold text-white transition-all duration-200 overflow-hidden ${
                     isActive
@@ -201,18 +258,20 @@ export default function ServerList({
                       : "bg-[var(--panel-2)] rounded-[24px] hover:rounded-[16px] hover:bg-[var(--accent-2)]"
                   }`}
                   title={server.name}
+                  aria-label={`${server.name}${hasUnread ? ", unread messages" : ""}`}
+                  aria-current={isActive ? "page" : undefined}
                 >
                   {isUploading ? (
                     <span className="text-xs opacity-60">...</span>
-                  ) : server.icon ? (
+                  ) : icon ? (
                     // eslint-disable-next-line @next/next/no-img-element -- server icons may be user-hosted, data, or blob URLs
-                    <img src={server.icon} alt={server.name} className="w-full h-full object-cover" />
+                    <img src={icon} alt="" className="w-full h-full object-cover" />
                   ) : (
                     server.name[0].toUpperCase()
                   )}
                 </button>
                 {hasUnread && (
-                  <span className="w-2.5 h-2.5 bg-white rounded-full absolute -bottom-0.5 -right-0.5 border border-[var(--bg)] pointer-events-none" />
+                  <span className="w-2.5 h-2.5 bg-[var(--text)] rounded-full absolute -bottom-0.5 -right-0.5 border border-[var(--bg)] pointer-events-none" />
                 )}
               </div>
             </div>
@@ -235,24 +294,23 @@ export default function ServerList({
                 }}
                 className="w-full px-3 py-2 text-left text-sm text-[var(--text)] hover:bg-[var(--accent-2)]/20 flex items-center gap-2"
               >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="m21 15-5-5L5 21" /></svg>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="m21 15-5-5L5 21" /></svg>
                 Change Server Icon
               </button>
-              {servers.find((s) => s.id === iconMenu.serverId)?.icon && (
+              {menuServerIcon && (
                 <button
                   onClick={async () => {
                     const sid = iconMenu.serverId;
                     setIconMenu(null);
-                    await fetch(`/api/servers/${sid}`, {
-                      method: "PATCH",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ icon: "" }),
-                    });
-                    window.location.reload();
+                    try {
+                      if (await saveIcon(sid, "")) toast("Server icon removed", "success");
+                    } catch {
+                      toast("Failed to remove server icon", "error");
+                    }
                   }}
-                  className="w-full px-3 py-2 text-left text-sm text-red-400 hover:bg-red-600/10 flex items-center gap-2"
+                  className="w-full px-3 py-2 text-left text-sm text-[var(--danger)] hover:bg-[var(--danger)]/10 flex items-center gap-2"
                 >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18" /><path d="M8 6V4h8v2" /><path d="m19 6-.867 12.142A2 2 0 0 1 16.138 20H7.862a2 2 0 0 1-1.995-1.858L5 6" /></svg>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M3 6h18" /><path d="M8 6V4h8v2" /><path d="m19 6-.867 12.142A2 2 0 0 1 16.138 20H7.862a2 2 0 0 1-1.995-1.858L5 6" /></svg>
                   Remove Icon
                 </button>
               )}
@@ -271,6 +329,8 @@ export default function ServerList({
               : "bg-[var(--panel-2)] text-[var(--accent-2)] hover:bg-[var(--accent-2)] hover:text-[var(--text)]"
           }`}
           title="Create Server"
+          aria-label="Create server"
+          aria-expanded={showPanel === "create"}
         >
           +
         </button>
@@ -284,17 +344,20 @@ export default function ServerList({
               : "bg-[var(--panel-2)] text-[var(--accent-2)] hover:bg-[var(--accent-2)] hover:text-[var(--text)]"
           }`}
           title="Join Server"
+          aria-label="Join server"
+          aria-expanded={showPanel === "join"}
         >
           &#8618;
         </button>
 
         {/* Explore public servers button */}
         <button
-          onClick={() => { window.location.href = "/explore"; }}
+          onClick={() => router.push("/explore")}
           className="w-12 h-12 rounded-2xl flex items-center justify-center transition-all hover:rounded-xl bg-[var(--panel-2)] text-[var(--accent-2)] hover:bg-[var(--accent-2)] hover:text-[var(--text)]"
           title="Explore public servers"
+          aria-label="Explore public servers"
         >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <circle cx="12" cy="12" r="10" />
             <path d="m16.24 7.76-1.804 5.411a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.411a2 2 0 0 1 1.265-1.265z" />
           </svg>
@@ -311,6 +374,7 @@ export default function ServerList({
             <button
               onClick={() => setShowPanel(null)}
               className="text-[var(--muted)] hover:text-[var(--text)] text-lg"
+              aria-label="Close"
             >
               &times;
             </button>
@@ -318,7 +382,7 @@ export default function ServerList({
 
           <div className="p-4">
             {error && (
-              <div className="p-2 mb-3 bg-[var(--danger)] text-[var(--text)] rounded text-xs">
+              <div role="alert" className="p-2 mb-3 bg-[var(--danger)] text-[var(--text)] rounded text-xs">
                 {error}
               </div>
             )}
@@ -339,8 +403,47 @@ export default function ServerList({
                     required
                   />
                 </div>
+                <fieldset>
+                  <legend className="block text-xs text-[var(--muted)] mb-1 uppercase tracking-wide">
+                    Start from
+                  </legend>
+                  <div className="space-y-1 max-h-56 overflow-y-auto">
+                    {[
+                      { id: "", emoji: "🔥", name: "Blank", description: "Just a #campfire channel" },
+                      ...SERVER_TEMPLATES,
+                    ].map((option) => (
+                      <label
+                        key={option.id || "blank"}
+                        className={`flex items-start gap-2 px-2 py-1.5 rounded cursor-pointer border transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-[var(--accent)] ${
+                          templateId === option.id
+                            ? "border-[var(--accent)] bg-[var(--accent)]/10"
+                            : "border-transparent hover:bg-[var(--panel-2)]"
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="server-template"
+                          value={option.id}
+                          checked={templateId === option.id}
+                          onChange={() => setTemplateId(option.id)}
+                          className="sr-only"
+                        />
+                        <span className="text-base leading-5" aria-hidden="true">{option.emoji}</span>
+                        <span className="min-w-0">
+                          <span className="block text-sm text-[var(--text)] font-medium">{option.name}</span>
+                          <span className="block text-[11px] text-[var(--muted)] leading-snug">{option.description}</span>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
                 <p className="text-xs text-[var(--muted)]">
-                  Your server is where you and your friends hang out. A #campfire channel will be created automatically.
+                  Your server is where you and your friends hang out.{" "}
+                  {templateId
+                    ? `Channels: ${SERVER_TEMPLATES.find((t) => t.id === templateId)?.channels
+                        .map((c) => (c.type === "voice" ? `🔊 ${c.name}` : `#${c.name}`))
+                        .join(", ")}`
+                    : "A #campfire channel will be created automatically."}
                 </p>
                 <button
                   type="submit"
