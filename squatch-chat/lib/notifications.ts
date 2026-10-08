@@ -258,6 +258,11 @@ export async function upsertDmNotification(
  * and the linked channel is only named/linked when they can view it.
  * ponytail: rescheduling a gathering after its reminder fired doesn't re-remind.
  */
+// Reminders already sent by this process (id -> gathering start). "Clear all" deletes
+// inbox rows, so the row alone can't stop a resend inside the 15-minute window.
+// ponytail: per-process; a restart inside the window can resend once to someone who cleared.
+const remindedThisProcess = new Map<string, number>();
+
 export async function createGatheringReminderNotifications(
   now = new Date(),
   database: NotificationDatabase & Pick<Prisma.TransactionClient, "gathering"> = prisma,
@@ -280,6 +285,9 @@ export async function createGatheringReminderNotifications(
     },
   });
 
+  for (const [id, startsAt] of remindedThisProcess) {
+    if (startsAt <= now.getTime()) remindedThisProcess.delete(id);
+  }
   const created: NotificationRecord[] = [];
   for (const gathering of gatherings) {
     const idFor = (userId: string) => `gathering:${userId}:${gathering.id}`;
@@ -290,7 +298,10 @@ export async function createGatheringReminderNotifications(
     const minutes = Math.max(1, Math.round((gathering.startsAt.getTime() - now.getTime()) / 60_000));
 
     for (const { userId } of gathering.rsvps) {
-      if (already.has(idFor(userId))) continue;
+      if (already.has(idFor(userId)) || remindedThisProcess.has(idFor(userId))) {
+        remindedThisProcess.set(idFor(userId), gathering.startsAt.getTime());
+        continue;
+      }
       if (!(await requireMembership(gathering.serverId, userId, database))) continue;
 
       let channelVisible = false;
@@ -319,6 +330,7 @@ export async function createGatheringReminderNotifications(
         if ((error as { code?: string })?.code === "P2002") return null;
         throw error;
       });
+      remindedThisProcess.set(idFor(userId), gathering.startsAt.getTime());
       if (record) created.push(record);
     }
   }

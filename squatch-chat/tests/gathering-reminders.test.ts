@@ -106,4 +106,10 @@ describe("createGatheringReminderNotifications", () => {
     expect(await createGatheringReminderNotifications(new Date(NOW.getTime() + 60_000))).toEqual([]);
     expect(await prisma.notification.count({ where: { id: { startsWith: "gathering:" }, serverId } })).toBe(4);
   });
+
+  it("does not resend after the user clears their inbox inside the window", async () => {
+    await prisma.notification.deleteMany({ where: { id: { startsWith: "gathering:" }, serverId } });
+    expect(await createGatheringReminderNotifications(new Date(NOW.getTime() + 120_000))).toEqual([]);
+    expect(await prisma.notification.count({ where: { id: { startsWith: "gathering:" }, serverId } })).toBe(0);
+  });
 });

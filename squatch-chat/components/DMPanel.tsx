@@ -554,11 +554,23 @@ export default function DMPanel({ currentUserId, initialConversationId, onUnread
                       )}
                       {m.attachmentUrl && (
                         <div className={`flex ${isSelf ? "justify-end" : ""}`}>
-                          <AttachmentPreview
-                            url={m.attachmentUrl}
-                            name={m.attachmentName}
-                            onOpenLightbox={setLightboxSrc}
-                          />
+                          {m.attachmentUrl.startsWith("/api/attachments/") ? (
+                            <AttachmentPreview
+                              url={m.attachmentUrl}
+                              name={m.attachmentName}
+                              onOpenLightbox={setLightboxSrc}
+                            />
+                          ) : (
+                            // Remote URL: a link, never an auto-loading <img>/<video> that
+                            // would tell the sender's host when (and from where) a DM was opened.
+                            /^https?:\/\//i.test(m.attachmentUrl) ? (
+                              <a href={m.attachmentUrl} target="_blank" rel="noopener noreferrer nofollow" className="text-xs text-[var(--accent)] underline break-all">
+                                {m.attachmentName || m.attachmentUrl}
+                              </a>
+                            ) : (
+                              <span className="text-xs text-[var(--muted)] break-all">{m.attachmentName || m.attachmentUrl}</span>
+                            )
+                          )}
                         </div>
                       )}
                       <div className="text-[10px] text-[var(--muted)] mt-0.5">

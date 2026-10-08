@@ -181,7 +181,9 @@ describe("PATCH /api/servers/:serverId/reports/:reportId", () => {
     expect((await prisma.report.findUnique({ where: { id: visibleReportId } }))?.status).toBe("resolved");
     const audit = await prisma.auditLog.findMany({ where: { serverId, action: "report_resolve" } });
     expect(audit).toHaveLength(1);
-    expect(audit[0]).toMatchObject({ actorId: mod.id, targetId: offender.id });
+    // Audit-log readers (incl. a reported moderator) must not learn who filed it or about whom.
+    expect(audit[0]).toMatchObject({ actorId: mod.id, targetId: null });
+    expect(audit[0].detail).not.toMatch(/filed by/i);
 
     expect((await patch(visibleReportId, "dismissed")).status).toBe(409);
     expect(await prisma.auditLog.count({ where: { serverId, action: { startsWith: "report_" } } })).toBe(1);

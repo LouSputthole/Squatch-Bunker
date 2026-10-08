@@ -203,8 +203,12 @@ export function attachSocketIO(
     if (check === "unavailable") return next(new Error("Unavailable"));
     const payload = check === "valid" ? verifyToken(token) : null;
     if (!payload) return next(new Error("Unauthorized"));
+    // Current name from the DB: a renamed user's other devices still carry the old claim.
+    const user = await prisma.user
+      .findUnique({ where: { id: payload.userId }, select: { username: true } })
+      .catch(() => null);
     socket.data.userId = payload.userId;
-    socket.data.username = payload.username;
+    socket.data.username = user?.username ?? payload.username;
     socket.data.sessionToken = token;
     next();
   });
@@ -1862,6 +1866,7 @@ export function attachSocketIO(
           authorId: currentUserId,
         },
         include: { author: { select: { id: true, username: true, avatar: true } } },
+        omit: { readAt: true }, // not a read receipt — matches the HTTP routes
       });
       if (!message) return;
 

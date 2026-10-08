@@ -61,9 +61,11 @@ export async function PATCH(
       data: {
         serverId,
         actorId: session.userId,
-        targetId: report.targetUserId,
+        // No reporter or target here: anyone with VIEW_AUDIT_LOG (incl. a reported
+        // moderator) can read the log, and the desk hides reports about the viewer.
+        targetId: null,
         action: status === "resolved" ? "report_resolve" : "report_dismiss",
-        detail: `Report filed by ${report.reporter.username} marked ${status}`,
+        detail: `Report ${report.id} marked ${status}`,
       },
     });
     return true;
