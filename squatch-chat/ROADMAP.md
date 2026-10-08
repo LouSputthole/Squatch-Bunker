@@ -1,8 +1,16 @@
 # Campfire product and engineering roadmap
 
-Updated: 2026-07-13
+Updated: 2026-10-08
 
 Campfire’s direction is **Discord-shaped community infrastructure with a warmer, more intentional social layer**. The goal is not to copy every Discord surface at once. The sequence is: make the current product trustworthy for small communities, prove operations, scale media, then deepen both parity and Campfire’s own identity.
+
+## Handoff — where things stand (2026-10-08)
+
+- **Open PRs:** #16 (polish pass) and #17 (completion wave, built on top of #16) both target `main`, CI is green, and every review thread is resolved. Merging #17 lands both, and GitHub then marks #16 as merged. If you merge #16 first, run `gh pr update-branch 17` and wait for CI before merging #17, because branch protection requires an up-to-date branch. Neither PR changes the schema or adds migrations.
+- **Verified on the branch:** about 680 tests, lint, TypeScript, production build, `release:check`, `db:check`, and the dependency audit gate. Both PRs also had code and security reviews.
+- **Not done (machine/infra):** the `0.1.0-beta.1` desktop build. Run `npm run desktop:stage && npm run desktop:verify -- --require-stage && npm run desktop:dist`, smoke-test the portable and installer builds (persistence, LAN toggle, no orphaned server process), record SHA-256 checksums, and attach them to a **draft** GitHub release only. Publishing a release arms the auto-updater for installed 0.0.x users, and the beta tag stays unpublished until the evidence gates in [the release notes](./docs/releases/0.1.0-beta.1.md#evidence-gates-before-tagging) are met.
+- **Needs people/infra:** a two-person real-microphone voice playtest (including Fireside Stage), public HTTPS + TURN staging, code signing, and a browser matrix. Four stale merged branches still need deleting: `agent/public-staging-verifier`, `codex/campfire-five-features-20260712`, `feat/hosted-postgres`, and `release/0.1.0-beta.1`. A scratch Neon project (`flat-leaf-31484496`) also needs deleting.
+- **Next build-out:** the rest of Ranger Desk (assignment, evidence, escalation, appeals), then Trail Boards and Gathering Seasons. See [Next five build-outs](#next-five-build-outs).
 
 Status notation:
 
@@ -50,6 +58,15 @@ Status notation:
 - Next.js, Stripe dependency, and Turbopack compatibility fixes.
 - Explicit fail-safe Community versus Cloud edition selection and production Cloud configuration validation.
 - Stripe checkout and entitlement hardening: guest rejection, Customer reuse, checkout claims, approved price/status validation, Stripe v22 item-period handling, stale-event rejection, invoice/cancellation transitions, unique Stripe IDs, and handler-level regression tests.
+
+### Polish and completion waves (2026-10-08, PRs #16 and #17)
+
+- **Security floor:** Next.js 16.3.8+ (critical RCE + SSRF advisories), patched transitive deps, Electron 43.7.9; OAuth and login keep a safe, same-origin post-login redirect.
+- **Realtime reliability:** sockets recover from server disconnects, database blips, and background-tab throttling; presence is per user with a grace period; guest upgrades re-handshake.
+- **Chat completion:** history paging, editing, threads (deletion respects reply authorship), saved messages, reports, search filters (local-timezone days), purge, slow mode, export, welcome messages, and in-app dialogs instead of `window.prompt`.
+- **Community features:** Ranger Desk first slice (moderator report inbox), gathering reminders in the Ember Inbox, expired-guest sweep, username changes (sessions read the current username from the database), DM attachments with unread/read state, custom emoji in chat and reactions (own uploads only), custom-role channel permission overrides, and server templates.
+- **Experience:** Campfire palette is the default and applies on every page; a mobile tab bar, channel drawer, and visible composer; Discord-style message grouping; toasts and focus rings.
+- **Desktop launcher:** tray menu, "Share on this network" LAN toggle (port 3939, plain HTTP with `COOKIE_SECURE=0`), prerelease-aware update checker, and a parent-PID watchdog, all on the current Electron pipeline.
 
 These lists describe implementation scope, not a public release. The authoritative boundaries are in [docs/GAP_ANALYSIS.md](./docs/GAP_ANALYSIS.md).
 

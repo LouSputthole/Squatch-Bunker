@@ -1,6 +1,6 @@
 # Campfire gap analysis
 
-Snapshot: 2026-07-13, based on the current stabilization worktree.
+Snapshot: 2026-10-08, after the polish pass and completion wave (PRs #16 and #17). The [roadmap handoff](../ROADMAP.md#handoff--where-things-stand-2026-10-08) lists what landed and what is still open.
 
 Campfire now has a credible private-alpha feature set and a distinct product identity. It is not yet a Discord replacement for large public communities, and this document is not a production certification. “Implemented” below means the source and focused tests exist in this worktree; every release candidate must still pass the full [release checklist](./RELEASE_CHECKLIST.md) on clean SQLite and PostgreSQL environments.
 
@@ -23,7 +23,7 @@ Campfire now has a credible private-alpha feature set and a distinct product ide
 | 6 | Leave-no-trace rooms | Text channels can retain messages for 1, 7, or 30 days; the unified server runs an hourly expiry sweep and removes unreferenced local uploads. | Retention is not a legal-hold system, and delivery is hourly rather than exact-to-the-minute. Operators must validate backups and external storage behavior. |
 | 7 | Camp Journal | A member can save a personal, durable snapshot of a visible message and attachment metadata with an optional note, then list or remove their entries. | Journal entries are private per member, not a shared wiki, collaborative notebook, or export/archive system. |
 | 8 | Camp Votes | Members with channel send access can create single- or multiple-choice polls with 2–10 unique options and optional closing times; creators or moderators can close them. | No anonymous ballots, ranked choice, quorum, reminders, or audit-grade election guarantees. |
-| 9 | Camp Gatherings | Members can schedule a future gathering, optionally link a channel, RSVP going/maybe/declined, see counts and a 15-minute reminder, and join the linked room while active. | No recurring events, calendar sync, timezone preference layer, push reminders, or waitlists. |
+| 9 | Camp Gatherings | Members can schedule a future gathering, optionally link a channel, RSVP going/maybe/declined, see counts, get an Ember Inbox reminder 15 minutes before start (going/maybe RSVPs, respecting space notification policy and channel visibility), and join the linked room while active. | No recurring events, calendar sync, timezone preference layer, push/email reminders, or waitlists. |
 | 10 | Offshoots | Voice-room members can form ephemeral side bubbles, rejoin the main camp, and close bubbles with creator/moderator controls; limits are three bubbles per parent and four members per bubble. | Offshoot state is process-local. Audio separation is implemented by client-side peer volume routing inside the parent WebRTC mesh, so it is a conversational convenience—not a security or privacy boundary. |
 
 ## Hardening and bug-fix wave
@@ -76,7 +76,7 @@ These changes address concrete correctness, authorization, and operations risks.
 - **Large voice/video rooms:** no production SFU path, region selection, adaptive subscriptions, media quality telemetry, recording consent workflow, or load-tested screen sharing at scale.
 - **Account security:** 2FA and SSO remain roadmap items. Session/device management, recovery-delivery monitoring, and security-event notifications need a formal product pass.
 - **Community operations:** members can report messages/users and moderators have a first report inbox (resolve/dismiss, audited), but escalation/appeals, mature anti-spam controls, legal holds, and trust tooling remain limited. The word filter is client-side and applies only to the configuring moderator's own messages.
-- **Discord-shaped workflows:** stage channels, forum channels, robust server discovery, application/bot ecosystem, webhooks, rich integrations, and mature role/channel-permission tooling are not at Discord depth.
+- **Discord-shaped workflows:** stage channels, forum channels, robust server discovery, application/bot ecosystem, webhooks, and rich integrations are not at Discord depth. Custom roles can now carry per-channel overrides and new servers can start from templates, but permission tooling is still simpler than Discord's.
 - **Notifications and search:** cross-device push, fine-grained per-server/channel notification policy, global discovery, and large-history search quality are not release-proven.
 - **Legacy public media migration:** the primary message/DM composer now uses authenticated private attachments, but the legacy `/api/upload` and existing `/uploads` records remain public-by-URL. Sensitive historical media needs an explicit migration/deprecation plan.
 - **Multi-node coordination:** attachment bytes still require shared durable storage, while rate limits and Lantern/Offshoot state are process-local. Horizontal replicas need shared storage, pub/sub/state, and distributed abuse controls.
