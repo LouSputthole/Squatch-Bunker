@@ -31,6 +31,7 @@ import PurgeMessagesModal from "@/components/PurgeMessagesModal";
 import ChannelPermissionsModal from "@/components/ChannelPermissionsModal";
 import { connectSocket, disconnectSocket, getSocket } from "@/lib/socket";
 import { displayName } from "@/lib/utils";
+import { toastResponseError } from "@/lib/toast";
 
 import { useAuth } from "@/hooks/useAuth";
 import { useServers } from "@/hooks/useServers";
@@ -41,6 +42,7 @@ import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useOfflineQueue } from "@/hooks/useOfflineQueue";
 import EmberInbox, { type InboxNotification } from "@/components/EmberInbox";
 import GatheringsPanel from "@/components/GatheringsPanel";
+import GuestUpgradeBanner from "@/components/GuestUpgradeBanner";
 
 import type { Channel, Server } from "@/types/chat";
 
@@ -123,10 +125,14 @@ function ChatPageInner() {
   const [purgeModalOpen, setPurgeModalOpen] = useState(false);
   const [channelPermsOpen, setChannelPermsOpen] = useState(false);
 
+  const [dmTargetConversationId, setDmTargetConversationId] = useState<string | null>(null);
+
   const toggleDmPanel = useCallback(() => {
     const willOpen = !dmOpen;
     setDmOpen(willOpen);
     setFriendsOpen(false);
+    setDmTargetConversationId(null);
+    setSidebarOpen(false);
     if (willOpen) setViewingVoiceRoom(false);
   }, [dmOpen]);
 
@@ -134,16 +140,38 @@ function ChatPageInner() {
     const willOpen = !friendsOpen;
     setFriendsOpen(willOpen);
     setDmOpen(false);
+    setDmTargetConversationId(null);
+    setSidebarOpen(false);
     if (willOpen) setViewingVoiceRoom(false);
   }, [friendsOpen]);
 
-  const [dmTargetConversationId, setDmTargetConversationId] = useState<string | null>(null);
   const openDmPanel = useCallback(() => {
     setFriendsOpen(false);
     setDmOpen(true);
     setViewingVoiceRoom(false);
   }, []);
+
+  // Friends / profile "Message" buttons: open (or create) the DM and land in that thread.
+  const openDmWith = useCallback(async (userId: string) => {
+    const res = await fetch("/api/dm", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ targetUserId: userId }),
+    });
+    if (!res.ok) {
+      await toastResponseError(res, "Couldn't open that conversation");
+      return false;
+    }
+    const data = await res.json().catch(() => ({}));
+    setDmTargetConversationId(typeof data.conversationId === "string" ? data.conversationId : null);
+    openDmPanel();
+    return true;
+  }, [openDmPanel]);
   const [gatheringsOpen, setGatheringsOpen] = useState(false);
+  // Message to scroll to + highlight once ChatPanel has it (search, saved, journal jumps).
+  const [focusMessageId, setFocusMessageId] = useState<string | null>(null);
+  // Ids removed by a moderator purge — hidden locally right away.
+  const [purgedIds, setPurgedIds] = useState<string[]>([]);
 
   async function saveStatusMessage(msg: string) {
     await fetch("/api/auth/status", {
@@ -237,10 +265,19 @@ function ChatPageInner() {
       const serverList = await srv.fetchServers();
       const socket = connectSocket();
 
+      // "connect" also fires after every reconnect; reconnect progress events live on the Manager.
       socket.on("connect", () => { setSocketStatus("connected"); offlineQueue.flush(); });
       socket.on("disconnect", () => setSocketStatus("disconnected"));
-      socket.on("reconnecting", () => setSocketStatus("connecting"));
-      socket.on("reconnect", () => { setSocketStatus("connected"); offlineQueue.flush(); });
+      socket.io.on("reconnect_attempt", () => setSocketStatus("connecting"));
+      // A handshake refused by the server's auth middleware is not retried automatically.
+      // Only log out when the HTTP session is really gone; otherwise (DB blip) try again.
+      socket.on("connect_error", (err) => {
+        if (socket.active) return;
+        void fetch("/api/auth/me").then((res) => {
+          if (res.status === 401 && err.message === "Unauthorized") void auth.logout();
+          else setTimeout(() => { if (!socket.connected) socket.connect(); }, 3000);
+        }).catch(() => setTimeout(() => { if (!socket.connected) socket.connect(); }, 3000));
+      });
 
       // Restore from URL
       if (ch.urlServerId && serverList.length > 0) {
@@ -264,11 +301,24 @@ function ChatPageInner() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const jumpToMessage = useCallback((channelId: string, messageId: string) => {
+    const server = srv.servers.find((s) => s.channels.some((c) => c.id === channelId));
+    const channel = server?.channels.find((c) => c.id === channelId);
+    if (!server || !channel) return;
+    if (server.id !== srv.activeServer?.id) srv.selectServer(server, ch.setActiveChannel);
+    ch.setActiveChannel(channel);
+    setDmOpen(false);
+    setFriendsOpen(false);
+    setViewingVoiceRoom(false);
+    setSearchOpen(false);
+    setFocusMessageId(messageId);
+  }, [srv, ch]);
+
   // Server select handler
   const handleServerSelect = useCallback((server: typeof srv.activeServer & object) => {
     srv.selectServer(server, ch.setActiveChannel);
     presence.resetPresence();
-    ch.resetUnreads();
+    setDmTargetConversationId(null);
   }, [srv, ch, presence]);
 
   const handleServerCreated = useCallback((server: typeof srv.activeServer & object) => {
@@ -340,91 +390,94 @@ function ChatPageInner() {
     );
   }
 
+  const voiceBarVisible = Boolean(voice.activeVoiceChannel && !viewingVoiceRoom && auth.user);
+  const serverRail = (
+    <ServerList
+      servers={srv.servers}
+      activeServerId={dmOpen ? undefined : srv.activeServer?.id}
+      dmActive={dmOpen}
+      friendsActive={friendsOpen}
+      unreadServerIds={(() => {
+        if (ch.unreadCounts.size === 0) return undefined;
+        const unreadChannelIds = new Set(ch.unreadCounts.keys());
+        const result = new Set<string>();
+        for (const server of srv.servers) {
+          if (server.channels.some((c) => unreadChannelIds.has(c.id))) {
+            result.add(server.id);
+          }
+        }
+        return result.size > 0 ? result : undefined;
+      })()}
+      onDmClick={toggleDmPanel}
+      onFriendsClick={toggleFriendsPanel}
+      onServerSelect={(s) => { setDmOpen(false); setFriendsOpen(false); handleServerSelect(s); }}
+      onServerCreated={handleServerCreated}
+      onServerJoined={handleServerJoined}
+      currentUserId={auth.user?.id}
+      onServerUpdated={({ id, icon }) => {
+        if (id === srv.activeServer?.id) srv.updateActiveServer({ icon });
+        else srv.setServers((list) => list.map((s) => (s.id === id ? { ...s, icon } : s)));
+      }}
+    />
+  );
+  const mobileTabClass = (active: boolean) =>
+    `flex flex-col items-center gap-0.5 min-h-[44px] min-w-[56px] justify-center transition-colors ${
+      active ? "text-[var(--accent)]" : "text-[var(--muted)] hover:text-[var(--text)]"
+    }`;
+
   return (
-    <div id="main-content" className="h-screen flex bg-[var(--bg)] relative">
+    <div
+      id="main-content"
+      className={`h-dvh flex bg-[var(--bg)] relative md:pb-0 ${voiceBarVisible ? "pb-[116px]" : "pb-16"}`}
+    >
       <ConnectionStatusBar status={socketStatus} queuedCount={offlineQueue.queuedCount} />
-
-      {/* Server rail — desktop only; mobile uses bottom tab bar */}
-      <div className="hidden md:flex">
-        <ServerList
-          servers={srv.servers}
-          activeServerId={dmOpen ? undefined : srv.activeServer?.id}
-          dmActive={dmOpen}
-          friendsActive={friendsOpen}
-          unreadServerIds={(() => {
-            if (ch.unreadCounts.size === 0) return undefined;
-            const unreadChannelIds = new Set(ch.unreadCounts.keys());
-            const result = new Set<string>();
-            for (const server of srv.servers) {
-              if (server.channels.some((c) => unreadChannelIds.has(c.id))) {
-                result.add(server.id);
-              }
-            }
-            return result.size > 0 ? result : undefined;
-          })()}
-          onDmClick={toggleDmPanel}
-          onFriendsClick={toggleFriendsPanel}
-          onServerSelect={(s) => { setDmOpen(false); setFriendsOpen(false); handleServerSelect(s); }}
-          onServerCreated={handleServerCreated}
-          onServerJoined={handleServerJoined}
+      {auth.user?.isGuest && (
+        <GuestUpgradeBanner
+          username={auth.user.username}
+          guestExpiresAt={auth.user.guestExpiresAt}
+          onUpgraded={(fields) => auth.updateUser({ ...fields, isGuest: false, guestExpiresAt: null })}
         />
-      </div>
+      )}
 
-      {/* Mobile bottom tab bar — replaces server rail on small screens */}
-      <div className="md:hidden fixed bottom-0 left-0 right-0 h-16 flex items-center justify-around bg-[var(--bg)] border-t border-[var(--accent-2)]/30 z-20 pb-safe">
+      {/* Server rail — desktop only; on mobile it lives inside the Channels drawer */}
+      <div className="hidden md:flex">{serverRail}</div>
+
+      {/* Mobile bottom tab bar */}
+      <nav
+        aria-label="Primary"
+        className="md:hidden fixed bottom-0 left-0 right-0 h-16 flex items-center justify-around bg-[var(--panel)] border-t border-[var(--accent-2)]/30 z-20 pb-safe"
+      >
         <button
-          onClick={() => setSidebarOpen((p) => !p)}
-          className="flex flex-col items-center gap-0.5 min-h-[44px] min-w-[44px] justify-center text-[var(--muted)] hover:text-[var(--text)] transition-colors"
-          title="Channels"
+          onClick={() => { setDmOpen(false); setFriendsOpen(false); setSidebarOpen((p) => !p); }}
+          className={mobileTabClass(sidebarOpen || (!dmOpen && !friendsOpen))}
+          aria-label="Servers and channels"
         >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" />
           </svg>
-          <span className="text-[10px]">Channels</span>
+          <span className="text-[10px]">Camps</span>
         </button>
-        {srv.servers.slice(0, 3).map((server) => (
-          <button
-            key={server.id}
-            onClick={() => {
-              setDmOpen(false);
-              setFriendsOpen(false);
-              handleServerSelect(server);
-              setSidebarOpen(false);
-            }}
-            className={`flex flex-col items-center gap-0.5 min-h-[44px] min-w-[44px] justify-center transition-colors ${
-              srv.activeServer?.id === server.id && !dmOpen && !friendsOpen
-                ? "text-[var(--text)]"
-                : "text-[var(--muted)] hover:text-[var(--text)]"
-            }`}
-            title={server.name}
-          >
-            {server.icon ? (
-              <Avatar
-                username={server.name}
-                avatarUrl={server.icon}
-                size={28}
-                className="w-7 h-7"
-              />
-            ) : (
-              <div className="w-7 h-7 rounded-full bg-[var(--accent-2)] flex items-center justify-center text-xs font-bold text-[var(--text)]">
-                {server.name.charAt(0).toUpperCase()}
-              </div>
-            )}
-          </button>
-        ))}
-        <button
-          onClick={toggleDmPanel}
-          className={`flex flex-col items-center gap-0.5 min-h-[44px] min-w-[44px] justify-center transition-colors ${
-            dmOpen ? "text-[var(--text)]" : "text-[var(--muted)] hover:text-[var(--text)]"
-          }`}
-          title="Direct Messages"
-        >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <button onClick={toggleDmPanel} className={mobileTabClass(dmOpen)} aria-label="Direct messages">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
           </svg>
           <span className="text-[10px]">DMs</span>
         </button>
-      </div>
+        <button onClick={toggleFriendsPanel} className={mobileTabClass(friendsOpen)} aria-label="Friends">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M16 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" /><circle cx="8.5" cy="7" r="4" /><path d="M20 8v6M23 11h-6" />
+          </svg>
+          <span className="text-[10px]">Friends</span>
+        </button>
+        <button onClick={() => { setSidebarOpen(false); setSettingsOpen(true); }} className={mobileTabClass(settingsOpen)} aria-label="Settings">
+          {auth.user ? (
+            <Avatar username={auth.user.username} avatarUrl={auth.user.avatar} size={22} className="bg-[var(--accent-2)] text-[var(--text)]" />
+          ) : (
+            <SettingsIcon />
+          )}
+          <span className="text-[10px]">You</span>
+        </button>
+      </nav>
 
       {/* Mobile sidebar overlay backdrop */}
       {sidebarOpen && (
@@ -450,90 +503,84 @@ function ChatPageInner() {
         <FriendPanel
           currentUserId={auth.user.id}
           onlineMemberIds={presence.onlineMembers}
-          onMessageUser={async (userId) => {
-            const res = await fetch("/api/dm", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ targetUserId: userId }),
-            });
-            if (res.ok) {
-              openDmPanel();
-            }
-          }}
+          onMessageUser={(userId) => { void openDmWith(userId); }}
         />
       ) : (
       <>
-      {/* Channel sidebar — fixed overlay on mobile, static on desktop */}
-      {srv.activeServer ? (
-        <div
-          className={[
-            "fixed left-0 top-0 bottom-0 z-40 w-64 transform transition-transform duration-300",
-            "md:static md:w-auto md:z-auto md:translate-x-0 md:transition-none",
-            sidebarOpen ? "translate-x-0" : "-translate-x-full",
-          ].join(" ")}
-        >
-          <ChannelList
-            key={srv.activeServer.id}
-            serverName={srv.activeServer.name}
-            serverBanner={(srv.activeServer as { banner?: string | null }).banner}
-            channels={srv.activeServer.channels}
-            activeChannelId={ch.activeChannel?.id}
-            serverId={srv.activeServer.id}
-            serverIcon={srv.activeServer.icon}
-            inviteCode={srv.activeServer.inviteCode}
-            inviteExpiresAt={srv.activeServer.inviteExpiresAt}
-            inviteMaxUses={srv.activeServer.inviteMaxUses}
-            inviteUseCount={srv.activeServer.inviteUseCount}
-            inviteRevokedAt={srv.activeServer.inviteRevokedAt}
-            memberCount={srv.activeServer._count.members}
-            unreadCounts={ch.unreadCounts}
-            currentUserId={auth.user?.id}
-            currentUserRole={presence.userRole}
-            canManageChannels={presence.canManageChannels}
-            activeVoiceChannelId={voice.activeVoiceChannel?.id}
-            viewingVoiceRoom={viewingVoiceRoom}
-            voiceParticipants={voice.voiceParticipants}
-            onChannelSelect={(channel) => {
-              ch.selectChannel(channel);
-              setViewingVoiceRoom(false); // browsing text — keep the call alive, just change the view
-              setSidebarOpen(false);
-            }}
-            onChannelCreated={handleChannelCreated}
-            onChannelsUpdated={(updated) => {
-              srv.updateChannels(updated);
-              if (srv.activeServer) {
-                getSocket().emit("channels:updated", { serverId: srv.activeServer.id, channelIds: updated.map((c) => c.id) });
-              }
-            }}
-            onInviteUpdated={(invite) => srv.updateActiveServer(invite)}
-            onChannelDeleted={(channelId) => {
-              if (voice.activeVoiceChannel?.id === channelId) { voice.disconnect(); setViewingVoiceRoom(false); }
-              srv.removeChannel(channelId);
-              if (ch.activeChannel?.id === channelId) {
-                const remaining = srv.activeServer?.channels.filter(
-                  (c) => c.id !== channelId && (!c.type || c.type === "text")
-                ) || [];
-                ch.setActiveChannel(remaining[0] || null);
-              }
-              if (srv.activeServer) {
-                getSocket().emit("channel:deleted", { serverId: srv.activeServer.id, channelId });
-              }
-            }}
-            onVoiceJoin={(channel) => { voice.joinVoice(channel); setViewingVoiceRoom(true); }}
-            onVoiceView={() => setViewingVoiceRoom(true)}
-            selfSpeaking={voice.voiceState.participants.some((p) => p.userId === auth.user?.id && p.speaking)}
-            onOpenServerSettings={() => setServerSettingsOpen(true)}
-          />
-        </div>
-      ) : (
-        <div className="hidden md:flex w-60 bg-[var(--panel)] flex-col items-center justify-center text-[var(--muted)] text-sm border-r border-[var(--accent-2)]/30 px-4 text-center gap-3 shrink-0">
-          <p className="text-base text-[var(--text)]">No servers yet</p>
-          <p className="text-xs">
-            Use the <span className="text-[var(--accent)] font-bold">+</span> button to create a server
-            or the <span className="text-[var(--accent)] font-bold">&#8618;</span> button to join one
-          </p>
-        </div>
-      )}
+      {/* Channel sidebar — on mobile a drawer (server rail + channels), static column on desktop.
+          Bottom padding leaves room for the user bar (and the voice bar while in a call). */}
+      <div
+        className={[
+          "fixed left-0 top-0 bottom-0 z-40 flex bg-[var(--bg)] transform transition-transform duration-300",
+          "md:static md:z-auto md:translate-x-0 md:transition-none",
+          voiceBarVisible ? "pb-[140px]" : "pb-[88px]",
+          sidebarOpen ? "translate-x-0" : "-translate-x-full",
+        ].join(" ")}
+      >
+        {sidebarOpen && <div className="md:hidden flex">{serverRail}</div>}
+        {srv.activeServer ? (
+            <ChannelList
+              key={srv.activeServer.id}
+              serverName={srv.activeServer.name}
+              serverBanner={(srv.activeServer as { banner?: string | null }).banner}
+              channels={srv.activeServer.channels}
+              activeChannelId={ch.activeChannel?.id}
+              serverId={srv.activeServer.id}
+              serverIcon={srv.activeServer.icon}
+              inviteCode={srv.activeServer.inviteCode}
+              inviteExpiresAt={srv.activeServer.inviteExpiresAt}
+              inviteMaxUses={srv.activeServer.inviteMaxUses}
+              inviteUseCount={srv.activeServer.inviteUseCount}
+              inviteRevokedAt={srv.activeServer.inviteRevokedAt}
+              memberCount={srv.activeServer._count.members}
+              unreadCounts={ch.unreadCounts}
+              currentUserId={auth.user?.id}
+              currentUserRole={presence.userRole}
+              canManageChannels={presence.canManageChannels}
+              activeVoiceChannelId={voice.activeVoiceChannel?.id}
+              viewingVoiceRoom={viewingVoiceRoom}
+              voiceParticipants={voice.voiceParticipants}
+              onChannelSelect={(channel) => {
+                ch.selectChannel(channel);
+                setViewingVoiceRoom(false); // browsing text — keep the call alive, just change the view
+                setSidebarOpen(false);
+              }}
+              onChannelCreated={handleChannelCreated}
+              onChannelsUpdated={(updated) => {
+                srv.updateChannels(updated);
+                if (srv.activeServer) {
+                  getSocket().emit("channels:updated", { serverId: srv.activeServer.id, channelIds: updated.map((c) => c.id) });
+                }
+              }}
+              onInviteUpdated={(invite) => srv.updateActiveServer(invite)}
+              onChannelDeleted={(channelId) => {
+                if (voice.activeVoiceChannel?.id === channelId) { voice.disconnect(); setViewingVoiceRoom(false); }
+                srv.removeChannel(channelId);
+                if (ch.activeChannel?.id === channelId) {
+                  const remaining = srv.activeServer?.channels.filter(
+                    (c) => c.id !== channelId && (!c.type || c.type === "text")
+                  ) || [];
+                  ch.setActiveChannel(remaining[0] || null);
+                }
+                if (srv.activeServer) {
+                  getSocket().emit("channel:deleted", { serverId: srv.activeServer.id, channelId });
+                }
+              }}
+              onVoiceJoin={(channel) => { voice.joinVoice(channel); setViewingVoiceRoom(true); }}
+              onVoiceView={() => setViewingVoiceRoom(true)}
+              selfSpeaking={voice.voiceState.participants.some((p) => p.userId === auth.user?.id && p.speaking)}
+              onOpenServerSettings={() => setServerSettingsOpen(true)}
+            />
+        ) : (
+          <div className="flex w-60 bg-[var(--panel)] flex-col items-center justify-center text-[var(--muted)] text-sm border-r border-[var(--accent-2)]/30 px-4 text-center gap-3 shrink-0">
+            <p className="text-base text-[var(--text)]">No camps yet</p>
+            <p className="text-xs">
+              Use the <span className="text-[var(--accent)] font-bold">+</span> button to start a camp
+              or the <span className="text-[var(--accent)] font-bold">&#8618;</span> button to join one with an invite
+            </p>
+          </div>
+        )}
+      </div>
 
       {/* Main panel — shows the voice room only when you're VIEWING it; the
           call keeps running in the background (VoicePanel) while you browse text. */}
@@ -556,7 +603,6 @@ function ChatPageInner() {
           onTogglePTT={voice.togglePTT}
           onDisconnect={voice.disconnect}
           onUserVolumeChange={voice.setUserVolume}
-          onUserRoutingMuted={voice.setUserRoutingMuted}
           onServerMute={voice.serverMuteUser}
           onServerDeafen={voice.serverDeafenUser}
           onKickFromVoice={voice.kickFromVoice}
@@ -600,6 +646,10 @@ function ChatPageInner() {
           canEditTopic={presence.userRole === "owner" || presence.userRole === "admin" || presence.userRole === "mod"}
           serverId={srv.activeServer?.id}
           blockedUserIds={blockedUserIds}
+          focusMessageId={focusMessageId}
+          onFocusHandled={() => setFocusMessageId(null)}
+          purgedMessageIds={purgedIds}
+          onJumpToMessage={jumpToMessage}
         />
       ) : (
         <div className="flex-1 flex items-center justify-center bg-[var(--panel-2)] text-[var(--muted)]">
@@ -628,6 +678,7 @@ function ChatPageInner() {
             currentUserId={auth.user?.id}
             currentUserRole={presence.userRole}
             onViewProfile={setProfileUserId}
+            onServerJoined={handleServerJoined}
           />
         </div>
       )}
@@ -636,11 +687,7 @@ function ChatPageInner() {
           serverId={srv.activeServer.id}
           blockedUserIds={blockedUserIds}
           onClose={() => setSearchOpen(false)}
-          onJumpToMessage={(channelId) => {
-            const found = srv.activeServer!.channels.find((c) => c.id === channelId);
-            if (found) ch.setActiveChannel(found);
-            setSearchOpen(false);
-          }}
+          onJumpToMessage={jumpToMessage}
         />
       )}
       </>
@@ -650,7 +697,7 @@ function ChatPageInner() {
           browsing a text channel. The call (VoicePanel) keeps running; this is how
           you mute/deafen/hang up or jump back in. Mobile-visible (the user bar isn't). */}
       {voice.activeVoiceChannel && !viewingVoiceRoom && auth.user && (
-        <div className="fixed inset-x-0 bottom-0 z-30 md:absolute md:inset-x-auto md:left-[72px] md:bottom-12 md:w-60">
+        <div className="fixed inset-x-0 bottom-16 z-30 md:absolute md:inset-x-auto md:left-[72px] md:bottom-[88px] md:w-60">
           <VoiceStatusBar
             channelName={voice.activeVoiceChannel.name}
             muted={voice.voiceState.muted}
@@ -659,6 +706,7 @@ function ChatPageInner() {
             onReturn={() => setViewingVoiceRoom(true)}
             onToggleMute={voice.toggleMute}
             onToggleDeafen={voice.toggleDeafen}
+            serverMuted={voice.voiceState.serverMuted || voice.voiceState.serverDeafened}
             onDisconnect={() => { voice.disconnect(); setViewingVoiceRoom(false); }}
           />
         </div>
@@ -680,28 +728,43 @@ function ChatPageInner() {
           onStateChange={voice.setVoiceState}
           onScreenShareChange={voice.handleScreenShareChange}
           onVideoStreamsChange={voice.handleVideoStreamsChange}
+          pttMode={voice.pttMode}
         />
       )}
 
-      {/* User bar — desktop only (hidden on mobile) */}
-      <div className="hidden md:flex absolute bottom-0 left-[72px] w-60 h-12 bg-[var(--bg)] border-t border-r border-[var(--accent-2)]/30 items-center px-3 justify-between z-10">
-        <div className="flex items-center gap-2 min-w-0">
+      {/* User bar — bottom of the channel column on desktop; inside the Channels drawer on mobile */}
+      <div
+        className={`${sidebarOpen ? "flex" : "hidden"} md:flex fixed md:absolute bottom-0 left-[72px] w-60 h-[88px] flex-col bg-[var(--panel-2)] border-t border-r border-[var(--accent-2)]/30 z-50 md:z-10`}
+      >
+        <div className="flex items-center gap-2 px-2.5 h-12 min-w-0">
           {auth.user && (
-            <div className="relative cursor-pointer" onClick={() => setStatusMenuOpen((p) => !p)}>
-              <Avatar
-                username={auth.user.username}
-                avatarUrl={auth.user.avatar}
-                size={28}
-                className="bg-[var(--accent-2)] text-[var(--text)]"
-              />
-              <div
-                className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-[var(--bg)] ${
-                  presence.myStatus === "online" ? "bg-green-500" :
-                  presence.myStatus === "idle" ? "bg-yellow-500" :
-                  presence.myStatus === "dnd" ? "bg-red-500" :
-                  "bg-gray-500"
-                }`}
-              />
+            <div
+              className="relative cursor-pointer flex items-center gap-2 min-w-0 flex-1 rounded-md px-1 py-1 hover:bg-[var(--accent-2)]/15 transition-colors"
+              onClick={() => setStatusMenuOpen((p) => !p)}
+              title="Set status"
+            >
+              <div className="relative shrink-0">
+                <Avatar
+                  username={auth.user.username}
+                  avatarUrl={auth.user.avatar}
+                  size={32}
+                  className="bg-[var(--accent-2)] text-[var(--text)]"
+                />
+                <div
+                  className={`absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 border-[var(--panel-2)] ${
+                    presence.myStatus === "online" ? "bg-green-500" :
+                    presence.myStatus === "idle" ? "bg-yellow-500" :
+                    presence.myStatus === "dnd" ? "bg-red-500" :
+                    "bg-gray-500"
+                  }`}
+                />
+              </div>
+              <div className="min-w-0 leading-tight">
+                <div className="text-sm font-semibold text-[var(--text)] truncate">{displayName(auth.user.username)}</div>
+                <div className="text-[11px] text-[var(--muted)] truncate">
+                  {statusMessage || ({ online: "Online", idle: "Idle", dnd: "Do Not Disturb", invisible: "Invisible" } as Record<string, string>)[presence.myStatus] || "Online"}
+                </div>
+              </div>
               {statusMenuOpen && (
                 <div className="absolute bottom-full left-0 mb-2 bg-[var(--panel)] border border-[var(--accent-2)]/30 rounded-lg shadow-xl py-1 w-52 z-50" onClick={(e) => e.stopPropagation()}>
                   {([
@@ -763,11 +826,16 @@ function ChatPageInner() {
               )}
             </div>
           )}
-          <span className="text-sm text-[var(--text)] truncate">
-            {auth.user ? displayName(auth.user.username) : ""}
-          </span>
+          <button
+            onClick={() => setSettingsOpen(true)}
+            className="shrink-0 p-1.5 rounded-md text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--accent-2)]/15 transition-colors"
+            title="Settings"
+            aria-label="Settings"
+          >
+            <SettingsIcon />
+          </button>
         </div>
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center justify-between px-3 h-10 border-t border-[var(--accent-2)]/20 [&>*]:shrink-0">
           <button
             onClick={() => setSearchOpen(!searchOpen)}
             className="text-[var(--muted)] hover:text-[var(--text)] transition-colors"
@@ -821,18 +889,14 @@ function ChatPageInner() {
             </button>
           )}
           <button
-            onClick={() => setSettingsOpen(true)}
-            className="text-[var(--muted)] hover:text-[var(--text)] transition-colors"
-            title="Settings"
-            aria-label="Settings"
-          >
-            <SettingsIcon />
-          </button>
-          <button
             onClick={auth.logout}
-            className="text-xs text-[var(--muted)] hover:text-[var(--danger)] transition-colors"
+            className="text-[var(--muted)] hover:text-[var(--danger)] transition-colors"
+            title="Log out"
+            aria-label="Log out"
           >
-            Logout
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" />
+            </svg>
           </button>
         </div>
       </div>
@@ -888,15 +952,7 @@ function ChatPageInner() {
           currentUserId={auth.user.id}
           onClose={() => setProfileUserId(null)}
           onMessageUser={async (uid) => {
-            const res = await fetch("/api/dm", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ targetUserId: uid }),
-            });
-            if (res.ok) {
-              setProfileUserId(null);
-              openDmPanel();
-            }
+            if (await openDmWith(uid)) setProfileUserId(null);
           }}
           onBlockChange={handleBlockChange}
         />
@@ -911,6 +967,7 @@ function ChatPageInner() {
         onAvatarChange={auth.updateAvatar}
         onInputSensitivityChange={voice.setInputSensitivity}
         onBlockChange={handleBlockChange}
+        onLogout={() => { setSettingsOpen(false); void auth.logout(); }}
       />
 
       {/* Keyboard shortcuts panel */}
@@ -928,9 +985,18 @@ function ChatPageInner() {
           isPublic={activeServerDetails.isPublic}
           welcomeMessage={activeServerDetails.welcomeMessage}
           onClose={() => setServerSettingsOpen(false)}
-          onUpdated={(updates) => {
-            if (updates.name) srv.renameActiveServer(updates.name);
-            srv.fetchServers();
+          onUpdated={(updates) => srv.updateActiveServer(updates as Partial<Server>)}
+          onDeleted={() => {
+            const deletedId = activeServerDetails.id;
+            setServerSettingsOpen(false);
+            if (voice.activeVoiceChannel && activeServerDetails.channels.some((c) => c.id === voice.activeVoiceChannel?.id)) {
+              voice.disconnect();
+              setViewingVoiceRoom(false);
+            }
+            srv.removeActiveServer();
+            const next = srv.servers.find((s) => s.id !== deletedId);
+            if (next) handleServerSelect(next);
+            else ch.setActiveChannel(null);
           }}
           hasActiveChannel={!!ch.activeChannel}
           onOpenModeration={() => { setServerSettingsOpen(false); setModerationOpen(true); }}
@@ -995,6 +1061,12 @@ function ChatPageInner() {
           channelName={ch.activeChannel.name}
           open={purgeModalOpen}
           onClose={() => setPurgeModalOpen(false)}
+          onPurged={(ids) => {
+            const channelId = ch.activeChannel?.id;
+            // Server re-checks the rows are gone before relaying the batch to the channel.
+            if (channelId) getSocket().emit("messages:purge", { channelId, messageIds: ids });
+            setPurgedIds((prev) => [...prev, ...ids]);
+          }}
         />
       )}
 

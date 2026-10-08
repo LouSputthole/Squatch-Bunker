@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { use } from "react";
 
@@ -98,8 +99,9 @@ export default function JoinPage({
     <div className="min-h-screen flex items-center justify-center bg-[var(--bg)]">
       <div className="w-full max-w-sm mx-4">
         {status === "loading" && (
-          <div className="text-center">
-            <p className="text-[var(--muted)] text-lg">Loading invite...</p>
+          <div className="bg-[var(--panel)] rounded-2xl border border-[var(--accent-2)]/30 shadow-2xl p-8 text-center">
+            <Image src="/Campfire-Icon.png" alt="" width={64} height={64} className="w-16 h-16 mx-auto mb-4 opacity-90" />
+            <p className="text-[var(--muted)] animate-pulse">Following the trail to this camp...</p>
           </div>
         )}
 
@@ -171,26 +173,31 @@ export default function JoinPage({
         )}
 
         {status === "joining" && (
-          <div className="text-center">
-            <p className="text-[var(--muted)] text-lg">Joining server...</p>
+          <div className="bg-[var(--panel)] rounded-2xl border border-[var(--accent-2)]/30 shadow-2xl p-8 text-center">
+            <Image src="/Campfire-Icon.png" alt="" width={64} height={64} className="w-16 h-16 mx-auto mb-4 opacity-90" />
+            <p className="text-[var(--muted)] animate-pulse">Pulling up a seat...</p>
           </div>
         )}
 
         {status === "success" && (
-          <div className="text-center">
-            <p className="text-[var(--text)] text-lg mb-2">You&apos;re in!</p>
-            <p className="text-[var(--muted)] text-sm">Redirecting to chat...</p>
+          <div className="bg-[var(--panel)] rounded-2xl border border-[var(--accent-2)]/30 shadow-2xl p-8 text-center">
+            <Image src="/Campfire-Icon.png" alt="" width={64} height={64} className="w-16 h-16 mx-auto mb-4 opacity-90" />
+            <p className="text-[var(--text)] text-lg font-semibold mb-1">You&apos;re in!</p>
+            <p className="text-[var(--muted)] text-sm">Heading to the fire...</p>
           </div>
         )}
 
         {status === "error" && (
-          <div className="text-center">
-            <p className="text-[var(--danger)] text-lg mb-2">{error}</p>
+          <div className="bg-[var(--panel)] rounded-2xl border border-[var(--accent-2)]/30 shadow-2xl p-8 text-center">
+            <Image src="/Campfire-Icon.png" alt="" width={64} height={64} className="w-16 h-16 mx-auto mb-4 opacity-90" />
+            <h1 className="text-xl font-bold text-[var(--text)] mb-2">This trail has gone cold</h1>
+            <p className="text-sm text-[var(--muted)]">{error || "This invite is invalid or has expired."}</p>
+            <p className="text-sm text-[var(--muted)] mb-6">Ask whoever invited you for a fresh link.</p>
             <button
               onClick={() => router.push("/chat")}
-              className="text-[var(--accent)] hover:underline text-sm"
+              className="w-full py-2.5 bg-[var(--accent-2)] text-white rounded-lg hover:bg-[var(--accent)] hover:text-[var(--bg)] transition-colors font-semibold text-sm"
             >
-              Back to chat
+              Back to camp
             </button>
           </div>
         )}
