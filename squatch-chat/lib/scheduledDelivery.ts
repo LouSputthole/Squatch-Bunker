@@ -1,5 +1,9 @@
 import { prisma } from "@/lib/db";
 import { resolveChannelAccess } from "@/lib/channelAccess";
+import {
+  createChannelMessageNotifications,
+  type NotificationRecord,
+} from "@/lib/notifications";
 
 export interface DeliveredScheduledMessage {
   id: string;
@@ -22,6 +26,8 @@ export interface ScheduledDeliveryResult {
   delivered: DeliveredScheduledMessage[];
   dropped: string[];
   failed: string[];
+  /** Mention notifications created for delivered messages, for realtime push. */
+  notifications: NotificationRecord[];
 }
 
 /**
@@ -41,7 +47,12 @@ export async function deliverDueMessages(
     take: Math.max(1, Math.min(limit, 100)),
   });
 
-  const result: ScheduledDeliveryResult = { delivered: [], dropped: [], failed: [] };
+  const result: ScheduledDeliveryResult = {
+    delivered: [],
+    dropped: [],
+    failed: [],
+    notifications: [],
+  };
 
   for (const candidate of candidates) {
     try {
@@ -75,11 +86,37 @@ export async function deliverDueMessages(
           },
           include: { author: { select: { id: true, username: true, avatar: true } } },
         });
-        return { kind: "delivered" as const, message };
+        const channel = await tx.channel.findUnique({
+          where: { id: scheduled.channelId },
+          select: { name: true },
+        });
+        return {
+          kind: "delivered" as const,
+          message,
+          serverId: access.serverId,
+          channelName: channel?.name ?? "channel",
+        };
       });
 
-      if (outcome?.kind === "delivered") result.delivered.push(outcome.message);
       if (outcome?.kind === "dropped") result.dropped.push(outcome.id);
+      if (outcome?.kind === "delivered") {
+        result.delivered.push(outcome.message);
+        // Same mention fan-out a live message gets. The message is already
+        // committed, so a notification failure must not mark it failed.
+        try {
+          result.notifications.push(...await createChannelMessageNotifications({
+            messageId: outcome.message.id,
+            channelId: outcome.message.channelId,
+            channelName: outcome.channelName,
+            serverId: outcome.serverId,
+            authorId: outcome.message.authorId,
+            authorUsername: outcome.message.author.username,
+            content: outcome.message.content,
+          }));
+        } catch (error) {
+          console.error("[Campfire] Scheduled message notifications failed:", outcome.message.id, error);
+        }
+      }
     } catch (error) {
       console.error("[Campfire] Failed to deliver scheduled message:", candidate.id, error);
       result.failed.push(candidate.id);

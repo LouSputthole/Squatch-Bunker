@@ -31,7 +31,15 @@ export async function GET() {
       const { prisma } = await import("@/lib/db");
       const user = await prisma.user.findUnique({
         where: { id: session.userId },
-        select: { id: true, username: true, email: true, avatar: true, statusMessage: true },
+        select: {
+          id: true,
+          username: true,
+          email: true,
+          avatar: true,
+          statusMessage: true,
+          isGuest: true,
+          guestExpiresAt: true,
+        },
       });
 
       if (user) {
@@ -48,6 +56,7 @@ export async function GET() {
         username: session.username,
         email: null,
         isGuest: session.userId.startsWith("guest-"),
+        guestExpiresAt: null,
       },
     });
   } catch (err) {

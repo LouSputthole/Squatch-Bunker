@@ -52,10 +52,22 @@ export async function PATCH(
     return NextResponse.json({ error: "Cannot assign this role" }, { status: 403 });
   }
 
-  const updated = await prisma.serverMember.update({
-    where: { id: target.member.id },
-    data: { role },
-  });
+  const previousRole = target.member.role;
+  const [updated] = await prisma.$transaction([
+    prisma.serverMember.update({
+      where: { id: target.member.id },
+      data: { role },
+    }),
+    prisma.auditLog.create({
+      data: {
+        serverId,
+        actorId: session.userId,
+        targetId: userId,
+        action: "member_role_change",
+        detail: `Role changed from ${previousRole} to ${role}`,
+      },
+    }),
+  ]);
   await notifyRealtimeAuthorizationChange({
     scope: "server",
     serverId,
@@ -77,6 +89,9 @@ export async function PUT(
 
   const { serverId, userId } = await params;
   const { banned } = await req.json();
+  if (typeof banned !== "boolean") {
+    return NextResponse.json({ error: "banned must be a boolean" }, { status: 400 });
+  }
 
   const permissionContext = await getPermContext(serverId, session.userId);
   if (!hasPermission("BAN_MEMBERS", permissionContext)) {
@@ -97,10 +112,20 @@ export async function PUT(
     return NextResponse.json({ error: "Member not found" }, { status: 404 });
   }
 
-  const updated = await prisma.serverMember.update({
-    where: { id: target.member.id },
-    data: { banned: !!banned, bannedAt: banned ? new Date() : null },
-  });
+  const [updated] = await prisma.$transaction([
+    prisma.serverMember.update({
+      where: { id: target.member.id },
+      data: { banned, bannedAt: banned ? new Date() : null },
+    }),
+    prisma.auditLog.create({
+      data: {
+        serverId,
+        actorId: session.userId,
+        targetId: userId,
+        action: banned ? "member_ban" : "member_unban",
+      },
+    }),
+  ]);
   await notifyRealtimeAuthorizationChange({
     scope: "member",
     serverId,
@@ -141,7 +166,22 @@ export async function DELETE(
     return NextResponse.json({ error: "Member not found" }, { status: 404 });
   }
 
-  await prisma.serverMember.delete({ where: { id: target.member.id } });
+  // The ServerMember row is the only ban record, so kicking a banned member
+  // would silently lift the ban. The banned check is part of the delete so a
+  // concurrent ban cannot slip between the read and the write.
+  const kicked = await prisma.$transaction(async (tx) => {
+    const removed = await tx.serverMember.deleteMany({
+      where: { id: target.member!.id, banned: false },
+    });
+    if (removed.count === 0) return false;
+    await tx.auditLog.create({
+      data: { serverId, actorId: session.userId, targetId: userId, action: "member_kick" },
+    });
+    return true;
+  });
+  if (!kicked) {
+    return NextResponse.json({ error: "Member is banned — unban first" }, { status: 409 });
+  }
   await notifyRealtimeAuthorizationChange({
     scope: "member",
     serverId,

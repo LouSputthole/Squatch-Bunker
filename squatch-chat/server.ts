@@ -111,16 +111,21 @@ async function main() {
     for (const message of result.delivered) {
       io.to(`channel:${message.channelId}`).emit(`message:channel:${message.channelId}`, message);
     }
+    for (const notification of result.notifications) {
+      io.to(`user:${notification.userId}`).emit("notification:new", notification);
+    }
     if (result.failed.length > 0) {
       console.error(`[Campfire] ${result.failed.length} scheduled message(s) will be retried.`);
     }
   }
 
+  const logSchedulerError = (error: unknown) =>
+    console.error("[Campfire] Scheduled delivery pass failed:", error);
   const schedulerInterval = setInterval(() => {
-    void runScheduledDelivery();
+    void runScheduledDelivery().catch(logSchedulerError);
   }, 15_000);
   schedulerInterval.unref();
-  void runScheduledDelivery();
+  void runScheduledDelivery().catch(logSchedulerError);
 
   async function runRetentionSweep() {
     const [retention, abandoned] = await Promise.all([
