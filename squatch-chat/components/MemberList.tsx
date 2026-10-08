@@ -4,11 +4,16 @@ import { useState, useEffect } from "react";
 import { truncateName, displayName } from "@/lib/utils";
 import Avatar from "@/components/Avatar";
 import ProfileCard from "@/components/ProfileCard";
+import type { Server } from "@/types/chat";
+import PromptDialog, { type PromptDialogRequest } from "@/components/PromptDialog";
+import { useEscape } from "@/hooks/useEscape";
+import { toast, toastResponseError } from "@/lib/toast";
 
+// Warm, campfire-friendly role colors (hex so the badge can append an alpha suffix).
 const ROLE_COLORS: Record<string, string> = {
-  owner: "#f59e0b",
-  admin: "#ef4444",
-  mod: "#3b82f6",
+  owner: "#f5b942",
+  admin: "#ef5d4f",
+  mod: "#7fb8a4",
   member: "",
 };
 
@@ -37,6 +42,8 @@ interface MemberListProps {
   onlineMemberIds: Set<string>;
   memberStatuses?: Map<string, string>;
   onViewProfile?: (userId: string) => void;
+  /** Called after joining another server from the invite box. Without it the page reloads. */
+  onServerJoined?: (server: Server) => void;
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -53,9 +60,13 @@ function MoonIcon() {
   );
 }
 
-export default function MemberList({ serverId, currentUserId, currentUserRole, onlineMemberIds, memberStatuses, onViewProfile }: MemberListProps) {
+export default function MemberList({ serverId, currentUserId, currentUserRole, onlineMemberIds, memberStatuses, onViewProfile, onServerJoined }: MemberListProps) {
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [dialog, setDialog] = useState<PromptDialogRequest | null>(null);
+  const [joining, setJoining] = useState(false);
   const [inviteCode, setInviteCode] = useState("");
   const [inviteAvailable, setInviteAvailable] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -67,17 +78,27 @@ export default function MemberList({ serverId, currentUserId, currentUserRole, o
   const [serverRoles, setServerRoles] = useState<{ id: string; name: string; color: string; isDefault: boolean }[]>([]);
 
   useEffect(() => {
+    let active = true;
     fetch(`/api/servers/${serverId}/members`)
-      .then((res) => res.json())
+      .then((res) => {
+        if (!res.ok) throw new Error(`members ${res.status}`);
+        return res.json();
+      })
       .then((data) => {
+        if (!active) return;
         setMembers(data.members || []);
         setInviteCode(data.inviteCode || "");
         setInviteAvailable(Boolean(data.inviteAvailable));
+        setLoadError(false);
+      })
+      .catch(() => {
+        if (active) setLoadError(true);
       })
       .finally(() => {
-        setLoading(false);
+        if (active) setLoading(false);
       });
-  }, [serverId]);
+    return () => { active = false; };
+  }, [serverId, reloadKey]);
 
   useEffect(() => {
     fetch(`/api/servers/${serverId}/roles`)
@@ -92,13 +113,24 @@ export default function MemberList({ serverId, currentUserId, currentUserRole, o
     const current = member.roleIds || [];
     const next = current.includes(roleId) ? current.filter((r) => r !== roleId) : [...current, roleId];
     setMembers((prev) => prev.map((m) => (m.id === userId ? { ...m, roleIds: next } : m))); // optimistic
-    const res = await fetch(`/api/servers/${serverId}/members/${userId}/roles`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ roleIds: next }),
-    });
-    if (!res.ok) setMembers((prev) => prev.map((m) => (m.id === userId ? { ...m, roleIds: current } : m))); // revert
+    const revert = () => setMembers((prev) => prev.map((m) => (m.id === userId ? { ...m, roleIds: current } : m)));
+    try {
+      const res = await fetch(`/api/servers/${serverId}/members/${userId}/roles`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ roleIds: next }),
+      });
+      if (!res.ok) {
+        revert();
+        await toastResponseError(res, "Failed to update roles");
+      }
+    } catch {
+      revert();
+      toast("Failed to update roles", "error");
+    }
   }
+
+  useEscape(() => setContextMenu(null), !!contextMenu);
 
   // Close context menu on click outside
   useEffect(() => {
@@ -123,37 +155,107 @@ export default function MemberList({ serverId, currentUserId, currentUserRole, o
 
   const canManage = currentUserRole === "owner" || currentUserRole === "admin";
 
+  /** Runs a member mutation; toasts the server's error and returns false on failure. */
+  async function memberRequest(userId: string, init: RequestInit, fallback: string): Promise<boolean> {
+    try {
+      const res = await fetch(`/api/servers/${serverId}/members/${userId}`, init);
+      if (!res.ok) {
+        await toastResponseError(res, fallback);
+        return false;
+      }
+      return true;
+    } catch {
+      toast(fallback, "error");
+      return false;
+    }
+  }
+
   async function handleRoleChange(userId: string, role: string) {
     setContextMenu(null);
-    const res = await fetch(`/api/servers/${serverId}/members/${userId}`, {
+    const ok = await memberRequest(userId, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ role }),
-    });
-    if (res.ok) {
+    }, "Failed to change role");
+    if (ok) {
       setMembers((prev) => prev.map((m) => m.id === userId ? { ...m, role } : m));
     }
   }
 
-  async function handleKick(userId: string) {
+  function handleKick(userId: string) {
     setContextMenu(null);
-    if (!confirm("Kick this member?")) return;
-    const res = await fetch(`/api/servers/${serverId}/members/${userId}`, { method: "DELETE" });
-    if (res.ok) {
-      setMembers((prev) => prev.filter((m) => m.id !== userId));
-    }
+    const target = members.find((m) => m.id === userId);
+    setDialog({
+      title: `Kick ${target ? displayName(target.username) : "this member"}?`,
+      message: "They'll be removed from the server but can rejoin with an invite.",
+      mode: "confirm",
+      confirmLabel: "Kick",
+      destructive: true,
+      onConfirm: async () => {
+        const ok = await memberRequest(userId, { method: "DELETE" }, "Failed to kick member");
+        if (!ok) return;
+        setMembers((prev) => prev.filter((m) => m.id !== userId));
+        setDialog(null);
+      },
+    });
   }
 
-  async function handleBan(userId: string, ban: boolean) {
-    setContextMenu(null);
-    if (ban && !confirm("Ban this member?")) return;
-    const res = await fetch(`/api/servers/${serverId}/members/${userId}`, {
+  async function applyBan(userId: string, ban: boolean): Promise<boolean> {
+    const ok = await memberRequest(userId, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ banned: ban }),
-    });
-    if (res.ok) {
+    }, ban ? "Failed to ban member" : "Failed to unban member");
+    if (ok) {
       setMembers((prev) => prev.map((m) => m.id === userId ? { ...m, banned: ban } : m));
+    }
+    return ok;
+  }
+
+  function handleBan(userId: string, ban: boolean) {
+    setContextMenu(null);
+    if (!ban) {
+      void applyBan(userId, false);
+      return;
+    }
+    const target = members.find((m) => m.id === userId);
+    setDialog({
+      title: `Ban ${target ? displayName(target.username) : "this member"}?`,
+      message: "They'll be removed and can't rejoin until unbanned.",
+      mode: "confirm",
+      confirmLabel: "Ban",
+      destructive: true,
+      onConfirm: async () => {
+        if (await applyBan(userId, true)) setDialog(null);
+      },
+    });
+  }
+
+  async function handleJoin() {
+    let code = joinCode.trim();
+    const match = code.match(/\/join\/(.+)$/);
+    if (match) code = match[1];
+    if (!code || joining) return;
+    setJoining(true);
+    try {
+      const res = await fetch("/api/servers/join", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ inviteCode: code }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setJoinError(data.error || "Failed to join server");
+        return;
+      }
+      setJoinCode("");
+      setShowInvite(false);
+      if (onServerJoined && data.server) onServerJoined(data.server);
+      else window.location.reload();
+    } catch {
+      setJoinError("Failed to join server");
+    } finally {
+      setJoining(false);
     }
   }
 
@@ -253,40 +355,34 @@ export default function MemberList({ serverId, currentUserId, currentUserRole, o
               type="text"
               value={joinCode}
               onChange={(e) => { setJoinCode(e.target.value); setJoinError(""); }}
+              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void handleJoin(); } }}
               placeholder="Paste invite code"
               className="flex-1 text-xs px-2 py-1.5 bg-[var(--panel-2)] text-[var(--text)] border border-[var(--accent-2)] rounded focus:outline-none"
             />
             <button
-              onClick={async () => {
-                let code = joinCode.trim();
-                const match = code.match(/\/join\/(.+)$/);
-                if (match) code = match[1];
-                if (!code) return;
-                const res = await fetch("/api/servers/join", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ inviteCode: code }),
-                });
-                if (res.ok) {
-                  setJoinCode("");
-                  setShowInvite(false);
-                  window.location.reload();
-                } else {
-                  const data = await res.json();
-                  setJoinError(data.error || "Failed");
-                }
-              }}
-              className="text-xs px-2 py-1.5 bg-[var(--accent-2)] text-[var(--text)] rounded hover:bg-[var(--accent)] transition-colors"
+              onClick={() => void handleJoin()}
+              disabled={joining || !joinCode.trim()}
+              className="text-xs px-2 py-1.5 bg-[var(--accent-2)] text-[var(--text)] rounded hover:bg-[var(--accent)] transition-colors disabled:opacity-50"
             >
               Join
             </button>
           </div>
-          {joinError && <p className="text-xs text-[var(--danger)]">{joinError}</p>}
+          {joinError && <p role="alert" className="text-xs text-[var(--danger)]">{joinError}</p>}
         </div>
       )}
 
       <div className="flex-1 overflow-y-auto py-2">
-        {loading && members.length === 0 ? (
+        {loadError && members.length === 0 ? (
+          <div className="px-3 py-4 text-center space-y-2" role="alert">
+            <p className="text-xs text-[var(--muted)]">Couldn&apos;t load members.</p>
+            <button
+              onClick={() => { setLoading(true); setLoadError(false); setReloadKey((k) => k + 1); }}
+              className="text-xs px-3 py-1 rounded bg-[var(--panel-2)] text-[var(--text)] hover:bg-[var(--accent-2)] transition-colors"
+            >
+              Retry
+            </button>
+          </div>
+        ) : loading && members.length === 0 ? (
           <div className="px-2 py-1 space-y-1">
             {Array.from({ length: 7 }).map((_, i) => (
               <div key={i} className="flex items-center gap-2 px-2 py-1">
@@ -329,15 +425,15 @@ export default function MemberList({ serverId, currentUserId, currentUserRole, o
             {canManage && bannedMembers.length > 0 && (
               <>
                 <div className="px-3 py-1 mt-2" id="banned-members-heading">
-                  <span className="text-xs font-semibold text-red-400/70 uppercase">
+                  <span className="text-xs font-semibold text-[var(--danger)]/80 uppercase">
                     Banned — {bannedMembers.length}
                   </span>
                 </div>
                 <ul role="list" aria-labelledby="banned-members-heading">
                   {bannedMembers.map((m) => (
                     <li key={m.id} role="listitem" className="flex items-center gap-2 px-3 py-1 opacity-40 cursor-pointer hover:bg-[var(--panel-2)]/50 rounded" onContextMenu={(e) => { e.preventDefault(); setContextMenu({ memberId: m.id, x: e.clientX, y: e.clientY }); }} aria-label={`${m.username}, banned`}>
-                      <Avatar username={m.username} avatarUrl={m.avatar} size={32} className="bg-red-900/30 text-red-400" />
-                      <span className="text-sm truncate text-red-400">{truncateName(m.username)}</span>
+                      <Avatar username={m.username} avatarUrl={m.avatar} size={32} className="bg-[var(--danger)]/20 text-[var(--danger)]" />
+                      <span className="text-sm truncate text-[var(--danger)]">{truncateName(m.username)}</span>
                     </li>
                   ))}
                 </ul>
@@ -414,15 +510,15 @@ export default function MemberList({ serverId, currentUserId, currentUserRole, o
               </div>
             )}
             <div className="border-t border-[var(--accent-2)]/20 mt-1 pt-1">
-              <button onClick={() => handleKick(target.id)} className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-red-600/10">
+              <button onClick={() => handleKick(target.id)} className="w-full text-left px-3 py-1.5 text-xs text-[var(--danger)] hover:bg-[var(--danger)]/10">
                 Kick Member
               </button>
               {target.banned ? (
-                <button onClick={() => handleBan(target.id, false)} className="w-full text-left px-3 py-1.5 text-xs text-yellow-400 hover:bg-yellow-600/10">
+                <button onClick={() => handleBan(target.id, false)} className="w-full text-left px-3 py-1.5 text-xs text-[var(--accent)] hover:bg-[var(--accent)]/10">
                   Unban Member
                 </button>
               ) : (
-                <button onClick={() => handleBan(target.id, true)} className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-red-600/10">
+                <button onClick={() => handleBan(target.id, true)} className="w-full text-left px-3 py-1.5 text-xs text-[var(--danger)] hover:bg-[var(--danger)]/10">
                   Ban Member
                 </button>
               )}
@@ -430,6 +526,8 @@ export default function MemberList({ serverId, currentUserId, currentUserRole, o
           </div>
         );
       })()}
+
+      {dialog && <PromptDialog key={dialog.title} {...dialog} onCancel={() => setDialog(null)} />}
     </div>
   );
 }

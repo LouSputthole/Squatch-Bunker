@@ -3,7 +3,9 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import Avatar from "@/components/Avatar";
 import { BlockedUsersSettings } from "@/components/BlockedUsersSettings";
+import { useEscape } from "@/hooks/useEscape";
 import { useTheme, THEMES, THEME_LABELS } from "@/hooks/useTheme";
+import { toast, toastResponseError } from "@/lib/toast";
 import {
   applyAudioOutputDevice,
   getMediaDeviceSettings,
@@ -21,6 +23,8 @@ interface SettingsModalProps {
   onAvatarChange?: (avatar: string | null) => void;
   onInputSensitivityChange?: (threshold: number) => void;
   onBlockChange?: (userId: string, blocked: boolean) => void;
+  /** Renders a "Log out" button in the Account tab when provided. */
+  onLogout?: () => void;
 }
 
 export default function SettingsModal(props: SettingsModalProps) {
@@ -28,7 +32,7 @@ export default function SettingsModal(props: SettingsModalProps) {
   return <SettingsModalContent {...props} />;
 }
 
-function SettingsModalContent({ onClose, username, currentAvatar, onAvatarChange, onInputSensitivityChange, onBlockChange }: SettingsModalProps) {
+function SettingsModalContent({ onClose, username, currentAvatar, onAvatarChange, onInputSensitivityChange, onBlockChange, onLogout }: SettingsModalProps) {
   const [initialSettings] = useState(readAudioSettings);
   const [tab, setTab] = useState<"audio" | "account" | "privacy" | "appearance">("audio");
   const { theme, setTheme, themes, customColors, setCustomColors } = useTheme();
@@ -55,6 +59,8 @@ function SettingsModalContent({ onClose, username, currentAvatar, onAvatarChange
   const animFrameRef = useRef<number | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const micTestRequestRef = useRef(0);
+
+  useEscape(onClose);
 
   useEffect(() => {
     onInputSensitivityChange?.(initialSettings.inputSensitivity ?? 15);
@@ -176,6 +182,7 @@ function SettingsModalContent({ onClose, username, currentAvatar, onAvatarChange
       console.error("[Settings] Mic test failed:", err);
       if (requestId === micTestRequestRef.current) {
         setTesting(false);
+        toast("Couldn't access your microphone. Check your browser's permission and device settings.", "error");
       }
     }
   }, [selectedInput]);
@@ -228,6 +235,7 @@ function SettingsModalContent({ onClose, username, currentAvatar, onAvatarChange
       audio?.pause();
       if (audio) audio.srcObject = null;
       void ctx?.close();
+      toast("Couldn't play through that output device", "error");
     }
   }, [outputVolume, selectedOutput]);
 
@@ -315,16 +323,17 @@ function SettingsModalContent({ onClose, username, currentAvatar, onAvatarChange
                     onClick={testing ? stopMicTest : startMicTest}
                     className={`px-4 py-2 text-sm font-semibold rounded transition-colors ${
                       testing
-                        ? "bg-red-600 hover:bg-red-700 text-white"
-                        : "bg-green-600 hover:bg-green-700 text-white"
+                        ? "bg-[var(--danger)] hover:opacity-90 text-white"
+                        : "bg-[var(--accent-2)] hover:bg-[var(--accent)] text-[var(--text)] hover:text-[var(--bg)]"
                     }`}
+                    aria-pressed={testing}
                   >
                     {testing ? "Stop Test" : "Test Mic"}
                   </button>
                   {testing && (
                     <div className="flex-1 h-4 bg-[var(--panel-2)] rounded-full overflow-hidden">
                       <div
-                        className="h-full bg-green-500 transition-all duration-75 rounded-full"
+                        className="h-full bg-[var(--accent)] transition-all duration-75 rounded-full"
                         style={{ width: `${micLevel}%` }}
                       />
                     </div>
@@ -447,8 +456,8 @@ function SettingsModalContent({ onClose, username, currentAvatar, onAvatarChange
                     className={`w-10 h-5 rounded-full transition-colors relative shrink-0 ${
                       messageNotifications ? "bg-[var(--accent)]" : "bg-[var(--panel-2)] border border-[var(--accent-2)]/30"
                     }`}
-                    title={messageNotifications ? "Disable message sounds" : "Enable message sounds"}
-                    aria-label={messageNotifications ? "Disable message notification sounds" : "Enable message notification sounds"}
+                    title={messageNotifications ? "Disable message notifications" : "Enable message notifications"}
+                    aria-label={messageNotifications ? "Disable message notifications" : "Enable message notifications"}
                     aria-pressed={messageNotifications}
                   >
                     <div className={`w-4 h-4 rounded-full bg-white absolute top-0.5 transition-transform ${
@@ -457,7 +466,7 @@ function SettingsModalContent({ onClose, username, currentAvatar, onAvatarChange
                   </button>
                 </div>
                 <p className="text-xs text-[var(--muted)] mt-1">
-                  Play a sound when a new message arrives while the tab is in the background.
+                  Chime and show a desktop notification when a new message arrives while Campfire is in the background.
                 </p>
               </div>
 
@@ -473,6 +482,8 @@ function SettingsModalContent({ onClose, username, currentAvatar, onAvatarChange
                       uiSoundsMaster ? "bg-[var(--accent)]" : "bg-[var(--panel-2)] border border-[var(--accent-2)]/30"
                     }`}
                     title={uiSoundsMaster ? "Disable UI sounds" : "Enable UI sounds"}
+                    aria-label="UI sounds"
+                    aria-pressed={uiSoundsMaster}
                   >
                     <div className={`w-4 h-4 rounded-full bg-white absolute top-0.5 transition-transform ${
                       uiSoundsMaster ? "translate-x-5" : "translate-x-0.5"
@@ -487,6 +498,8 @@ function SettingsModalContent({ onClose, username, currentAvatar, onAvatarChange
                       <label className="text-xs text-[var(--muted)]">Message sounds</label>
                       <button
                         onClick={() => setUiSoundMessages((v) => !v)}
+                        aria-label="Message sounds"
+                        aria-pressed={uiSoundMessages}
                         className={`w-8 h-4 rounded-full transition-colors relative shrink-0 ${
                           uiSoundMessages ? "bg-[var(--accent)]" : "bg-[var(--panel-2)] border border-[var(--accent-2)]/30"
                         }`}
@@ -502,6 +515,8 @@ function SettingsModalContent({ onClose, username, currentAvatar, onAvatarChange
                       <label className="text-xs text-[var(--muted)]">Voice sounds</label>
                       <button
                         onClick={() => setUiSoundVoice((v) => !v)}
+                        aria-label="Voice sounds"
+                        aria-pressed={uiSoundVoice}
                         className={`w-8 h-4 rounded-full transition-colors relative shrink-0 ${
                           uiSoundVoice ? "bg-[var(--accent)]" : "bg-[var(--panel-2)] border border-[var(--accent-2)]/30"
                         }`}
@@ -517,6 +532,8 @@ function SettingsModalContent({ onClose, username, currentAvatar, onAvatarChange
                       <label className="text-xs text-[var(--muted)]">Notification sounds</label>
                       <button
                         onClick={() => setUiSoundNotifications((v) => !v)}
+                        aria-label="Notification sounds"
+                        aria-pressed={uiSoundNotifications}
                         className={`w-8 h-4 rounded-full transition-colors relative shrink-0 ${
                           uiSoundNotifications ? "bg-[var(--accent)]" : "bg-[var(--panel-2)] border border-[var(--accent-2)]/30"
                         }`}
@@ -553,6 +570,7 @@ function SettingsModalContent({ onClose, username, currentAvatar, onAvatarChange
               username={username}
               currentAvatar={currentAvatar}
               onAvatarChange={onAvatarChange}
+              onLogout={onLogout}
             />
           )}
 
@@ -628,10 +646,12 @@ function AccountTab({
   username,
   currentAvatar,
   onAvatarChange,
+  onLogout,
 }: {
   username?: string;
   currentAvatar?: string | null;
   onAvatarChange?: (avatar: string | null) => void;
+  onLogout?: () => void;
 }) {
   const avatarSource = currentAvatar ?? null;
   const [avatarState, setAvatarState] = useState(() => ({
@@ -653,6 +673,44 @@ function AccountTab({
   const [statusSaved, setStatusSaved] = useState(false);
   const [preview, setPreview] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // Prefill the current status so the field (and Save) reflect what's set.
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/auth/me")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        const current = data?.user?.statusMessage;
+        if (!cancelled && typeof current === "string") {
+          setStatusMsg((typed) => (typed === "" ? current : typed));
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function saveStatus() {
+    setStatusSaving(true);
+    try {
+      const res = await fetch("/api/auth/me", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ statusMessage: statusMsg }),
+      });
+      if (!res.ok) {
+        await toastResponseError(res, "Couldn't save your status");
+        return;
+      }
+      setStatusSaved(true);
+      setTimeout(() => setStatusSaved(false), 2000);
+    } catch {
+      toast("Couldn't save your status", "error");
+    } finally {
+      setStatusSaving(false);
+    }
+  }
 
   async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -707,6 +765,8 @@ function AccountTab({
         setAvatar(null);
         setPreview(null);
         onAvatarChange?.(null);
+      } else {
+        setError("Failed to remove avatar.");
       }
     } catch {
       setError("Failed to remove avatar.");
@@ -749,7 +809,7 @@ function AccountTab({
               <button
                 onClick={handleRemove}
                 disabled={uploading}
-                className="px-4 py-2 bg-red-600/20 text-red-400 text-sm font-semibold rounded hover:bg-red-600/30 transition-colors disabled:opacity-50"
+                className="px-4 py-2 bg-[var(--danger)]/15 text-[var(--danger)] text-sm font-semibold rounded hover:bg-[var(--danger)]/25 transition-colors disabled:opacity-50"
               >
                 Remove
               </button>
@@ -780,21 +840,15 @@ function AccountTab({
             type="text"
             value={statusMsg}
             onChange={(e) => setStatusMsg(e.target.value.slice(0, 128))}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !statusSaving) void saveStatus();
+            }}
+            aria-label="Status message"
             placeholder="What are you up to? (max 128 chars)"
             className="flex-1 px-3 py-2 bg-[var(--panel-2)] text-[var(--text)] border border-[var(--accent-2)]/50 rounded text-sm focus:outline-none focus:border-[var(--accent-2)]"
           />
           <button
-            onClick={async () => {
-              setStatusSaving(true);
-              await fetch("/api/auth/me", {
-                method: "PATCH",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ statusMessage: statusMsg }),
-              });
-              setStatusSaving(false);
-              setStatusSaved(true);
-              setTimeout(() => setStatusSaved(false), 2000);
-            }}
+            onClick={() => void saveStatus()}
             disabled={statusSaving}
             className="px-3 py-2 bg-[var(--accent-2)] text-[var(--text)] rounded text-sm hover:bg-[var(--accent)] transition-colors disabled:opacity-50"
           >
@@ -813,10 +867,25 @@ function AccountTab({
         <p className="text-sm text-[var(--text)] bg-[var(--panel-2)] px-3 py-2 rounded border border-[var(--accent-2)]/30">
           {username || "Unknown"}
         </p>
-        <p className="text-xs text-[var(--muted)] mt-1">
-          Username changes coming soon.
-        </p>
       </div>
+
+      {onLogout && (
+        <>
+          <hr className="border-[var(--accent-2)]/20" />
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-[var(--text)]">Log out</p>
+              <p className="text-xs text-[var(--muted)]">Sign out of Campfire on this device.</p>
+            </div>
+            <button
+              onClick={onLogout}
+              className="px-4 py-2 bg-[var(--danger)]/15 text-[var(--danger)] text-sm font-semibold rounded hover:bg-[var(--danger)] hover:text-white transition-colors"
+            >
+              Log out
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }

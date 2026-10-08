@@ -1,20 +1,26 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
 import { getSocket } from "@/lib/socket";
 import { truncateName } from "@/lib/utils";
 import { sounds } from "@/lib/sounds";
+import { toast, toastResponseError } from "@/lib/toast";
+import { evaluateUploadPolicy } from "@/lib/uploadPolicy";
+import { ensureRuntimeConfig } from "@/hooks/useRuntimeConfig";
 import MessageBubble from "./MessageBubble";
 import PinnedMessagesPanel from "./PinnedMessagesPanel";
+import SavedMessagesPanel from "./SavedMessagesPanel";
 import CampJournalPanel from "./CampJournalPanel";
 import CreatePollModal from "./CreatePollModal";
 import type { PollData } from "./PollCard";
 import EmojiPicker from "./EmojiPicker";
 import GifPicker from "./GifPicker";
 import SlashCommandMenu, { SLASH_COMMANDS } from "./SlashCommandMenu";
-import MentionAutocomplete from "./MentionAutocomplete";
+import MentionAutocomplete, { filterMentionMembers } from "./MentionAutocomplete";
 import { checkAutoMod } from "./AutoModSettings";
 import { VoiceNoteRecorder } from "./VoiceNoteRecorder";
+import PromptDialog, { type PromptDialogRequest } from "./PromptDialog";
+import ChatIcon, { type ChatIconName } from "./ChatIcons";
 
 // ── Formatting toolbar ────────────────────────────────────────────────────────
 
@@ -46,11 +52,11 @@ function wrapSelection(
 
 interface FormattingToolbarProps {
   inputRef: React.RefObject<HTMLTextAreaElement | null>;
-  value: string;
   onChange: (val: string) => void;
+  onLink: () => void;
 }
 
-function FormattingToolbar({ inputRef, onChange }: FormattingToolbarProps) {
+function FormattingToolbar({ inputRef, onChange, onLink }: FormattingToolbarProps) {
   const btn =
     "text-xs px-2 py-1 rounded hover:bg-[var(--accent-2)]/20 text-[var(--muted)] hover:text-[var(--text)] font-mono transition-colors";
 
@@ -66,24 +72,6 @@ function FormattingToolbar({ inputRef, onChange }: FormattingToolbarProps) {
     if (!inputRef.current) return;
     wrapSelection(inputRef.current, "`", "`", "code", onChange);
   }
-  function applyLink() {
-    if (!inputRef.current) return;
-    const textarea = inputRef.current;
-    const start = textarea.selectionStart;
-    const end = textarea.selectionEnd;
-    const selected = textarea.value.slice(start, end) || "link text";
-    const url = window.prompt("Enter URL:", "https://");
-    if (!url) return;
-    const newVal =
-      textarea.value.slice(0, start) +
-      "[" + selected + "](" + url + ")" +
-      textarea.value.slice(end);
-    onChange(newVal);
-    setTimeout(() => {
-      textarea.focus();
-      textarea.setSelectionRange(start + 1, start + 1 + selected.length);
-    }, 0);
-  }
   function applyBullet() {
     if (!inputRef.current) return;
     const textarea = inputRef.current;
@@ -91,7 +79,7 @@ function FormattingToolbar({ inputRef, onChange }: FormattingToolbarProps) {
     const end = textarea.selectionEnd;
     if (start === end) {
       const newVal =
-        textarea.value.slice(0, start) + "\u2022 " + textarea.value.slice(end);
+        textarea.value.slice(0, start) + "• " + textarea.value.slice(end);
       onChange(newVal);
       setTimeout(() => {
         textarea.focus();
@@ -103,7 +91,7 @@ function FormattingToolbar({ inputRef, onChange }: FormattingToolbarProps) {
       const after = textarea.value.slice(end);
       const bulleted = selected
         .split("\n")
-        .map((line) => "\u2022 " + line)
+        .map((line) => "• " + line)
         .join("\n");
       onChange(before + bulleted + after);
       setTimeout(() => {
@@ -115,21 +103,71 @@ function FormattingToolbar({ inputRef, onChange }: FormattingToolbarProps) {
 
   return (
     <div className="border border-[var(--accent-2)]/30 rounded-t-lg bg-[var(--panel)] px-2 py-1 flex items-center gap-1">
-      <button type="button" onClick={applyBold} className={btn} title="Bold (Ctrl+B)">
+      <button type="button" onClick={applyBold} className={btn} title="Bold (Ctrl+B)" aria-label="Bold">
         <strong>B</strong>
       </button>
-      <button type="button" onClick={applyItalic} className={btn} title="Italic (Ctrl+I)">
+      <button type="button" onClick={applyItalic} className={btn} title="Italic (Ctrl+I)" aria-label="Italic">
         <em>I</em>
       </button>
-      <button type="button" onClick={applyCode} className={btn} title="Inline code">
+      <button type="button" onClick={applyCode} className={btn} title="Inline code" aria-label="Inline code">
         {"</>"}
       </button>
-      <button type="button" onClick={applyLink} className={btn} title="Link (Ctrl+K)">
+      <button type="button" onClick={onLink} className={btn} title="Link (select text, then Ctrl+K)" aria-label="Insert link">
         🔗
       </button>
-      <button type="button" onClick={applyBullet} className={btn} title="Bullet list">
+      <button type="button" onClick={applyBullet} className={btn} title="Bullet list" aria-label="Bullet list">
         •
       </button>
+    </div>
+  );
+}
+
+// ── Header / welcome pieces ─────────────────────────────────────────────────
+
+interface HeaderButtonProps {
+  icon: ChatIconName;
+  label: string;
+  onClick: () => void;
+  active?: boolean;
+  badge?: number;
+}
+
+function HeaderButton({ icon, label, onClick, active = false, badge = 0 }: HeaderButtonProps) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={label}
+      aria-label={label}
+      aria-pressed={active}
+      className={`relative flex h-8 w-8 items-center justify-center rounded-md transition-colors ${
+        active
+          ? "bg-[var(--accent)]/15 text-[var(--accent)]"
+          : "text-[var(--muted)] hover:bg-[var(--panel)] hover:text-[var(--text)]"
+      }`}
+    >
+      <ChatIcon name={icon} size={18} />
+      {badge > 0 && (
+        <span
+          aria-hidden="true"
+          className="absolute -right-0.5 -top-0.5 min-w-4 rounded-full bg-[var(--accent)] px-1 text-center text-[9px] font-bold leading-4 text-[var(--bg)]"
+        >
+          {badge > 99 ? "99+" : badge}
+        </span>
+      )}
+    </button>
+  );
+}
+
+function ChannelWelcome({ channelName, topic }: { channelName: string; topic: string }) {
+  return (
+    <div className="px-4 pb-4 pt-10">
+      <div className="mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-[var(--accent)]/15 text-[var(--accent)]">
+        <ChatIcon name="hash" size={34} />
+      </div>
+      <h2 className="text-2xl font-bold text-[var(--text)]">Welcome to #{channelName}!</h2>
+      <p className="mt-1 text-sm text-[var(--muted)]">This is the start of the #{channelName} channel.</p>
+      {topic && <p className="mt-1 text-sm text-[var(--text)] opacity-80">{topic}</p>}
     </div>
   );
 }
@@ -159,12 +197,18 @@ interface Message {
   replyCount?: number;
   createdAt: string;
   updatedAt?: string;
+  editedAt?: string | null;
   author: { id: string; username: string; avatar?: string | null };
   reactions?: Record<string, ReactionGroup>;
   replyTo?: ReplySnippet | null;
   poll?: PollData | null;
   pending?: boolean;
   isSystem?: boolean;
+}
+
+interface MessagePage {
+  messages?: Message[];
+  nextCursor?: string | null;
 }
 
 interface MemberInfo {
@@ -185,6 +229,54 @@ interface ChatPanelProps {
   canEditTopic?: boolean;
   serverId?: string;
   blockedUserIds?: ReadonlySet<string>;
+  /** Scroll to and highlight this message, loading older history if needed. */
+  focusMessageId?: string | null;
+  /** Called once a `focusMessageId` request was handled (found or given up). */
+  onFocusHandled?: () => void;
+  /** Ids removed by a bulk purge in this session — hidden from the list immediately. */
+  purgedMessageIds?: readonly string[];
+  /** Open a message in another channel (Saved / Camp Journal jump-to). */
+  onJumpToMessage?: (channelId: string, messageId: string) => void;
+}
+
+type SidePanel = "pins" | "journal" | "saved";
+
+const PAGE_SIZE = 50;
+const MAX_JUMP_PAGES = 10;
+const GROUP_WINDOW_MS = 5 * 60 * 1000;
+// Mirrors the server allow-list in lib/uploadPolicy.ts (voice notes use the recorder).
+const UPLOAD_ACCEPT =
+  "image/jpeg,image/png,image/gif,image/webp,application/pdf,text/plain,application/zip,.jpg,.jpeg,.png,.gif,.webp,.pdf,.txt,.zip";
+
+function isPendingMessage(message: Message): boolean {
+  return Boolean(message.pending) || message.id.startsWith("pending-");
+}
+
+function hasOlderPage(data: MessagePage, received: number): boolean {
+  // New API: nextCursor null means "no older history". Fall back to page size.
+  if (data.nextCursor !== undefined) return data.nextCursor !== null;
+  return received >= PAGE_SIZE;
+}
+
+function mentionsUser(content: string, username: string): boolean {
+  if (!content || !username) return false;
+  const lower = content.toLowerCase();
+  const token = `@${username.toLowerCase()}`;
+  let index = lower.indexOf(token);
+  while (index !== -1) {
+    const next = lower[index + token.length];
+    if (next === undefined || !/[\w#]/.test(next)) return true;
+    index = lower.indexOf(token, index + 1);
+  }
+  return false;
+}
+
+function dayKey(iso: string): string {
+  return new Date(iso).toDateString();
+}
+
+function dayLabel(iso: string): string {
+  return new Date(iso).toLocaleDateString([], { year: "numeric", month: "long", day: "numeric" });
 }
 
 // Unsent composer text survives channel switches (ChatPanelContent remounts
@@ -223,6 +315,10 @@ function ChatPanelContent({
   canEditTopic,
   serverId,
   blockedUserIds,
+  focusMessageId,
+  onFocusHandled,
+  purgedMessageIds,
+  onJumpToMessage,
 }: ChatPanelProps) {
   const topicBaseline = channelTopic ?? "";
   const [messages, setMessages] = useState<Message[]>([]);
@@ -230,12 +326,17 @@ function ChatPanelContent({
   const draftKey = `squatch:draft:${currentUserId}:${channelId}`;
   const [newMessage, setNewMessage] = useState(() => loadDraft(draftKey));
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
   const [typingUsers, setTypingUsers] = useState<Map<string, string>>(new Map());
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
   const [firstUnreadId, setFirstUnreadId] = useState<string | null>(null);
-  const [showPinnedPanel, setShowPinnedPanel] = useState(false);
-  const [showJournalPanel, setShowJournalPanel] = useState(false);
+  const [sidePanel, setSidePanel] = useState<SidePanel | null>(null);
   const [showPollModal, setShowPollModal] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [promptRequest, setPromptRequest] = useState<PromptDialogRequest | null>(null);
   const [threadParent, setThreadParent] = useState<{ id: string; author: { id: string; username: string } } | null>(null);
   const [threadMessages, setThreadMessages] = useState<Message[]>([]);
   const [threadInput, setThreadInput] = useState("");
@@ -269,16 +370,25 @@ function ChatPanelContent({
     });
   }
   const [topicDraft, setTopicDraft] = useState("");
+  const scrollRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messageRefs = useRef<Map<string, HTMLDivElement>>(new Map());
-  const lastReadIdRef = useRef<string | null>(null);
+  const messagesRef = useRef<Message[]>([]);
+  const threadMessagesRef = useRef<Message[]>([]);
+  const threadParentIdRef = useRef<string | null>(null);
+  const hasMoreRef = useRef(false);
+  const loadingOlderRef = useRef(false);
+  const nearBottomRef = useRef(true);
+  const initialScrollPendingRef = useRef(false);
+  const restoreScrollRef = useRef<number | null>(null);
+  const pendingFocusRef = useRef<string | null>(null);
+  const onFocusHandledRef = useRef(onFocusHandled);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isTypingRef = useRef(false);
   const userTypingTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const [uploadProgress, setUploadProgress] = useState(0);
   const uploading = uploadProgress > 0;
   const [isDragging, setIsDragging] = useState(false);
-  const [multiFileToast, setMultiFileToast] = useState(false);
   const [slowRemaining, setSlowRemaining] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -293,24 +403,50 @@ function ChatPanelContent({
   const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pendingIdCounter = useRef(0);
 
-  const scrollToBottom = useCallback(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+  useEffect(() => {
+    threadMessagesRef.current = threadMessages;
+  }, [threadMessages]);
+  useEffect(() => {
+    onFocusHandledRef.current = onFocusHandled;
+  });
+
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
+    messagesEndRef.current?.scrollIntoView({ behavior });
   }, []);
 
-  const scrollToMessage = useCallback((messageId: string) => {
+  /** Scroll a rendered message into view; `highlight` replays the glow animation. */
+  const scrollToMessage = useCallback((messageId: string, highlight = true) => {
     const el = messageRefs.current.get(messageId);
-    if (el) {
-      el.scrollIntoView({ behavior: "smooth", block: "center" });
-      el.classList.add("ring-1", "ring-[var(--accent-2)]", "rounded");
-      setTimeout(() => el.classList.remove("ring-1", "ring-[var(--accent-2)]", "rounded"), 1500);
+    if (!el) return false;
+    el.scrollIntoView({ behavior: highlight ? "smooth" : "auto", block: highlight ? "center" : "nearest" });
+    if (highlight) {
+      el.classList.remove("animate-search-highlight");
+      void el.offsetWidth; // restart the animation
+      el.classList.add("animate-search-highlight");
+      setTimeout(() => el.classList.remove("animate-search-highlight"), 2000);
     }
+    return true;
   }, []);
 
-
+  function updateHasMore(value: boolean) {
+    hasMoreRef.current = value;
+    setHasMore(value);
+  }
 
   useEffect(() => {
     saveDraft(draftKey, newMessage);
   }, [draftKey, newMessage]);
+
+  // Composer grows with its content up to ~8 lines.
+  useLayoutEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(Math.max(el.scrollHeight, 44), 200)}px`;
+  }, [newMessage]);
 
   // Fetch server members for @mention autocomplete
   useEffect(() => {
@@ -349,42 +485,194 @@ function ChatPanelContent({
     return () => controller.abort();
   }, []);
 
-  // Load message history
+  // Load the newest page of history
   useEffect(() => {
     const controller = new AbortController();
-    let scrollTimer: ReturnType<typeof setTimeout> | null = null;
 
-    fetch(`/api/messages?channelId=${channelId}`, { signal: controller.signal })
+    fetch(`/api/messages?channelId=${encodeURIComponent(channelId)}`, { signal: controller.signal })
       .then((res) => {
         if (!res.ok) throw new Error("Failed to load messages");
         return res.json();
       })
-      .then((data) => {
-        const msgs: Message[] = data.messages || [];
-        setMessages(msgs);
-        lastReadIdRef.current = msgs.length > 0 ? msgs[msgs.length - 1].id : null;
+      .then((data: MessagePage) => {
+        const page: Message[] = data.messages || [];
+        const known = new Set(page.map((m) => m.id));
+        // Keep anything that arrived over the socket (or was sent) while loading.
+        setMessages((prev) => [...page, ...prev.filter((m) => !known.has(m.id))]);
+        updateHasMore(hasOlderPage(data, page.length));
+        setLoadError(false);
         setLoading(false);
-        scrollTimer = setTimeout(scrollToBottom, 100);
+        initialScrollPendingRef.current = true;
       })
       .catch((error: unknown) => {
         if (!(error instanceof DOMException && error.name === "AbortError")) {
+          setLoadError(true);
           setLoading(false);
         }
       });
 
+    return () => controller.abort();
+  }, [channelId, reloadKey]);
+
+  // Scroll bookkeeping that must happen before paint: jump to the bottom after
+  // the first page renders, and keep the viewport anchored when older pages
+  // are prepended above it.
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    if (initialScrollPendingRef.current && !loading) {
+      initialScrollPendingRef.current = false;
+      el.scrollTop = el.scrollHeight;
+      nearBottomRef.current = true;
+      // Late-loading images/embeds can grow the list — settle at the bottom again.
+      const settle = setTimeout(() => {
+        if (nearBottomRef.current) el.scrollTop = el.scrollHeight;
+      }, 300);
+      return () => clearTimeout(settle);
+    }
+    const restore = restoreScrollRef.current;
+    if (restore !== null) {
+      restoreScrollRef.current = null;
+      el.scrollTop = el.scrollHeight - restore;
+    }
+  }, [messages, loading]);
+
+  // A jump target that just got loaded: scroll to it once it is in the DOM.
+  useEffect(() => {
+    const target = pendingFocusRef.current;
+    if (target && scrollToMessage(target)) pendingFocusRef.current = null;
+  }, [messages, scrollToMessage]);
+
+  const loadOlder = useCallback(async (): Promise<Message[] | null> => {
+    if (loadingOlderRef.current || !hasMoreRef.current) return null;
+    const oldest = messagesRef.current.find((m) => !isPendingMessage(m));
+    if (!oldest) return null;
+    loadingOlderRef.current = true;
+    setLoadingOlder(true);
+    try {
+      const res = await fetch(
+        `/api/messages?channelId=${encodeURIComponent(channelId)}&cursor=${encodeURIComponent(oldest.id)}`,
+      );
+      if (!res.ok) {
+        await toastResponseError(res, "Couldn't load older messages");
+        return null;
+      }
+      const data = (await res.json()) as MessagePage;
+      const older = data.messages || [];
+      const more = hasOlderPage(data, older.length);
+      hasMoreRef.current = more;
+      setHasMore(more);
+      const el = scrollRef.current;
+      restoreScrollRef.current = el ? el.scrollHeight - el.scrollTop : null;
+      setMessages((prev) => {
+        const known = new Set(prev.map((m) => m.id));
+        return [...older.filter((m) => !known.has(m.id)), ...prev];
+      });
+      return older;
+    } catch {
+      toast("Couldn't load older messages", "error");
+      return null;
+    } finally {
+      loadingOlderRef.current = false;
+      setLoadingOlder(false);
+    }
+  }, [channelId]);
+
+  /**
+   * Scroll to a message, paging back through history until it is loaded.
+   * Gives up (with a toast) after MAX_JUMP_PAGES pages or at the channel start.
+   */
+  const jumpToMessage = useCallback(async (messageId: string): Promise<boolean> => {
+    if (messagesRef.current.some((m) => m.id === messageId)) {
+      if (!scrollToMessage(messageId)) pendingFocusRef.current = messageId;
+      return true;
+    }
+    let pages = 0;
+    let waits = 0;
+    while (pages < MAX_JUMP_PAGES && hasMoreRef.current) {
+      if (loadingOlderRef.current) {
+        // A scroll-triggered page is already in flight — let it land first.
+        if (++waits > 50) break;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        if (messagesRef.current.some((m) => m.id === messageId)) break;
+        continue;
+      }
+      const older = await loadOlder();
+      if (older === null) break;
+      pages += 1;
+      if (older.some((m) => m.id === messageId)) {
+        pendingFocusRef.current = messageId;
+        return true;
+      }
+    }
+    if (messagesRef.current.some((m) => m.id === messageId)) {
+      if (!scrollToMessage(messageId)) pendingFocusRef.current = messageId;
+      return true;
+    }
+    toast("Message is too old to jump to", "info");
+    return false;
+  }, [loadOlder, scrollToMessage]);
+
+  // Jump requests from outside (search results, saved messages in another channel).
+  useEffect(() => {
+    if (!focusMessageId || loading) return;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      void jumpToMessage(focusMessageId).finally(() => {
+        if (!cancelled) onFocusHandledRef.current?.();
+      });
+    }, 0);
     return () => {
-      controller.abort();
-      if (scrollTimer) clearTimeout(scrollTimer);
+      cancelled = true;
+      clearTimeout(timer);
     };
-  }, [channelId, scrollToBottom]);
+  }, [focusMessageId, loading, jumpToMessage]);
+
+  function handleLogScroll() {
+    const el = scrollRef.current;
+    if (!el) return;
+    nearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 150;
+    if (el.scrollTop < 200 && hasMoreRef.current && !loadingOlderRef.current && !loading) {
+      void loadOlder();
+    }
+  }
 
   // Socket.IO realtime
   useEffect(() => {
     const socket = getSocket();
     socket.emit("channel:join", channelId);
 
+    function clearTypingFor(userId: string) {
+      setTypingUsers((prev) => {
+        if (!prev.has(userId)) return prev;
+        const next = new Map(prev);
+        next.delete(userId);
+        return next;
+      });
+      // Clear safety timeout for the user who just sent a message
+      const safetyTimeout = userTypingTimeoutsRef.current.get(userId);
+      if (safetyTimeout) {
+        clearTimeout(safetyTimeout);
+        userTypingTimeoutsRef.current.delete(userId);
+      }
+    }
 
     function handleChannelMessage(message: Message) {
+      clearTypingFor(message.author.id);
+
+      // Thread replies: bump the parent's count and feed an open thread panel.
+      if (message.parentMessageId) {
+        const parentId = message.parentMessageId;
+        if (threadMessagesRef.current.some((m) => m.id === message.id)) return;
+        if (threadParentIdRef.current === parentId) {
+          setThreadMessages((prev) => (prev.some((m) => m.id === message.id) ? prev : [...prev, message]));
+        }
+        setMessages((prev) =>
+          prev.map((m) => (m.id === parentId ? { ...m, replyCount: (m.replyCount ?? 0) + 1 } : m)),
+        );
+        return;
+      }
+
       // Mark first incoming message as the unread boundary (only for others' messages)
       if (message.author.id !== currentUserId) {
         setFirstUnreadId((prev) => prev ?? message.id);
@@ -393,42 +681,45 @@ function ChatPanelContent({
         if (prev.some((m) => m.id === message.id)) return prev;
         return [...prev, message];
       });
-      setTypingUsers((prev) => {
-        const next = new Map(prev);
-        next.delete(message.author.id);
-        return next;
-      });
-      // Clear safety timeout for the user who just sent a message
-      const safetyTimeout = userTypingTimeoutsRef.current.get(message.author.id);
-      if (safetyTimeout) {
-        clearTimeout(safetyTimeout);
-        userTypingTimeoutsRef.current.delete(message.author.id);
-      }
-      setTimeout(scrollToBottom, 100);
+      // Don't yank someone reading history back down to the bottom.
+      if (nearBottomRef.current) setTimeout(() => scrollToBottom(), 50);
       // Play sound when message is from someone else
       if (message.author.id !== currentUserId) {
         sounds.messageReceived();
       }
     }
 
-    function handleMessageEdited(data: { messageId: string; content: string; updatedAt: string }) {
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === data.messageId
-            ? { ...m, content: data.content, updatedAt: data.updatedAt }
-            : m
-        )
-      );
+    function handleMessageEdited(data: { messageId: string; content: string; updatedAt?: string; editedAt?: string | null }) {
+      const editedAt = data.editedAt ?? data.updatedAt ?? new Date().toISOString();
+      const patch = (m: Message) => (m.id === data.messageId ? { ...m, content: data.content, editedAt } : m);
+      setMessages((prev) => prev.map(patch));
+      setThreadMessages((prev) => prev.map(patch));
     }
 
-    function handleMessageDeleted(data: { messageId: string }) {
-      setMessages((prev) => prev.filter((m) => m.id !== data.messageId));
+    function handleMessageDeleted(data: { messageId?: string; messageIds?: string[] }) {
+      const ids = new Set<string>(Array.isArray(data.messageIds) ? data.messageIds : []);
+      if (data.messageId) ids.add(data.messageId);
+      if (ids.size === 0) return;
+      const removedReplies = threadMessagesRef.current.filter((m) => ids.has(m.id));
+      setMessages((prev) =>
+        prev
+          .filter((m) => !ids.has(m.id))
+          .map((m) => {
+            const removed = removedReplies.filter((r) => r.parentMessageId === m.id).length;
+            return removed > 0 ? { ...m, replyCount: Math.max(0, (m.replyCount ?? 0) - removed) } : m;
+          }),
+      );
+      setThreadMessages((prev) => prev.filter((m) => !ids.has(m.id)));
+      if (threadParentIdRef.current && ids.has(threadParentIdRef.current)) {
+        threadParentIdRef.current = null;
+        setThreadParent(null);
+      }
     }
 
     function handleReactionUpdate(data: { messageId: string; reactions: Record<string, ReactionGroup> }) {
-      setMessages((prev) =>
-        prev.map((m) => (m.id === data.messageId ? { ...m, reactions: data.reactions } : m))
-      );
+      const patch = (m: Message) => (m.id === data.messageId ? { ...m, reactions: data.reactions } : m);
+      setMessages((prev) => prev.map(patch));
+      setThreadMessages((prev) => prev.map(patch));
     }
 
     function handlePollUpdate(poll: PollData) {
@@ -526,6 +817,33 @@ function ChatPanelContent({
     }, 3000);
   }
 
+  function requestLink() {
+    const textarea = inputRef.current;
+    if (!textarea) return;
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const selected = textarea.value.slice(start, end) || "link text";
+    setPromptRequest({
+      title: "Insert link",
+      label: "URL",
+      defaultValue: "https://",
+      confirmLabel: "Insert",
+      onConfirm: (raw) => {
+        const url = raw.trim();
+        if (!/^(https?:\/\/\S+|mailto:\S+)$/i.test(url)) {
+          toast("Links need to start with http://, https:// or mailto:", "error");
+          return;
+        }
+        setPromptRequest(null);
+        setNewMessage((current) => current.slice(0, start) + `[${selected}](${url})` + current.slice(end));
+        setTimeout(() => {
+          textarea.focus();
+          textarea.setSelectionRange(start + 1, start + 1 + selected.length);
+        }, 0);
+      },
+    });
+  }
+
   async function handleTranslate(messageId: string, text: string) {
     if (translations.has(messageId)) {
       setTranslations((prev) => { const next = new Map(prev); next.delete(messageId); return next; });
@@ -537,14 +855,22 @@ function ChatPanelContent({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text, target: "en" }),
       });
-      if (res.ok) {
-        const data = await res.json();
-        setTranslations((prev) => new Map(prev).set(messageId, data.translatedText));
+      if (!res.ok) {
+        await toastResponseError(res, "Translation failed");
+        return;
       }
-    } catch { /* ignore */ }
+      const data = await res.json();
+      if (typeof data.translatedText !== "string" || !data.translatedText) {
+        toast("Translation failed", "error");
+        return;
+      }
+      setTranslations((prev) => new Map(prev).set(messageId, data.translatedText));
+    } catch {
+      toast("Translation failed — check your connection", "error");
+    }
   }
 
-  async function handleBookmark(messageId: string, bookmarked: boolean) {
+  async function handleBookmark(messageId: string, bookmarked: boolean): Promise<boolean> {
     try {
       const response = await fetch("/api/bookmarks", {
         method: bookmarked ? "POST" : "DELETE",
@@ -552,10 +878,8 @@ function ChatPanelContent({
         body: JSON.stringify({ messageId }),
       });
       if (!response.ok) {
-        const body = (await response.json().catch(() => null)) as {
-          error?: string;
-        } | null;
-        throw new Error(body?.error || "Could not update bookmark");
+        await toastResponseError(response, "Could not update your saved messages");
+        return false;
       }
 
       setBookmarkedMessageIds((current) => {
@@ -567,26 +891,44 @@ function ChatPanelContent({
         }
         return next;
       });
-    } catch (error) {
-      alert(error instanceof Error ? error.message : "Could not update bookmark");
+      toast(bookmarked ? "Saved — find it under Saved in the channel header" : "Removed from Saved", "success");
+      return true;
+    } catch {
+      toast("Could not update your saved messages", "error");
+      return false;
     }
   }
 
-  async function handleJournal(messageId: string) {
+  function handleJournal(messageId: string) {
     if (!serverId) return;
-    const note = window.prompt("Optional private note for your Camp Journal:", "");
-    if (note === null) return;
-    const response = await fetch(`/api/servers/${serverId}/journal`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messageId, note }),
+    setPromptRequest({
+      title: "Save to Camp Journal",
+      message: "Keep this message in your private Camp Journal. Add a note if you like.",
+      mode: "textarea",
+      label: "Note (optional)",
+      placeholder: "Why this one matters…",
+      allowEmpty: true,
+      maxLength: 500,
+      confirmLabel: "Save keepsake",
+      onConfirm: async (note) => {
+        try {
+          const response = await fetch(`/api/servers/${serverId}/journal`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ messageId, note: note.trim() }),
+          });
+          if (!response.ok) {
+            await toastResponseError(response, "Could not save this keepsake");
+            return;
+          }
+          setPromptRequest(null);
+          toast("Saved to your Camp Journal", "success");
+          setSidePanel("journal");
+        } catch {
+          toast("Could not save this keepsake", "error");
+        }
+      },
     });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      alert(data.error || "Could not save this keepsake");
-      return;
-    }
-    setShowJournalPanel(true);
   }
 
   function handlePollCreated(value: unknown) {
@@ -594,16 +936,40 @@ function ChatPanelContent({
     if (!message?.id || !message.author) return;
     setMessages((current) => current.some((item) => item.id === message.id) ? current : [...current, message]);
     getSocket().emit("message:send", { channelId, message });
-    setTimeout(scrollToBottom, 50);
+    setTimeout(() => scrollToBottom(), 50);
   }
 
-  function jumpFromJournal(sourceChannelId: string, messageId: string) {
-    if (sourceChannelId !== channelId) {
-      alert("Open the source channel to jump to this keepsake.");
+  /** Jump-to from a side panel: same channel scrolls here, otherwise ask the page to switch. */
+  function jumpFromPanel(sourceChannelId: string, messageId: string) {
+    if (sourceChannelId === channelId) {
+      setSidePanel(null);
+      void jumpToMessage(messageId);
       return;
     }
-    scrollToMessage(messageId);
-    setShowJournalPanel(false);
+    if (onJumpToMessage) {
+      onJumpToMessage(sourceChannelId, messageId);
+      return;
+    }
+    toast("Open that message's channel to jump to it.", "info");
+  }
+
+  function togglePanel(panel: SidePanel) {
+    setSidePanel((current) => (current === panel ? null : panel));
+  }
+
+  function editLastOwnMessage(): boolean {
+    const last = [...messagesRef.current]
+      .reverse()
+      .find((m) => m.author.id === currentUserId && !isPendingMessage(m) && !m.isSystem && !m.poll && !m.parentMessageId && m.content);
+    if (!last) return false;
+    setEditingId(last.id);
+    setTimeout(() => scrollToMessage(last.id, false), 0);
+    return true;
+  }
+
+  function handleEditingChange(messageId: string, editing: boolean) {
+    setEditingId((current) => (editing ? messageId : current === messageId ? null : current));
+    if (!editing) setTimeout(() => inputRef.current?.focus(), 0);
   }
 
   async function handleSend(e: React.FormEvent) {
@@ -616,7 +982,7 @@ function ChatPanelContent({
     if (serverId) {
       const automod = checkAutoMod(serverId, content);
       if (automod.blocked) {
-        alert(`Message blocked by auto-mod: contains "${automod.word}"`);
+        toast(`Not sent — your Word Filter blocks "${automod.word}"`, "error");
         return;
       }
     }
@@ -633,6 +999,8 @@ function ChatPanelContent({
       }
     }
     setNewMessage("");
+    setSlashQuery(null);
+    setMentionQuery(null);
     setFirstUnreadId(null);
 
     // Stop typing
@@ -656,7 +1024,13 @@ function ChatPanelContent({
       pending: true,
     };
     setMessages((prev) => [...prev, optimisticMsg]);
-    setTimeout(scrollToBottom, 50);
+    nearBottomRef.current = true;
+    setTimeout(() => scrollToBottom(), 50);
+
+    function revert() {
+      setMessages((prev) => prev.filter((m) => m.id !== tempId));
+      setNewMessage((cur) => (cur.trim() ? cur : content));
+    }
 
     try {
       const res = await fetch("/api/messages", {
@@ -690,20 +1064,30 @@ function ChatPanelContent({
           }, 1000);
         }
       } else {
-        // Remove failed optimistic message and surface the error
-        setMessages((prev) => prev.filter((m) => m.id !== tempId));
-        setNewMessage((cur) => (cur.trim() ? cur : content));
-        alert("Failed to send message. Please try again.");
+        // Remove failed optimistic message and surface the server's reason
+        revert();
+        await toastResponseError(res, "Failed to send message. Please try again.");
       }
     } catch {
       // Network failure — revert the optimistic message so it isn't stuck pending
-      setMessages((prev) => prev.filter((m) => m.id !== tempId));
-      setNewMessage((cur) => (cur.trim() ? cur : content));
-      alert("Failed to send message. Please try again.");
+      revert();
+      toast("Failed to send message — check your connection.", "error");
     }
   }
 
   async function handleEdit(messageId: string, newContent: string) {
+    const previous = [...messagesRef.current, ...threadMessagesRef.current].find((m) => m.id === messageId);
+    if (!previous) return;
+    const optimisticEditedAt = new Date().toISOString();
+    // Merge only the edited fields — never replace the whole message object.
+    const applyEdit = (content: string, editedAt: string | null | undefined) => (m: Message) =>
+      m.id === messageId ? { ...m, content, editedAt } : m;
+    const applyBoth = (content: string, editedAt: string | null | undefined) => {
+      setMessages((prev) => prev.map(applyEdit(content, editedAt)));
+      setThreadMessages((prev) => prev.map(applyEdit(content, editedAt)));
+    };
+    applyBoth(newContent, optimisticEditedAt);
+
     try {
       const res = await fetch(`/api/messages/${messageId}`, {
         method: "PATCH",
@@ -711,24 +1095,26 @@ function ChatPanelContent({
         body: JSON.stringify({ content: newContent }),
       });
 
-      if (res.ok) {
-        const { message } = await res.json();
-        setMessages((prev) =>
-          prev.map((m) => (m.id === messageId ? message : m))
-        );
-        // Broadcast edit
-        const socket = getSocket();
-        socket.emit("message:edit", {
-          channelId,
-          messageId,
-          content: newContent,
-          updatedAt: message.updatedAt,
-        });
-      } else {
-        alert("Failed to edit message. Please try again.");
+      if (!res.ok) {
+        applyBoth(previous.content, previous.editedAt);
+        await toastResponseError(res, "Failed to edit message. Please try again.");
+        return;
       }
+      const data = (await res.json().catch(() => null)) as { message?: { content?: unknown; editedAt?: unknown; updatedAt?: unknown } } | null;
+      const saved = data?.message;
+      const content = typeof saved?.content === "string" ? saved.content : newContent;
+      const editedAt = typeof saved?.editedAt === "string" ? saved.editedAt : optimisticEditedAt;
+      applyBoth(content, editedAt);
+      // Broadcast edit (the realtime server re-reads the row before relaying)
+      getSocket().emit("message:edit", {
+        channelId,
+        messageId,
+        content,
+        updatedAt: typeof saved?.updatedAt === "string" ? saved.updatedAt : editedAt,
+      });
     } catch {
-      alert("Failed to edit message. Please try again.");
+      applyBoth(previous.content, previous.editedAt);
+      toast("Failed to edit message — check your connection.", "error");
     }
   }
 
@@ -740,18 +1126,18 @@ function ChatPanelContent({
         body: JSON.stringify({ emoji }),
       });
 
-      if (res.ok) {
-        const { reactions } = await res.json();
-        setMessages((prev) =>
-          prev.map((m) => (m.id === messageId ? { ...m, reactions } : m))
-        );
-        // Broadcast reaction update
-        const socket = getSocket();
-        socket.emit("message:react", { channelId, messageId, reactions });
+      if (!res.ok) {
+        await toastResponseError(res, "Failed to add reaction");
+        return;
       }
+      const { reactions } = await res.json();
+      const patch = (m: Message) => (m.id === messageId ? { ...m, reactions } : m);
+      setMessages((prev) => prev.map(patch));
+      setThreadMessages((prev) => prev.map(patch));
+      // Broadcast reaction update
+      getSocket().emit("message:react", { channelId, messageId, reactions });
     } catch {
-      // Network failure — reaction not applied; nothing optimistic to revert
-      alert("Failed to add reaction. Please try again.");
+      toast("Failed to add reaction — check your connection.", "error");
     }
   }
 
@@ -761,47 +1147,81 @@ function ChatPanelContent({
         method: "DELETE",
       });
 
-      if (res.ok) {
-        setMessages((prev) => prev.filter((m) => m.id !== messageId));
-        // Broadcast delete
-        const socket = getSocket();
-        socket.emit("message:delete", { channelId, messageId });
-      } else {
-        alert("Failed to delete message. Please try again.");
+      if (!res.ok) {
+        await toastResponseError(res, "Failed to delete message");
+        return;
       }
+      const reply = threadMessagesRef.current.find((m) => m.id === messageId);
+      setMessages((prev) =>
+        prev
+          .filter((m) => m.id !== messageId)
+          .map((m) =>
+            reply && m.id === reply.parentMessageId
+              ? { ...m, replyCount: Math.max(0, (m.replyCount ?? 0) - 1) }
+              : m,
+          ),
+      );
+      setThreadMessages((prev) => prev.filter((m) => m.id !== messageId));
+      if (threadParentIdRef.current === messageId) {
+        threadParentIdRef.current = null;
+        setThreadParent(null);
+      }
+      setEditingId((current) => (current === messageId ? null : current));
+      // Broadcast delete
+      getSocket().emit("message:delete", { channelId, messageId });
     } catch {
-      alert("Failed to delete message. Please try again.");
+      toast("Failed to delete message — check your connection.", "error");
     }
   }
 
   async function handlePin(messageId: string, pinned: boolean) {
-    const res = await fetch(`/api/messages/${messageId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ pinned }),
-    });
-    if (res.ok) {
+    try {
+      const res = await fetch(`/api/messages/${messageId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pinned }),
+      });
+      if (!res.ok) {
+        await toastResponseError(res, pinned ? "Couldn't pin that message" : "Couldn't unpin that message");
+        return;
+      }
+      // Only the pin flag changes — keep editedAt etc. untouched.
       setMessages((prev) =>
         prev.map((m) => (m.id === messageId ? { ...m, pinned } : m))
       );
+      toast(pinned ? "Message pinned" : "Message unpinned", "success");
+    } catch {
+      toast("Couldn't update the pin — check your connection.", "error");
     }
   }
 
   async function openThread(messageId: string, author: { id: string; username: string }) {
+    threadParentIdRef.current = messageId;
     setThreadParent({ id: messageId, author });
     setThreadMessages([]);
     setThreadLoading(true);
     try {
-      const res = await fetch(`/api/messages?channelId=${channelId}&parentId=${messageId}`);
-      if (res.ok) {
-        const { messages: replies } = await res.json();
-        setThreadMessages(replies || []);
+      const res = await fetch(`/api/messages?channelId=${encodeURIComponent(channelId)}&parentId=${encodeURIComponent(messageId)}`);
+      if (threadParentIdRef.current !== messageId) return;
+      if (!res.ok) {
+        await toastResponseError(res, "Couldn't load this thread");
+        return;
       }
+      const { messages: replies } = (await res.json()) as MessagePage;
+      if (threadParentIdRef.current !== messageId) return;
+      const page = replies || [];
+      const known = new Set(page.map((m) => m.id));
+      setThreadMessages((prev) => [...page, ...prev.filter((m) => !known.has(m.id))]);
     } catch {
-      // Network failure — leave the thread empty rather than stuck loading
+      if (threadParentIdRef.current === messageId) toast("Couldn't load this thread", "error");
     } finally {
-      setThreadLoading(false);
+      if (threadParentIdRef.current === messageId) setThreadLoading(false);
     }
+  }
+
+  function closeThread() {
+    threadParentIdRef.current = null;
+    setThreadParent(null);
   }
 
   async function sendThreadMessage(e: React.FormEvent) {
@@ -818,20 +1238,25 @@ function ChatPanelContent({
       });
       if (res.ok) {
         const { message } = await res.json();
-        setThreadMessages((prev) => [...prev, message]);
+        if (threadParentIdRef.current === parentId) {
+          setThreadMessages((prev) => (prev.some((m) => m.id === message.id) ? prev : [...prev, message]));
+        }
         setMessages((prev) =>
           prev.map((m) =>
             m.id === parentId ? { ...m, replyCount: (m.replyCount ?? 0) + 1 } : m
           )
         );
+        // Same relay as a normal send — other clients bump the count / live thread.
+        getSocket().emit("message:send", { channelId, message });
+        sounds.messageSent();
       } else {
         // Restore the unsent reply so it isn't silently lost
         setThreadInput((cur) => (cur.trim() ? cur : content));
-        alert("Failed to send reply. Please try again.");
+        await toastResponseError(res, "Failed to send reply. Please try again.");
       }
     } catch {
       setThreadInput((cur) => (cur.trim() ? cur : content));
-      alert("Failed to send reply. Please try again.");
+      toast("Failed to send reply — check your connection.", "error");
     }
   }
 
@@ -858,10 +1283,10 @@ function ChatPanelContent({
             reject(new Error("Upload response was incomplete"));
           }
         } else {
-          reject(new Error(response.error || "Upload failed"));
+          reject(new Error(response.error || (xhr.status === 413 ? "File too large for this server." : "Upload failed")));
         }
       });
-      xhr.addEventListener("error", () => reject(new Error("Upload failed")));
+      xhr.addEventListener("error", () => reject(new Error("Upload failed — check your connection.")));
       xhr.open("POST", "/api/attachments");
       xhr.send(formData);
     });
@@ -894,7 +1319,8 @@ function ChatPanelContent({
 
       const { message } = await res.json();
       setMessages((prev) => [...prev, message]);
-      setTimeout(scrollToBottom, 50);
+      nearBottomRef.current = true;
+      setTimeout(() => scrollToBottom(), 50);
       getSocket().emit("message:send", { channelId, message });
     } finally {
       setUploadProgress(0);
@@ -907,27 +1333,30 @@ function ChatPanelContent({
     if (file) void handleFileDrop(file);
   }
 
+  /** Client-side mirror of the server's upload policy so bad files fail fast with the same message. */
+  async function uploadAllowed(file: File): Promise<boolean> {
+    const config = await ensureRuntimeConfig();
+    const configured = (config as { maxUploadBytes?: unknown }).maxUploadBytes;
+    const maxBytes = typeof configured === "number" && configured > 0 ? configured : Number.POSITIVE_INFINITY;
+    const policy = evaluateUploadPolicy({ name: file.name, type: file.type, size: file.size }, maxBytes);
+    if (!policy.allowed) {
+      toast(policy.error, "error");
+      return false;
+    }
+    return true;
+  }
+
   async function handleFileDrop(file: File) {
     if (slowRemaining > 0) {
-      alert(`Slow mode: wait ${slowRemaining}s to send again`);
+      toast(`Slow mode is on — wait ${slowRemaining}s to send again`, "info");
       return;
     }
-    if (file.size > 10 * 1024 * 1024) {
-      alert("File too large. Maximum size is 10MB. Videos are supported but must be under 10MB.");
-      return;
-    }
+    if (!(await uploadAllowed(file))) return;
     setUploadProgress(1);
     try {
       const formData = new FormData();
       formData.append("file", file);
-      let uploadResult: { attachmentId: string; url: string; name: string };
-      try {
-        uploadResult = await uploadWithProgress(formData, (pct) => setUploadProgress(pct));
-      } catch {
-        alert("Upload failed");
-        return;
-      }
-      const { attachmentId } = uploadResult;
+      const { attachmentId } = await uploadWithProgress(formData, (pct) => setUploadProgress(pct));
       const res = await fetch("/api/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -941,13 +1370,35 @@ function ChatPanelContent({
       }
       const { message } = await res.json();
       setMessages((prev) => [...prev, message]);
-      setTimeout(scrollToBottom, 50);
-      const socket = getSocket();
-      socket.emit("message:send", { channelId, message });
+      nearBottomRef.current = true;
+      setTimeout(() => scrollToBottom(), 50);
+      getSocket().emit("message:send", { channelId, message });
     } catch (error) {
-      alert(error instanceof Error ? error.message : "Upload failed. Please try again.");
+      toast(error instanceof Error ? error.message : "Upload failed. Please try again.", "error");
     } finally {
       setUploadProgress(0);
+    }
+  }
+
+  async function sendGif(gifUrl: string) {
+    setShowGifPicker(false);
+    try {
+      const res = await fetch("/api/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channelId, content: "", attachmentUrl: gifUrl, attachmentName: "gif" }),
+      });
+      if (!res.ok) {
+        await toastResponseError(res, "Couldn't send that GIF");
+        return;
+      }
+      const { message } = await res.json();
+      setMessages((prev) => [...prev, message]);
+      nearBottomRef.current = true;
+      setTimeout(() => scrollToBottom(), 50);
+      getSocket().emit("message:send", { channelId, message });
+    } catch {
+      toast("Couldn't send that GIF — check your connection.", "error");
     }
   }
 
@@ -962,12 +1413,70 @@ function ChatPanelContent({
       if (res.ok) {
         setTopic(trimmed);
       } else {
-        alert("Failed to save topic. Please try again.");
+        await toastResponseError(res, "Failed to save topic. Please try again.");
       }
     } catch {
-      alert("Failed to save topic. Please try again.");
+      toast("Failed to save topic — check your connection.", "error");
     } finally {
       setEditingTopic(false);
+    }
+  }
+
+  function startTopicEdit() {
+    setTopicDraft(topic);
+    setEditingTopic(true);
+  }
+
+  function handleComposerKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    // Never act on keys that are part of an IME composition (e.g. Japanese input).
+    if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+    const mod = e.ctrlKey || e.metaKey;
+
+    // @mention menu open with matches: Enter/Tab pick a member (MentionAutocomplete
+    // handles the selection) and arrows move through the list — never send.
+    const mentionOpen = mentionQuery !== null && filterMentionMembers(mentionQuery, members).length > 0;
+    if (mentionOpen) {
+      if ((e.key === "Enter" || e.key === "Tab") && !e.shiftKey) {
+        e.preventDefault();
+        return;
+      }
+      if (e.key === "ArrowUp" || e.key === "ArrowDown") return;
+    }
+
+    // /command menu: Tab (or Enter on a partial name) completes the first match.
+    if (slashQuery !== null && (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey))) {
+      const query = slashQuery.toLowerCase();
+      const matches = SLASH_COMMANDS.filter((c) => c.name.startsWith(query));
+      const exact = SLASH_COMMANDS.some((c) => c.name === query);
+      if (matches.length > 0 && (e.key === "Tab" || !exact)) {
+        e.preventDefault();
+        setNewMessage(`/${matches[0].name} `);
+        setSlashQuery(null);
+        return;
+      }
+    }
+
+    if (mod && e.key === "b") {
+      e.preventDefault();
+      if (inputRef.current) wrapSelection(inputRef.current, "**", "**", "bold text", setNewMessage);
+    } else if (mod && e.key === "i") {
+      e.preventDefault();
+      if (inputRef.current) wrapSelection(inputRef.current, "_", "_", "italic text", setNewMessage);
+    } else if (mod && e.key === "k" && e.currentTarget.selectionStart !== e.currentTarget.selectionEnd) {
+      // Ctrl+K with text selected links it; without a selection it falls
+      // through to the global Ctrl+K search shortcut.
+      e.preventDefault();
+      e.stopPropagation();
+      requestLink();
+    } else if (e.key === "ArrowUp" && !newMessage && !mod && !e.shiftKey && !e.altKey) {
+      // ↑ in an empty composer edits your last message.
+      if (editLastOwnMessage()) e.preventDefault();
+    } else if (e.key === "Escape" && replyingTo) {
+      e.preventDefault();
+      setReplyingTo(null);
+    } else if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      void handleSend(e as unknown as React.FormEvent);
     }
   }
 
@@ -981,7 +1490,10 @@ function ChatPanelContent({
           ? "Several people are typing..."
           : null;
 
-  const pinnedCount = messages.filter((m) => m.pinned).length;
+  const purgedIds = useMemo(() => new Set(purgedMessageIds ?? []), [purgedMessageIds]);
+  const visibleMessages = messages.filter((m) => !m.parentMessageId && !purgedIds.has(m.id));
+  const visibleThreadMessages = threadMessages.filter((m) => !purgedIds.has(m.id));
+  const pinnedCount = visibleMessages.filter((m) => m.pinned).length;
 
   return (
     <div
@@ -1002,29 +1514,21 @@ function ChatPanelContent({
         setIsDragging(false);
         const files = e.dataTransfer.files;
         if (files.length > 1) {
-          setMultiFileToast(true);
-          setTimeout(() => setMultiFileToast(false), 3000);
+          toast("Only one file can be uploaded at a time — sending the first one.", "info");
         }
-        if (files[0]) handleFileDrop(files[0]);
+        if (files[0]) void handleFileDrop(files[0]);
       }}
     >
       {/* Drop zone overlay */}
       {isDragging && (
         <div className="absolute inset-0 z-30 flex items-center justify-center bg-[var(--accent)]/10 border-2 border-dashed border-[var(--accent)] rounded-lg pointer-events-none">
           <div className="text-center">
-            <svg className="mx-auto mb-3 text-[var(--accent)]" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <svg className="mx-auto mb-3 text-[var(--accent)]" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
             </svg>
-            <p className="text-xl font-bold text-[var(--accent)]">📁 Drop to upload</p>
-            <p className="text-sm text-[var(--muted)] mt-1">Drop files to upload — images, video, audio, documents</p>
+            <p className="text-xl font-bold text-[var(--accent)]">Drop to upload</p>
+            <p className="text-sm text-[var(--muted)] mt-1">Images (JPG, PNG, GIF, WebP), PDFs, text files and .zip archives</p>
           </div>
-        </div>
-      )}
-
-      {/* Multi-file toast */}
-      {multiFileToast && (
-        <div className="absolute bottom-20 left-1/2 -translate-x-1/2 z-40 px-4 py-2 bg-[var(--panel)] border border-[var(--accent-2)]/40 rounded-lg text-sm text-[var(--text)] shadow-lg pointer-events-none">
-          Only one file can be uploaded at a time
         </div>
       )}
 
@@ -1040,123 +1544,170 @@ function ChatPanelContent({
           backgroundRepeat: "no-repeat",
         }}
       >
-      <div className="px-4 flex items-center border-b border-[var(--accent-2)]/30 bg-[var(--panel-2)] shrink-0 min-h-12 py-1 gap-2 flex-wrap justify-between">
-        <div className="flex items-center gap-1 shrink-0">
-          <span className="text-[var(--accent-2)]">#</span>
-          <h3 className="font-bold text-[var(--text)]">{channelName}</h3>
+      <div className="flex h-12 shrink-0 items-center gap-3 border-b border-[var(--accent-2)]/30 bg-[var(--panel-2)] px-4">
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <ChatIcon name="hash" size={20} className="shrink-0 text-[var(--muted)]" />
+          <h3 className="max-w-[45%] shrink-0 truncate font-bold text-[var(--text)]" title={channelName}>{channelName}</h3>
+          {editingTopic ? (
+            <form
+              className="flex min-w-0 flex-1 items-center gap-1"
+              onSubmit={(e) => { e.preventDefault(); void saveTopic(); }}
+            >
+              <span className="h-5 w-px shrink-0 bg-[var(--accent-2)]/30" aria-hidden="true" />
+              <input
+                autoFocus
+                type="text"
+                value={topicDraft}
+                maxLength={1024}
+                aria-label="Channel topic"
+                onChange={(e) => setTopicDraft(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); setEditingTopic(false); } }}
+                placeholder="Set a channel topic..."
+                className="min-w-0 flex-1 rounded border border-[var(--accent-2)]/50 bg-[var(--panel)] px-2 py-1 text-xs text-[var(--text)] focus:border-[var(--accent)] focus:outline-none"
+              />
+              <button type="submit" className="shrink-0 rounded bg-[var(--accent)] px-2 py-1 text-xs font-medium text-[var(--bg)] transition-colors hover:bg-[var(--accent-2)] hover:text-[var(--text)]">Save</button>
+              <button type="button" onClick={() => setEditingTopic(false)} className="shrink-0 px-1 text-xs text-[var(--muted)] hover:text-[var(--text)]">Cancel</button>
+            </form>
+          ) : (topic || canEditTopic) && (
+            <>
+              <span className="h-5 w-px shrink-0 bg-[var(--accent-2)]/30" aria-hidden="true" />
+              {canEditTopic ? (
+                <button
+                  type="button"
+                  onClick={startTopicEdit}
+                  title={topic ? `${topic} — click to edit` : "Add a channel topic"}
+                  aria-label={topic ? `Channel topic: ${topic}. Edit topic` : "Add a channel topic"}
+                  className={`min-w-0 truncate rounded px-1 text-left text-sm transition-colors hover:bg-[var(--panel)] hover:text-[var(--text)] ${topic ? "text-[var(--muted)]" : "italic text-[var(--muted)]/70"}`}
+                >
+                  {topic || "Add a topic"}
+                </button>
+              ) : (
+                <span className="min-w-0 truncate text-sm text-[var(--muted)]" title={topic}>{topic}</span>
+              )}
+            </>
+          )}
         </div>
-        {topic && !editingTopic && (
-          <>
-            <span className="text-[var(--accent-2)]/50 shrink-0">|</span>
-            <span className="text-xs text-[var(--muted)] truncate max-w-xs" title={topic}>{topic}</span>
-          </>
-        )}
-        {editingTopic ? (
-          <form
-            className="flex items-center gap-1 flex-1 min-w-0"
-            onSubmit={(e) => { e.preventDefault(); saveTopic(); }}
-          >
-            <input
-              autoFocus
-              type="text"
-              value={topicDraft}
-              onChange={(e) => setTopicDraft(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Escape") setEditingTopic(false); }}
-              placeholder="Set a channel topic..."
-              className="flex-1 min-w-0 text-xs px-2 py-1 bg-[var(--panel)] text-[var(--text)] border border-[var(--accent-2)] rounded focus:outline-none"
-            />
-            <button type="submit" className="text-xs px-2 py-1 bg-[var(--accent-2)] text-[var(--text)] rounded hover:bg-[var(--accent)] transition-colors shrink-0">Save</button>
-            <button type="button" onClick={() => setEditingTopic(false)} className="text-xs text-[var(--muted)] hover:text-[var(--text)] shrink-0">Cancel</button>
-          </form>
-        ) : canEditTopic && (
-          <button
-            onClick={() => { setTopicDraft(topic); setEditingTopic(true); }}
-            className="text-[var(--muted)] hover:text-[var(--text)] shrink-0"
-            title="Edit topic"
-            aria-label="Edit channel topic"
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-            </svg>
-          </button>
-        )}
-        <button
-          onClick={() => setShowPollModal(true)}
-          className="text-xs px-2 py-1 rounded text-[var(--muted)] hover:text-[var(--accent-2)] transition-colors"
-          title="Start a Camp Vote"
-          aria-label="Start a Camp Vote"
-        >
-          Vote
-        </button>
-        {serverId && (
-          <button
-            onClick={() => setShowJournalPanel((open) => !open)}
-            className={`text-xs px-2 py-1 rounded transition-colors ${showJournalPanel ? "bg-[var(--accent-2)]/15 text-[var(--accent-2)]" : "text-[var(--muted)] hover:text-[var(--accent-2)]"}`}
-            title="Camp Journal"
-            aria-label="Open Camp Journal"
-          >
-            Journal
-          </button>
-        )}
-        <button
-          onClick={() => setShowPinnedPanel((p) => !p)}
-          className={`text-xs px-2 py-1 rounded transition-colors ${showPinnedPanel ? "bg-yellow-500/20 text-yellow-400" : "text-[var(--muted)] hover:text-yellow-400"}`}
-          title="Pinned messages"
-          aria-label={showPinnedPanel ? "Hide pinned messages" : "Show pinned messages"}
-          aria-expanded={showPinnedPanel}
-        >
-          {pinnedCount > 0 ? `📌 ${pinnedCount}` : "📌"}
-        </button>
+        <div role="toolbar" aria-label="Channel tools" className="flex shrink-0 items-center gap-0.5">
+          <HeaderButton icon="vote" label="Start a Camp Vote" onClick={() => setShowPollModal(true)} />
+          {serverId && (
+            <HeaderButton icon="journal" label="Camp Journal" active={sidePanel === "journal"} onClick={() => togglePanel("journal")} />
+          )}
+          <HeaderButton icon="bookmark" label="Saved messages" active={sidePanel === "saved"} onClick={() => togglePanel("saved")} />
+          <HeaderButton
+            icon="pin"
+            label={pinnedCount > 0 ? `Pinned messages (${pinnedCount})` : "Pinned messages"}
+            active={sidePanel === "pins"}
+            badge={pinnedCount}
+            onClick={() => togglePanel("pins")}
+          />
+        </div>
       </div>
 
-      <div role="log" aria-live="polite" aria-label={`Messages in #${channelName}`} className="flex-1 overflow-y-auto px-4 py-2">
+      <div
+        ref={scrollRef}
+        onScroll={handleLogScroll}
+        role="log"
+        aria-live="polite"
+        aria-label={`Messages in #${channelName}`}
+        className="flex-1 overflow-y-auto"
+      >
         {loading ? (
           <div className="flex items-center justify-center h-full text-[var(--muted)]">
             Loading tracks...
           </div>
-        ) : messages.length === 0 ? (
-          <div className="flex items-center justify-center h-full text-[var(--muted)]">
-            <div className="text-center">
-              <p className="text-lg mb-1">No messages yet</p>
-              <p className="text-sm">Be the first to howl in #{channelName}</p>
-            </div>
+        ) : loadError && messages.length === 0 ? (
+          <div className="flex h-full flex-col items-center justify-center gap-3 text-[var(--muted)]">
+            <p className="text-sm">Couldn&apos;t load messages for #{channelName}.</p>
+            <button
+              type="button"
+              onClick={() => { setLoading(true); setLoadError(false); setReloadKey((k) => k + 1); }}
+              className="rounded-md bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-[var(--bg)] hover:bg-[var(--accent-2)] hover:text-[var(--text)]"
+            >
+              Try again
+            </button>
           </div>
         ) : (
-          messages.filter((m) => !m.parentMessageId).map((msg) => (
-            <div
-              key={`${msg.id}:${blockedUserIds?.has(msg.author.id) ? "blocked" : "visible"}`}
-              ref={(el) => { if (el) messageRefs.current.set(msg.id, el); else messageRefs.current.delete(msg.id); }}
-            >
-              {firstUnreadId === msg.id && (
-                <div className="flex items-center gap-2 my-2 px-1">
-                  <div className="flex-1 h-px bg-red-500/60" />
-                  <span className="text-[10px] font-bold text-red-400 uppercase tracking-widest px-1">New</span>
-                  <div className="flex-1 h-px bg-red-500/60" />
+          <div className="flex min-h-full flex-col justify-end pb-2">
+            {hasMore ? (
+              <div className="flex justify-center py-3">
+                <button
+                  type="button"
+                  onClick={() => void loadOlder()}
+                  disabled={loadingOlder}
+                  className="rounded-full border border-[var(--accent-2)]/30 bg-[var(--panel)] px-3 py-1 text-xs text-[var(--muted)] transition-colors hover:text-[var(--text)] disabled:opacity-60"
+                >
+                  {loadingOlder ? "Loading older messages…" : "Load older messages"}
+                </button>
+              </div>
+            ) : (
+              <ChannelWelcome channelName={channelName} topic={topic} />
+            )}
+            {visibleMessages.map((msg, index) => {
+              const prev = index > 0 ? visibleMessages[index - 1] : null;
+              const newDay = !prev || dayKey(prev.createdAt) !== dayKey(msg.createdAt);
+              const unreadBoundary = firstUnreadId === msg.id;
+              const gap = prev ? new Date(msg.createdAt).getTime() - new Date(prev.createdAt).getTime() : Infinity;
+              // Discord-style grouping: same author within 5 minutes collapses
+              // into compact rows; replies, polls and system lines break groups.
+              const compact =
+                !!prev &&
+                !newDay &&
+                !unreadBoundary &&
+                prev.author.id === msg.author.id &&
+                !prev.isSystem &&
+                !msg.isSystem &&
+                !prev.poll &&
+                !msg.poll &&
+                !msg.replyTo &&
+                gap >= 0 &&
+                gap < GROUP_WINDOW_MS;
+              return (
+                <div
+                  key={`${msg.id}:${blockedUserIds?.has(msg.author.id) ? "blocked" : "visible"}`}
+                  ref={(el) => { if (el) messageRefs.current.set(msg.id, el); else messageRefs.current.delete(msg.id); }}
+                >
+                  {newDay && (
+                    <div role="separator" className="mx-4 mt-4 mb-1 flex items-center gap-2">
+                      <div className="h-px flex-1 bg-[var(--accent-2)]/25" />
+                      <span className="text-[11px] font-semibold text-[var(--muted)]">{dayLabel(msg.createdAt)}</span>
+                      <div className="h-px flex-1 bg-[var(--accent-2)]/25" />
+                    </div>
+                  )}
+                  {unreadBoundary && (
+                    <div className="mx-4 my-2 flex items-center gap-2" role="separator" aria-label="New messages">
+                      <div className="h-px flex-1 bg-[var(--danger)]/70" />
+                      <span className="px-1 text-[10px] font-bold uppercase tracking-widest text-[var(--danger)]">New</span>
+                      <div className="h-px flex-1 bg-[var(--danger)]/70" />
+                    </div>
+                  )}
+                  <MessageBubble
+                    message={msg}
+                    isOwn={msg.author.id === currentUserId}
+                    currentUserId={currentUserId}
+                    canPin={canPin}
+                    compact={compact}
+                    mentionsMe={msg.author.id !== currentUserId && mentionsUser(msg.content, currentUsername)}
+                    editing={editingId === msg.id}
+                    onEditingChange={(editing) => handleEditingChange(msg.id, editing)}
+                    onEdit={handleEdit}
+                    onDelete={handleDelete}
+                    onReact={handleReact}
+                    onReply={(target) => { setReplyingTo(target); inputRef.current?.focus(); }}
+                    onScrollToMessage={(id) => { void jumpToMessage(id); }}
+                    onPin={handlePin}
+                    onThread={openThread}
+                    onBookmark={handleBookmark}
+                    isBookmarked={bookmarkedMessageIds.has(msg.id)}
+                    onJournal={serverId ? handleJournal : undefined}
+                    onTranslate={handleTranslate}
+                    translatedText={translations.get(msg.id) ?? null}
+                    blocked={blockedUserIds?.has(msg.author.id)}
+                    replyAuthorBlocked={!!msg.replyTo && blockedUserIds?.has(msg.replyTo.author.id)}
+                  />
                 </div>
-              )}
-              <MessageBubble
-                message={msg}
-                isOwn={msg.author.id === currentUserId}
-                currentUserId={currentUserId}
-                canPin={canPin}
-                onEdit={handleEdit}
-                onDelete={handleDelete}
-                onReact={handleReact}
-                onReply={setReplyingTo}
-                onScrollToMessage={scrollToMessage}
-                onPin={handlePin}
-                onThread={openThread}
-                onBookmark={handleBookmark}
-                isBookmarked={bookmarkedMessageIds.has(msg.id)}
-                onJournal={serverId ? handleJournal : undefined}
-                onTranslate={handleTranslate}
-                translatedText={translations.get(msg.id) ?? null}
-                blocked={blockedUserIds?.has(msg.author.id)}
-                replyAuthorBlocked={!!msg.replyTo && blockedUserIds?.has(msg.replyTo.author.id)}
-              />
-            </div>
-          ))
+              );
+            })}
+          </div>
         )}
         <div ref={messagesEndRef} />
       </div>
@@ -1186,6 +1737,7 @@ function ChatPanelContent({
             onClick={() => setReplyingTo(null)}
             className="shrink-0 text-[var(--muted)] hover:text-[var(--danger)] transition-colors ml-1"
             aria-label="Cancel reply"
+            title="Cancel reply (Esc)"
           >
             ✕
           </button>
@@ -1240,22 +1792,7 @@ function ChatPanelContent({
         {showGifPicker && (
           <div className="absolute bottom-full right-4 mb-2 z-50">
             <GifPicker
-              onSelect={async (gifUrl) => {
-                // Send GIF as an attachment message
-                const res = await fetch("/api/messages", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ channelId, content: "", attachmentUrl: gifUrl, attachmentName: "gif" }),
-                });
-                if (res.ok) {
-                  const { message } = await res.json();
-                  setMessages((prev) => [...prev, message]);
-                  setTimeout(scrollToBottom, 50);
-                  const socket = getSocket();
-                  socket.emit("message:send", { channelId, message });
-                }
-                setShowGifPicker(false);
-              }}
+              onSelect={(gifUrl) => { void sendGif(gifUrl); }}
               onClose={() => setShowGifPicker(false)}
             />
           </div>
@@ -1264,8 +1801,8 @@ function ChatPanelContent({
         {showToolbar && (
           <FormattingToolbar
             inputRef={inputRef}
-            value={newMessage}
             onChange={setNewMessage}
+            onLink={requestLink}
           />
         )}
         {uploading && (
@@ -1276,7 +1813,7 @@ function ChatPanelContent({
             />
           </div>
         )}
-        <div className={`flex items-center bg-[var(--panel)] border border-[var(--accent-2)]/30 ${showToolbar ? "rounded-b-lg" : "rounded-lg"}`}>
+        <div className={`flex items-end bg-[var(--panel)] border border-[var(--accent-2)]/30 focus-within:border-[var(--accent)]/60 transition-colors ${showToolbar ? "rounded-b-lg" : "rounded-lg"}`}>
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
@@ -1292,7 +1829,7 @@ function ChatPanelContent({
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/*,video/*,.pdf,.txt,.zip,.doc,.docx,.mp3,.wav,.webm,.ogg,.m4a"
+            accept={UPLOAD_ACCEPT}
             onChange={handleFileUpload}
             className="hidden"
           />
@@ -1315,42 +1852,11 @@ function ChatPanelContent({
               e.preventDefault();
               void handleFileDrop(file);
             }}
-            onKeyDown={(e) => {
-              const mod = e.ctrlKey || e.metaKey;
-              if (mod && e.key === "b") {
-                e.preventDefault();
-                if (inputRef.current) wrapSelection(inputRef.current, "**", "**", "bold text", setNewMessage);
-              } else if (mod && e.key === "i") {
-                e.preventDefault();
-                if (inputRef.current) wrapSelection(inputRef.current, "_", "_", "italic text", setNewMessage);
-              } else if (mod && e.key === "k") {
-                e.preventDefault();
-                if (inputRef.current) {
-                  const textarea = inputRef.current;
-                  const start = textarea.selectionStart;
-                  const end = textarea.selectionEnd;
-                  const selected = textarea.value.slice(start, end) || "link text";
-                  const url = window.prompt("Enter URL:", "https://");
-                  if (!url) return;
-                  const newVal =
-                    textarea.value.slice(0, start) +
-                    `[${selected}](${url})` +
-                    textarea.value.slice(end);
-                  setNewMessage(newVal);
-                  setTimeout(() => {
-                    textarea.focus();
-                    textarea.setSelectionRange(start + 1, start + 1 + selected.length);
-                  }, 0);
-                }
-              } else if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                handleSend(e as unknown as React.FormEvent);
-              }
-            }}
+            onKeyDown={handleComposerKeyDown}
             placeholder={uploading ? "Uploading..." : slowRemaining > 0 ? `Wait ${slowRemaining}s to send again` : `Message #${channelName}`}
             rows={1}
-            className="flex-1 px-2 py-3 bg-transparent text-[var(--text)] focus:outline-none placeholder:text-[var(--muted)] resize-none max-h-32 overflow-y-auto"
-            style={{ minHeight: "44px" }}
+            className="flex-1 px-2 py-3 bg-transparent text-[var(--text)] focus:outline-none placeholder:text-[var(--muted)] resize-none overflow-y-auto"
+            style={{ minHeight: "44px", maxHeight: "200px" }}
             disabled={uploading || slowRemaining > 0}
           />
           <button
@@ -1358,6 +1864,8 @@ function ChatPanelContent({
             onClick={() => setShowToolbar((v) => !v)}
             className={`px-2 py-3 text-xs font-semibold transition-colors ${showToolbar ? "text-[var(--accent-2)]" : "text-[var(--muted)] hover:text-[var(--text)]"}`}
             title="Toggle formatting toolbar"
+            aria-label="Toggle formatting toolbar"
+            aria-pressed={showToolbar}
           >
             Aa
           </button>
@@ -1392,59 +1900,80 @@ function ChatPanelContent({
       </div>{/* end main chat column */}
 
       {/* Pinned messages side panel */}
-      {showPinnedPanel && (
+      {sidePanel === "pins" && (
         <PinnedMessagesPanel
           channelId={channelId}
           canPin={canPin ?? false}
-          onClose={() => setShowPinnedPanel(false)}
-          onJumpToMessage={(messageId) => {
-            scrollToMessage(messageId);
-            setShowPinnedPanel(false);
-          }}
+          onClose={() => setSidePanel(null)}
+          onJumpToMessage={(messageId) => jumpFromPanel(channelId, messageId)}
           onUnpin={(messageId) => handlePin(messageId, false)}
           blockedUserIds={blockedUserIds}
         />
       )}
 
-      {showJournalPanel && serverId && (
+      {sidePanel === "saved" && (
+        <SavedMessagesPanel
+          currentChannelId={channelId}
+          bookmarkedMessageIds={bookmarkedMessageIds}
+          onClose={() => setSidePanel(null)}
+          onJumpToMessage={jumpFromPanel}
+          onRemove={(messageId) => handleBookmark(messageId, false)}
+          blockedUserIds={blockedUserIds}
+        />
+      )}
+
+      {sidePanel === "journal" && serverId && (
         <CampJournalPanel
           serverId={serverId}
-          onClose={() => setShowJournalPanel(false)}
-          onJumpToMessage={jumpFromJournal}
+          onClose={() => setSidePanel(null)}
+          onJumpToMessage={jumpFromPanel}
         />
       )}
 
       {/* Thread panel */}
       {threadParent && (
-        <div className="w-72 flex flex-col border-l border-[var(--accent-2)]/30 bg-[var(--panel)] shrink-0">
+        <div className="w-80 flex flex-col border-l border-[var(--accent-2)]/30 bg-[var(--panel)] shrink-0">
           <div className="h-12 px-3 flex items-center justify-between border-b border-[var(--accent-2)]/30 shrink-0">
-            <span className="text-sm font-semibold text-[var(--text)]">Thread</span>
-            <button onClick={() => setThreadParent(null)} className="text-[var(--muted)] hover:text-[var(--text)] text-lg leading-none" aria-label="Close thread">&times;</button>
+            <span className="flex items-center gap-2 text-sm font-semibold text-[var(--text)]">
+              <ChatIcon name="thread" size={16} className="text-[var(--muted)]" />
+              Thread
+            </span>
+            <button
+              type="button"
+              onClick={closeThread}
+              className="flex h-8 w-8 items-center justify-center rounded-md text-[var(--muted)] hover:bg-[var(--panel-2)] hover:text-[var(--text)]"
+              aria-label="Close thread"
+              title="Close thread"
+            >
+              <ChatIcon name="close" size={16} />
+            </button>
           </div>
           <div className="px-3 py-2 border-b border-[var(--accent-2)]/10 text-xs text-[var(--muted)]">
             Reply to <span className="text-[var(--text)] font-medium">{blockedUserIds?.has(threadParent.author.id) ? "blocked user" : threadParent.author.username}</span>
           </div>
-          <div className="flex-1 overflow-y-auto px-2 py-2 space-y-1">
-            {threadLoading ? (
-              <div className="text-xs text-[var(--muted)] italic px-1">Loading...</div>
-            ) : threadMessages.length === 0 ? (
-              <div className="text-xs text-[var(--muted)] italic px-1">No replies yet</div>
+          <div className="flex-1 overflow-y-auto py-2">
+            {threadLoading && visibleThreadMessages.length === 0 ? (
+              <div className="text-xs text-[var(--muted)] italic px-4">Loading...</div>
+            ) : visibleThreadMessages.length === 0 ? (
+              <div className="text-xs text-[var(--muted)] italic px-4">No replies yet — start the conversation.</div>
             ) : (
-              threadMessages.map((msg) => (
+              visibleThreadMessages.map((msg) => (
                 <MessageBubble
                   key={`${msg.id}:${blockedUserIds?.has(msg.author.id) ? "blocked" : "visible"}`}
                   message={msg}
                   isOwn={msg.author.id === currentUserId}
                   currentUserId={currentUserId}
+                  canPin={canPin}
+                  editing={editingId === msg.id}
+                  onEditingChange={(editing) => handleEditingChange(msg.id, editing)}
                   onEdit={handleEdit}
-                  onDelete={(id) => {
-                    handleDelete(id);
-                    setThreadMessages((prev) => prev.filter((m) => m.id !== id));
-                  }}
+                  onDelete={handleDelete}
                   onReact={handleReact}
                   onBookmark={handleBookmark}
                   isBookmarked={bookmarkedMessageIds.has(msg.id)}
                   onJournal={serverId ? handleJournal : undefined}
+                  onTranslate={handleTranslate}
+                  translatedText={translations.get(msg.id) ?? null}
                   blocked={blockedUserIds?.has(msg.author.id)}
                   replyAuthorBlocked={!!msg.replyTo && blockedUserIds?.has(msg.replyTo.author.id)}
                 />
@@ -1459,6 +1988,7 @@ function ChatPanelContent({
                 type="text"
                 value={threadInput}
                 onChange={(e) => setThreadInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); closeThread(); } }}
                 placeholder="Reply in thread..."
                 className="flex-1 px-2 py-2 bg-transparent text-[var(--text)] focus:outline-none placeholder:text-[var(--muted)] text-sm"
               />
@@ -1479,6 +2009,13 @@ function ChatPanelContent({
           channelId={channelId}
           onClose={() => setShowPollModal(false)}
           onCreated={handlePollCreated}
+        />
+      )}
+      {promptRequest && (
+        <PromptDialog
+          key={promptRequest.title}
+          {...promptRequest}
+          onCancel={() => setPromptRequest(null)}
         />
       )}
     </div>

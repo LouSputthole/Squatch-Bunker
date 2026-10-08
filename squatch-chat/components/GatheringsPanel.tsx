@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Channel } from "@/types/chat";
 import GatheringForm from "@/components/GatheringForm";
+import PromptDialog from "@/components/PromptDialog";
+import { useEscape } from "@/hooks/useEscape";
 import GatheringCard, {
   type GatheringView,
 } from "@/components/GatheringCard";
@@ -54,6 +56,7 @@ export default function GatheringsPanel({
   const [channelId, setChannelId] = useState("");
   const [saving, setSaving] = useState(false);
   const [clock, setClock] = useState<number | null>(null);
+  const [pendingCancel, setPendingCancel] = useState<GatheringView | null>(null);
 
   const loadGatherings = useCallback(async () => {
     setLoading(true);
@@ -82,14 +85,8 @@ export default function GatheringsPanel({
     };
   }, [open, loadGatherings]);
 
-  useEffect(() => {
-    if (!open) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [open, onClose]);
+  // Stack-aware so Escape in the cancel confirmation only closes that dialog.
+  useEscape(onClose, open);
 
   function resetForm() {
     setFormOpen(false);
@@ -183,36 +180,45 @@ export default function GatheringsPanel({
   }
 
   async function deleteGathering(gathering: GatheringView) {
-    if (!window.confirm(`Cancel “${gathering.title}”?`)) return;
-    const response = await fetch(`/api/gatherings/${gathering.id}`, {
-      method: "DELETE",
-    });
-    if (response.ok) {
-      setGatherings((current) =>
-        current.filter((item) => item.id !== gathering.id),
-      );
-      if (editingId === gathering.id) resetForm();
-      return;
+    setError("");
+    try {
+      const response = await fetch(`/api/gatherings/${gathering.id}`, {
+        method: "DELETE",
+      });
+      if (response.ok) {
+        setGatherings((current) =>
+          current.filter((item) => item.id !== gathering.id),
+        );
+        if (editingId === gathering.id) resetForm();
+        return;
+      }
+      const data = await response.json().catch(() => ({}));
+      setError(data.error || "Failed to cancel gathering");
+    } catch {
+      setError("Failed to cancel gathering");
     }
-    const data = await response.json();
-    setError(data.error || "Failed to cancel gathering");
   }
 
   async function setRsvp(
     gatheringId: string,
     status: GatheringRsvpStatus,
   ) {
-    const response = await fetch(`/api/gatherings/${gatheringId}/rsvp`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status }),
-    });
-    const data = await response.json();
-    if (!response.ok) {
-      setError(data.error || "Failed to update RSVP");
-      return;
+    setError("");
+    try {
+      const response = await fetch(`/api/gatherings/${gatheringId}/rsvp`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setError(data.error || "Failed to update RSVP");
+        return;
+      }
+      replaceGathering(data.gathering);
+    } catch {
+      setError("Failed to update RSVP");
     }
-    replaceGathering(data.gathering);
   }
 
   if (!open) return null;
@@ -230,19 +236,19 @@ export default function GatheringsPanel({
       onClick={onClose}
     >
       <section
-        className="flex max-h-[88vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-amber-500/25 bg-[var(--panel)] shadow-2xl"
+        className="flex max-h-[88vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-[var(--accent-2)]/30 bg-[var(--panel)] shadow-2xl"
         onClick={(event) => event.stopPropagation()}
         aria-label="Camp Gatherings"
       >
         <header className="flex items-center gap-3 border-b border-[var(--accent-2)]/20 px-5 py-4">
-          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-amber-500/15 text-xl">
+          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--accent)]/15 text-xl" aria-hidden="true">
             🏕️
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
               <h2 className="text-lg font-bold text-[var(--text)]">Camp Gatherings</h2>
               {reminders > 0 && (
-                <span className="rounded-full bg-amber-500/20 px-2 py-0.5 text-[10px] font-semibold text-amber-300">
+                <span className="rounded-full bg-[var(--accent)]/20 px-2 py-0.5 text-[10px] font-semibold text-[var(--accent)]">
                   {reminders} starting soon
                 </span>
               )}
@@ -267,7 +273,7 @@ export default function GatheringsPanel({
         </header>
 
         {error && (
-          <div className="mx-5 mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+          <div className="mx-5 mt-4 rounded-lg border border-[var(--danger)]/30 bg-[var(--danger)]/10 px-3 py-2 text-sm text-[var(--danger)]" role="alert">
             {error}
           </div>
         )}
@@ -313,7 +319,7 @@ export default function GatheringsPanel({
                 clock={clock}
                 onRsvp={(status) => void setRsvp(gathering.id, status)}
                 onEdit={() => beginEdit(gathering)}
-                onDelete={() => void deleteGathering(gathering)}
+                onDelete={() => setPendingCancel(gathering)}
                 onJoinChannel={() => {
                   if (!gathering.channel) return;
                   onJoinChannel(gathering.channel.id);
@@ -323,6 +329,25 @@ export default function GatheringsPanel({
             ))}
         </div>
       </section>
+
+      {pendingCancel && (
+        <div onClick={(event) => event.stopPropagation()}>
+          <PromptDialog
+            mode="confirm"
+            title={`Cancel “${pendingCancel.title}”?`}
+            message="This removes the gathering and its RSVPs for everyone."
+            confirmLabel="Cancel gathering"
+            cancelLabel="Keep it"
+            destructive
+            onConfirm={async () => {
+              const gathering = pendingCancel;
+              setPendingCancel(null);
+              await deleteGathering(gathering);
+            }}
+            onCancel={() => setPendingCancel(null)}
+          />
+        </div>
+      )}
     </div>
   );
 }
