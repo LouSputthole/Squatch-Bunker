@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import PromptDialog, { type PromptDialogRequest } from "@/components/PromptDialog";
+import ReportsPanel from "@/components/ReportsPanel";
 import { useEscape } from "@/hooks/useEscape";
 import { toast, toastResponseError } from "@/lib/toast";
 
@@ -19,6 +20,8 @@ interface ModerationPanelProps {
   currentUserRole: string;
   open: boolean;
   onClose: () => void;
+  /** Enables "Jump to message" on reports; the panel closes itself first. */
+  onJumpToMessage?: (channelId: string, messageId: string) => void;
 }
 
 const ROLE_OPTIONS = ["admin", "mod", "member"] as const;
@@ -45,6 +48,7 @@ export default function ModerationPanel({
   currentUserRole,
   open,
   onClose,
+  onJumpToMessage,
 }: ModerationPanelProps) {
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(false);
@@ -52,6 +56,9 @@ export default function ModerationPanel({
   const [pendingActions, setPendingActions] = useState<Set<string>>(new Set());
   const [loadError, setLoadError] = useState(false);
   const [dialog, setDialog] = useState<PromptDialogRequest | null>(null);
+  const [tab, setTab] = useState<"members" | "reports">("members");
+  // null = this viewer can't review reports here, so the tab stays hidden.
+  const [reportCount, setReportCount] = useState<number | null>(null);
 
   const fetchMembers = useCallback(() => {
     setLoading(true);
@@ -76,6 +83,7 @@ export default function ModerationPanel({
 
   if (!open) return null;
 
+  const view = reportCount === null ? "members" : tab;
   const query = search.trim().toLowerCase();
   const active = members.filter((m) => !m.banned && m.username.toLowerCase().includes(query));
   const banned = members.filter((m) => m.banned && m.username.toLowerCase().includes(query));
@@ -225,12 +233,36 @@ export default function ModerationPanel({
       >
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-3.5 border-b border-[var(--accent-2)]/30" style={{ background: "var(--bg)" }}>
-          <h2 className="text-sm font-semibold" style={{ color: "var(--text)" }}>
-            Moderation Panel
-            <span className="ml-2 text-xs font-normal" style={{ color: "var(--muted)" }}>
-              {active.length} active · {banned.length} banned
-            </span>
-          </h2>
+          <div className="flex items-center gap-3 min-w-0">
+            <h2 className="text-sm font-semibold" style={{ color: "var(--text)" }}>
+              Moderation Panel
+              {view === "members" && (
+                <span className="ml-2 text-xs font-normal" style={{ color: "var(--muted)" }}>
+                  {active.length} active · {banned.length} banned
+                </span>
+              )}
+            </h2>
+            {reportCount !== null && (
+              <div role="tablist" aria-label="Moderation views" className="flex gap-1">
+                {(["members", "reports"] as const).map((t) => (
+                  <button
+                    key={t}
+                    role="tab"
+                    aria-selected={view === t}
+                    onClick={() => setTab(t)}
+                    className={`text-xs px-2 py-1 rounded transition-colors ${view === t ? "bg-[var(--panel-2)] text-[var(--text)]" : "text-[var(--muted)] hover:text-[var(--text)]"}`}
+                  >
+                    {t === "members" ? "Members" : "Reports"}
+                    {t === "reports" && reportCount > 0 && (
+                      <span className="ml-1.5 rounded-full bg-[var(--danger)] px-1.5 text-[10px] font-bold text-white" aria-label={`${reportCount} open`}>
+                        {reportCount > 99 ? "99+" : reportCount}
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           <button
             onClick={onClose}
             className="text-xs px-2 py-1 rounded hover:bg-[var(--panel-2)] transition-colors"
@@ -242,7 +274,7 @@ export default function ModerationPanel({
         </div>
 
         {/* Search */}
-        <div className="px-5 py-3 border-b border-[var(--accent-2)]/20" style={{ background: "var(--panel)" }}>
+        <div className={`px-5 py-3 border-b border-[var(--accent-2)]/20 ${view === "members" ? "" : "hidden"}`} style={{ background: "var(--panel)" }}>
           <input
             type="search"
             value={search}
@@ -257,7 +289,16 @@ export default function ModerationPanel({
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4">
-          {loading ? (
+          <ReportsPanel
+            serverId={serverId}
+            visible={view === "reports"}
+            onOpenCountChange={setReportCount}
+            onJumpToMessage={onJumpToMessage && ((channelId, messageId) => {
+              onClose();
+              onJumpToMessage(channelId, messageId);
+            })}
+          />
+          {view === "reports" ? null : loading ? (
             <div className="flex justify-center py-12 text-sm" style={{ color: "var(--muted)" }}>
               Loading members...
             </div>

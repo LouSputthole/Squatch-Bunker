@@ -6,6 +6,8 @@ import { BlockedUsersSettings } from "@/components/BlockedUsersSettings";
 import { useEscape } from "@/hooks/useEscape";
 import { useTheme, THEMES, THEME_LABELS } from "@/hooks/useTheme";
 import { toast, toastResponseError } from "@/lib/toast";
+import { getSocket } from "@/lib/socket";
+import { MAX_USERNAME_LENGTH, MIN_USERNAME_LENGTH } from "@/lib/accountCredentials";
 import {
   applyAudioOutputDevice,
   getMediaDeviceSettings,
@@ -25,6 +27,8 @@ interface SettingsModalProps {
   onBlockChange?: (userId: string, blocked: boolean) => void;
   /** Renders a "Log out" button in the Account tab when provided. */
   onLogout?: () => void;
+  /** Called after a successful username change (session cookie and socket already refreshed). */
+  onUsernameChange?: (username: string) => void;
 }
 
 export default function SettingsModal(props: SettingsModalProps) {
@@ -32,7 +36,7 @@ export default function SettingsModal(props: SettingsModalProps) {
   return <SettingsModalContent {...props} />;
 }
 
-function SettingsModalContent({ onClose, username, currentAvatar, onAvatarChange, onInputSensitivityChange, onBlockChange, onLogout }: SettingsModalProps) {
+function SettingsModalContent({ onClose, username, currentAvatar, onAvatarChange, onInputSensitivityChange, onBlockChange, onLogout, onUsernameChange }: SettingsModalProps) {
   const [initialSettings] = useState(readAudioSettings);
   const [tab, setTab] = useState<"audio" | "account" | "privacy" | "appearance">("audio");
   const { theme, setTheme, themes, customColors, setCustomColors } = useTheme();
@@ -571,6 +575,7 @@ function SettingsModalContent({ onClose, username, currentAvatar, onAvatarChange
               currentAvatar={currentAvatar}
               onAvatarChange={onAvatarChange}
               onLogout={onLogout}
+              onUsernameChange={onUsernameChange}
             />
           )}
 
@@ -647,11 +652,13 @@ function AccountTab({
   currentAvatar,
   onAvatarChange,
   onLogout,
+  onUsernameChange,
 }: {
   username?: string;
   currentAvatar?: string | null;
   onAvatarChange?: (avatar: string | null) => void;
   onLogout?: () => void;
+  onUsernameChange?: (username: string) => void;
 }) {
   const avatarSource = currentAvatar ?? null;
   const [avatarState, setAvatarState] = useState(() => ({
@@ -673,6 +680,12 @@ function AccountTab({
   const [statusSaved, setStatusSaved] = useState(false);
   const [preview, setPreview] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  // null until /api/auth/me answers; guests rename by saving their account.
+  const [isGuest, setIsGuest] = useState<boolean | null>(null);
+  const [savedName, setSavedName] = useState<string | null>(null);
+  const [nameDraft, setNameDraft] = useState("");
+  const [nameSaving, setNameSaving] = useState(false);
+  const shownName = savedName ?? username ?? "";
 
   // Prefill the current status so the field (and Save) reflect what's set.
   useEffect(() => {
@@ -680,10 +693,12 @@ function AccountTab({
     fetch("/api/auth/me")
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
+        if (cancelled) return;
         const current = data?.user?.statusMessage;
-        if (!cancelled && typeof current === "string") {
+        if (typeof current === "string") {
           setStatusMsg((typed) => (typed === "" ? current : typed));
         }
+        if (typeof data?.user?.isGuest === "boolean") setIsGuest(data.user.isGuest);
       })
       .catch(() => {});
     return () => {
@@ -709,6 +724,41 @@ function AccountTab({
       toast("Couldn't save your status", "error");
     } finally {
       setStatusSaving(false);
+    }
+  }
+
+  async function saveUsername() {
+    const next = nameDraft.trim();
+    if (next.length < MIN_USERNAME_LENGTH || next.length > MAX_USERNAME_LENGTH) {
+      toast(`Username must be ${MIN_USERNAME_LENGTH}-${MAX_USERNAME_LENGTH} characters`, "error");
+      return;
+    }
+    if (next === shownName) return;
+    setNameSaving(true);
+    try {
+      const res = await fetch("/api/auth/me", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: next }),
+      });
+      if (!res.ok) {
+        await toastResponseError(res, "Couldn't change your username");
+        return;
+      }
+      const data = await res.json();
+      const updated: string = data?.user?.username ?? next;
+      setSavedName(updated);
+      setNameDraft("");
+      // The socket handshake carried the old token + name; re-handshake with the new cookie.
+      const socket = getSocket();
+      socket.disconnect();
+      socket.connect();
+      onUsernameChange?.(updated);
+      toast("Username updated", "success");
+    } catch {
+      toast("Couldn't change your username", "error");
+    } finally {
+      setNameSaving(false);
     }
   }
 
@@ -861,12 +911,48 @@ function AccountTab({
       <hr className="border-[var(--accent-2)]/20" />
 
       <div>
-        <label className="block text-sm font-semibold text-[var(--text)] mb-2">
+        <label htmlFor="settings-username" className="block text-sm font-semibold text-[var(--text)] mb-2">
           Username
         </label>
-        <p className="text-sm text-[var(--text)] bg-[var(--panel-2)] px-3 py-2 rounded border border-[var(--accent-2)]/30">
-          {username || "Unknown"}
-        </p>
+        {isGuest === false ? (
+          <>
+            <div className="flex gap-2">
+              <input
+                id="settings-username"
+                type="text"
+                value={nameDraft}
+                onChange={(e) => setNameDraft(e.target.value.slice(0, MAX_USERNAME_LENGTH))}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !nameSaving) void saveUsername();
+                }}
+                placeholder={shownName || "New username"}
+                autoComplete="username"
+                className="flex-1 px-3 py-2 bg-[var(--panel-2)] text-[var(--text)] border border-[var(--accent-2)]/50 rounded text-sm focus:outline-none focus:border-[var(--accent-2)]"
+              />
+              <button
+                onClick={() => void saveUsername()}
+                disabled={nameSaving || !nameDraft.trim() || nameDraft.trim() === shownName}
+                className="px-3 py-2 bg-[var(--accent-2)] text-[var(--text)] rounded text-sm hover:bg-[var(--accent)] transition-colors disabled:opacity-50"
+              >
+                {nameSaving ? "..." : "Change"}
+              </button>
+            </div>
+            <p className="text-xs text-[var(--muted)] mt-1">
+              Currently <strong className="text-[var(--text)]">{shownName || "Unknown"}</strong>. {MIN_USERNAME_LENGTH}-{MAX_USERNAME_LENGTH} characters.
+            </p>
+          </>
+        ) : (
+          <>
+            <p className="text-sm text-[var(--text)] bg-[var(--panel-2)] px-3 py-2 rounded border border-[var(--accent-2)]/30">
+              {shownName || "Unknown"}
+            </p>
+            {isGuest && (
+              <p className="text-xs text-[var(--muted)] mt-1">
+                Save your account to pick a permanent username.
+              </p>
+            )}
+          </>
+        )}
       </div>
 
       {onLogout && (

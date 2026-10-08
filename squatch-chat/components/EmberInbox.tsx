@@ -29,6 +29,7 @@ const TYPE_ICONS: Record<string, string> = {
   reply: "↩",
   dm: "✉",
   friend_request: "🤝",
+  gathering: "📅",
 };
 
 function relativeTime(iso: string): string {

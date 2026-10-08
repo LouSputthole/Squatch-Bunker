@@ -30,6 +30,8 @@ const ACTION_LABELS: Record<string, { label: string; icon: string; color: string
   channel_update: { label: "Updated Channel", icon: "✏️", color: "text-[var(--accent)]" },
   channel_delete: { label: "Deleted Channel", icon: "🗑️", color: "text-[var(--danger)]" },
   server_update: { label: "Updated Server", icon: "⚙️", color: "text-[var(--accent-2)]" },
+  report_resolve: { label: "Resolved Report", icon: "🛡️", color: "text-[var(--accent)]" },
+  report_dismiss: { label: "Dismissed Report", icon: "🧹", color: "text-[var(--muted)]" },
 };
 
 function formatAction(action: string) {

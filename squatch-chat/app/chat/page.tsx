@@ -232,6 +232,16 @@ function ChatPageInner() {
 
   // Ember Inbox navigation: jump to the space a notification points at.
   const handleNotificationNavigate = useCallback((notification: InboxNotification) => {
+    if (notification.type === "gathering" && notification.serverId) {
+      const server = srv.servers.find((s) => s.id === notification.serverId);
+      if (!server) return;
+      setDmOpen(false);
+      setFriendsOpen(false);
+      setViewingVoiceRoom(false);
+      srv.selectServer(server, ch.setActiveChannel);
+      setGatheringsOpen(true);
+      return;
+    }
     if (notification.type === "friend_request") {
       setDmOpen(false);
       setFriendsOpen(true);
@@ -974,6 +984,7 @@ function ChatPageInner() {
         onInputSensitivityChange={voice.setInputSensitivity}
         onBlockChange={handleBlockChange}
         onLogout={() => { setSettingsOpen(false); void auth.logout(); }}
+        onUsernameChange={(username) => auth.updateUser({ username })}
       />
 
       {/* Keyboard shortcuts panel */}
@@ -1031,6 +1042,7 @@ function ChatPageInner() {
           currentUserRole={presence.userRole}
           open={moderationOpen}
           onClose={() => setModerationOpen(false)}
+          onJumpToMessage={jumpToMessage}
         />
       )}
 

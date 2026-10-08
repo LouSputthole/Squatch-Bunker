@@ -12,6 +12,8 @@ import next from "next";
 import { attachSocketIO } from "./realtime/server";
 import { networkInterfaces } from "os";
 import { deliverDueMessages } from "./lib/scheduledDelivery";
+import { createGatheringReminderNotifications } from "./lib/notifications";
+import { sweepExpiredGuests } from "./lib/guestCleanup";
 import { prisma } from "./lib/db";
 import {
   sweepAbandonedPrivateUploads,
@@ -127,16 +129,39 @@ async function main() {
   schedulerInterval.unref();
   void runScheduledDelivery().catch(logSchedulerError);
 
+  // Gathering reminders: one inbox entry per RSVP'd member ~15 minutes out.
+  async function runGatheringReminders() {
+    const notifications = await createGatheringReminderNotifications();
+    for (const notification of notifications) {
+      io.to(`user:${notification.userId}`).emit("notification:new", notification);
+    }
+  }
+
+  const logReminderError = (error: unknown) =>
+    console.error("[Campfire] Gathering reminder pass failed:", error);
+  const reminderInterval = setInterval(() => {
+    void runGatheringReminders().catch(logReminderError);
+  }, 60_000);
+  reminderInterval.unref();
+  void runGatheringReminders().catch(logReminderError);
+
   async function runRetentionSweep() {
     const [retention, abandoned] = await Promise.all([
       sweepExpiredMessages(),
       sweepAbandonedPrivateUploads(),
     ]);
+    // After retention, so guests whose last messages just expired can go.
+    const guests = await sweepExpiredGuests();
     if (retention.deletedMessages > 0) {
       console.log(`[Campfire] Retention sweep removed ${retention.deletedMessages} expired message(s).`);
     }
     if (abandoned.deletedUploads > 0) {
       console.log(`[Campfire] Retention sweep removed ${abandoned.deletedUploads} abandoned upload(s).`);
+    }
+    if (guests.deletedGuests > 0 || guests.retiredGuests > 0) {
+      console.log(
+        `[Campfire] Guest sweep deleted ${guests.deletedGuests} and retired ${guests.retiredGuests} expired guest(s).`,
+      );
     }
   }
 
@@ -154,6 +179,7 @@ async function main() {
     shuttingDown = true;
     console.log(`[Campfire] ${signal} received; draining connections...`);
     clearInterval(schedulerInterval);
+    clearInterval(reminderInterval);
     clearInterval(retentionInterval);
 
     await new Promise<void>((resolve) => io.close(() => resolve()));
@@ -172,6 +198,21 @@ async function main() {
   process.once("SIGTERM", () => {
     void shutdown("SIGTERM");
   });
+
+  // Desktop: the Electron launcher passes its pid. If it is force-killed it can't stop us,
+  // so exit on our own rather than linger as an orphan holding the SQLite database.
+  const parentPid = Number(process.env.CAMPFIRE_PARENT_PID);
+  if (Number.isInteger(parentPid) && parentPid > 0) {
+    setInterval(() => {
+      try {
+        process.kill(parentPid, 0);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ESRCH") {
+          void shutdown("parent exited").finally(() => process.exit(0));
+        }
+      }
+    }, 2_000).unref();
+  }
 
   httpServer.listen(PORT, BIND_HOST, () => {
     const ip = getLanIP();

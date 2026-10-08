@@ -1,19 +1,21 @@
 import { prisma } from "@/lib/db";
 import type { Prisma } from "@/generated/prisma/client";
 import { resolveChannelAccess } from "@/lib/channelAccess";
+import { GATHERING_REMINDER_WINDOW_MS } from "@/lib/gatherings";
+import { requireMembership } from "@/lib/membership";
 import { displayName } from "@/lib/utils";
 
 /**
  * Ember Inbox — durable, per-user notifications.
  *
  * Rows are created server-side at the moment the triggering mutation is
- * authoritative (realtime message fan-out, DM fan-out, friend-request route)
- * and pushed to connected clients over the `user:<id>` room as
+ * authoritative (realtime message fan-out, DM fan-out, friend-request route,
+ * the gathering-reminder worker) and pushed to connected clients over the `user:<id>` room as
  * `notification:new`. The inbox is persistence plus unread state; sound and
  * desktop toasts remain a client decision (quiet hours, focus mode).
  */
 
-export const NOTIFICATION_TYPES = ["mention", "reply", "dm", "friend_request"] as const;
+export const NOTIFICATION_TYPES = ["mention", "reply", "dm", "friend_request", "gathering"] as const;
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
 
 export const MAX_MENTION_TARGETS = 10;
@@ -60,14 +62,14 @@ function previewOf(content: string): string {
 }
 
 /**
- * Channel > server > global precedence, defaulting to "all". Mention and reply
- * notifications are delivered at "all" and "mentions"; "none" silences the
- * scope entirely.
+ * Channel > server > global precedence, defaulting to "all". Mention, reply,
+ * and gathering-reminder notifications are delivered at "all" and "mentions";
+ * "none" silences the scope entirely. A null channelId resolves server scope.
  */
 export async function resolveNotificationLevel(
   userId: string,
   serverId: string,
-  channelId: string,
+  channelId: string | null,
   database: NotificationDatabase = prisma,
 ): Promise<"all" | "mentions" | "none"> {
   const preferences = await database.notificationPreference.findMany({
@@ -245,6 +247,82 @@ export async function upsertDmNotification(
     if ((error as { code?: string })?.code === "P2002") return write();
     throw error;
   });
+}
+
+/**
+ * One reminder per RSVP'd (going/maybe) member for each gathering starting
+ * within the reminder window; run on the unified server's worker cadence.
+ * The deterministic id makes the primary key the "already reminded" record,
+ * so overlapping passes or multiple workers cannot stack inbox rows. Each
+ * recipient is re-authorized: active membership, their notification policy,
+ * and the linked channel is only named/linked when they can view it.
+ * ponytail: rescheduling a gathering after its reminder fired doesn't re-remind.
+ */
+export async function createGatheringReminderNotifications(
+  now = new Date(),
+  database: NotificationDatabase & Pick<Prisma.TransactionClient, "gathering"> = prisma,
+): Promise<NotificationRecord[]> {
+  const gatherings = await database.gathering.findMany({
+    where: {
+      startsAt: { gt: now, lte: new Date(now.getTime() + GATHERING_REMINDER_WINDOW_MS) },
+    },
+    orderBy: { startsAt: "asc" },
+    take: 200,
+    select: {
+      id: true,
+      serverId: true,
+      channelId: true,
+      title: true,
+      startsAt: true,
+      server: { select: { name: true } },
+      channel: { select: { name: true } },
+      rsvps: { where: { status: { in: ["going", "maybe"] } }, select: { userId: true } },
+    },
+  });
+
+  const created: NotificationRecord[] = [];
+  for (const gathering of gatherings) {
+    const idFor = (userId: string) => `gathering:${userId}:${gathering.id}`;
+    const already = new Set((await database.notification.findMany({
+      where: { id: { in: gathering.rsvps.map((rsvp) => idFor(rsvp.userId)) } },
+      select: { id: true },
+    })).map((row) => row.id));
+    const minutes = Math.max(1, Math.round((gathering.startsAt.getTime() - now.getTime()) / 60_000));
+
+    for (const { userId } of gathering.rsvps) {
+      if (already.has(idFor(userId))) continue;
+      if (!(await requireMembership(gathering.serverId, userId, database))) continue;
+
+      let channelVisible = false;
+      if (gathering.channelId) {
+        const access = await resolveChannelAccess(gathering.channelId, userId, database);
+        channelVisible = access?.canView === true && access.serverId === gathering.serverId;
+      }
+      const channelId = channelVisible ? gathering.channelId : null;
+      const level = await resolveNotificationLevel(userId, gathering.serverId, channelId, database);
+      if (level === "none") continue;
+
+      const where = channelVisible && gathering.channel
+        ? `${gathering.server.name} · #${gathering.channel.name}`
+        : gathering.server.name;
+      const record = await database.notification.create({
+        data: {
+          id: idFor(userId),
+          userId,
+          type: "gathering",
+          title: `Starting soon: ${gathering.title}`,
+          body: `${where} — starts in ${minutes} min`,
+          serverId: gathering.serverId,
+          channelId,
+        },
+      }).catch((error: unknown) => {
+        if ((error as { code?: string })?.code === "P2002") return null;
+        throw error;
+      });
+      if (record) created.push(record);
+    }
+  }
+  return created;
 }
 
 export async function createFriendRequestNotification(
