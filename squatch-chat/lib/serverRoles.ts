@@ -60,7 +60,7 @@ export async function getPermContext(serverId: string, userId: string): Promise<
   ]);
   const isOwner = !!server && server.ownerId === userId;
   const activeMember = member?.banned ? null : member;
-  const defaultRoles = server?.roles ?? [];
+  const defaultRoles = activeMember ? (server?.roles ?? []) : [];
   return {
     isOwner,
     isMember: isOwner || !!activeMember,
