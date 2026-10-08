@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { projectVisibleServerChannels } from "@/lib/channelAccess";
 import { parseServerName } from "@/lib/inputLimits";
+import { resolveServerTemplate, templateChannelRows } from "@/lib/serverTemplates";
 
 export async function GET() {
   const session = await getSession();
@@ -44,11 +45,14 @@ export async function POST(request: Request) {
   }
 
   const body: unknown = await request.json().catch(() => null);
-  const name = parseServerName(
-    body && typeof body === "object" ? (body as Record<string, unknown>).name : undefined,
-  );
+  const fields = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
+  const name = parseServerName(fields.name);
   if (!name.ok) {
     return NextResponse.json({ error: name.error }, { status: 400 });
+  }
+  const template = resolveServerTemplate(fields.templateId);
+  if (!template.ok) {
+    return NextResponse.json({ error: "Unknown server template" }, { status: 400 });
   }
 
   try {
@@ -61,11 +65,11 @@ export async function POST(request: Request) {
           create: { userId: session.userId, role: "owner" },
         },
         channels: {
-          create: { name: "campfire", type: "text" },
+          create: templateChannelRows(template.template),
         },
       },
       include: {
-        channels: true,
+        channels: { orderBy: { position: "asc" } },
         _count: { select: { members: true } },
       },
     });

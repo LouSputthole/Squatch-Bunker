@@ -5,6 +5,7 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useEscape } from "@/hooks/useEscape";
 import { toast, toastResponseError } from "@/lib/toast";
+import { SERVER_TEMPLATES } from "@/lib/serverTemplates";
 
 interface Server {
   id: string;
@@ -21,6 +22,8 @@ interface ServerListProps {
   dmActive?: boolean;
   friendsActive?: boolean;
   unreadServerIds?: Set<string>;
+  /** Total unread direct messages; badges the DM button when > 0. */
+  dmUnreadCount?: number;
   /** Owner-only actions (change/remove icon) are shown only for servers this user owns. */
   currentUserId?: string;
   onDmClick?: () => void;
@@ -38,6 +41,7 @@ export default function ServerList({
   dmActive,
   friendsActive,
   unreadServerIds,
+  dmUnreadCount = 0,
   currentUserId,
   onDmClick,
   onFriendsClick,
@@ -48,6 +52,8 @@ export default function ServerList({
 }: ServerListProps) {
   const [showPanel, setShowPanel] = useState<"create" | "join" | null>(null);
   const [newName, setNewName] = useState("");
+  // "" = blank server (a single #campfire channel); otherwise a SERVER_TEMPLATES id.
+  const [templateId, setTemplateId] = useState("");
   const [joinCode, setJoinCode] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -90,7 +96,7 @@ export default function ServerList({
       const res = await fetch("/api/servers", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: newName.trim() }),
+        body: JSON.stringify({ name: newName.trim(), ...(templateId ? { templateId } : {}) }),
       });
 
       const data = await res.json();
@@ -101,6 +107,7 @@ export default function ServerList({
 
       onServerCreated(data.server);
       setNewName("");
+      setTemplateId("");
       setShowPanel(null);
     } catch {
       setError("Something went wrong");
@@ -184,18 +191,26 @@ export default function ServerList({
         {/* DM button */}
         <button
           onClick={onDmClick}
-          className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all ${
+          className={`relative w-12 h-12 rounded-2xl flex items-center justify-center transition-all ${
             dmActive
               ? "bg-[var(--accent-2)]/30 text-[var(--accent)] rounded-xl"
               : "bg-[var(--panel)] text-[var(--muted)] hover:bg-[var(--accent-2)]/20 hover:text-[var(--accent)] hover:rounded-xl"
           }`}
           title="Direct Messages"
-          aria-label="Direct messages"
+          aria-label={dmUnreadCount > 0 ? `Direct messages, ${dmUnreadCount} unread` : "Direct messages"}
           aria-pressed={!!dmActive}
         >
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
           </svg>
+          {dmUnreadCount > 0 && (
+            <span
+              className="absolute -bottom-1 -right-1 min-w-[18px] rounded-full border-2 border-[var(--bg)] bg-[var(--danger)] px-1 text-[10px] font-bold leading-[14px] text-white"
+              aria-hidden="true"
+            >
+              {dmUnreadCount > 99 ? "99+" : dmUnreadCount}
+            </span>
+          )}
         </button>
         {/* Friends button */}
         <button
@@ -388,8 +403,47 @@ export default function ServerList({
                     required
                   />
                 </div>
+                <fieldset>
+                  <legend className="block text-xs text-[var(--muted)] mb-1 uppercase tracking-wide">
+                    Start from
+                  </legend>
+                  <div className="space-y-1 max-h-56 overflow-y-auto">
+                    {[
+                      { id: "", emoji: "🔥", name: "Blank", description: "Just a #campfire channel" },
+                      ...SERVER_TEMPLATES,
+                    ].map((option) => (
+                      <label
+                        key={option.id || "blank"}
+                        className={`flex items-start gap-2 px-2 py-1.5 rounded cursor-pointer border transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-[var(--accent)] ${
+                          templateId === option.id
+                            ? "border-[var(--accent)] bg-[var(--accent)]/10"
+                            : "border-transparent hover:bg-[var(--panel-2)]"
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="server-template"
+                          value={option.id}
+                          checked={templateId === option.id}
+                          onChange={() => setTemplateId(option.id)}
+                          className="sr-only"
+                        />
+                        <span className="text-base leading-5" aria-hidden="true">{option.emoji}</span>
+                        <span className="min-w-0">
+                          <span className="block text-sm text-[var(--text)] font-medium">{option.name}</span>
+                          <span className="block text-[11px] text-[var(--muted)] leading-snug">{option.description}</span>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
                 <p className="text-xs text-[var(--muted)]">
-                  Your server is where you and your friends hang out. A #campfire channel will be created automatically.
+                  Your server is where you and your friends hang out.{" "}
+                  {templateId
+                    ? `Channels: ${SERVER_TEMPLATES.find((t) => t.id === templateId)?.channels
+                        .map((c) => (c.type === "voice" ? `🔊 ${c.name}` : `#${c.name}`))
+                        .join(", ")}`
+                    : "A #campfire channel will be created automatically."}
                 </p>
                 <button
                   type="submit"

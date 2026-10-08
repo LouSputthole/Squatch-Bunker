@@ -12,6 +12,13 @@ interface Permission {
   canSend: boolean;
 }
 
+interface CustomRole {
+  id: string;
+  key: string;
+  name: string;
+  color: string;
+}
+
 interface ChannelPermissionsModalProps {
   channelId: string;
   channelName: string;
@@ -28,6 +35,8 @@ const ROLE_LABELS: Record<string, string> = {
 
 export default function ChannelPermissionsModal({ channelId, channelName, open, onClose }: ChannelPermissionsModalProps) {
   const [permissions, setPermissions] = useState<Permission[]>([]);
+  const [customRoles, setCustomRoles] = useState<CustomRole[]>([]);
+  const [roleToAdd, setRoleToAdd] = useState("");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -44,7 +53,10 @@ export default function ChannelPermissionsModal({ channelId, channelName, open, 
           if (!r.ok) throw new Error(`permissions ${r.status}`);
           return r.json();
         })
-        .then((data) => setPermissions(data.permissions || []))
+        .then((data) => {
+          setPermissions(data.permissions || []);
+          setCustomRoles(data.roles || []);
+        })
         .catch(() => setLoadError(true))
         .finally(() => setLoading(false));
     }, 0);
@@ -65,7 +77,10 @@ export default function ChannelPermissionsModal({ channelId, channelName, open, 
 
     // If hiding channel, also disable send
     if (field === "canView" && !newVal) updates.canSend = false;
+    await savePermission(role, updates);
+  }
 
+  async function savePermission(role: string, updates: { canView: boolean; canSend: boolean }) {
     setSaving(role);
     try {
       const res = await fetch(`/api/channels/${channelId}/permissions`, {
@@ -95,7 +110,32 @@ export default function ChannelPermissionsModal({ channelId, channelName, open, 
     setSaving(null);
   }
 
+  async function removeOverride(role: string) {
+    setSaving(role);
+    try {
+      const res = await fetch(
+        `/api/channels/${channelId}/permissions?role=${encodeURIComponent(role)}`,
+        { method: "DELETE" },
+      );
+      if (res.ok) {
+        setPermissions((prev) => prev.filter((p) => p.role !== role));
+      } else {
+        await toastResponseError(res, "Failed to remove the override");
+      }
+    } catch {
+      toast("Failed to remove the override", "error");
+    }
+    setSaving(null);
+  }
+
   if (!open) return null;
+
+  const roleOverrides = customRoles.filter((role) => permissions.some((p) => p.role === role.key));
+  const addableRoles = customRoles.filter((role) => !permissions.some((p) => p.role === role.key));
+  const rows: { key: string; label: string; color?: string; removable: boolean }[] = [
+    ...ROLES.map((role) => ({ key: role, label: ROLE_LABELS[role], removable: false })),
+    ...roleOverrides.map((role) => ({ key: role.key, label: `@${role.name}`, color: role.color, removable: true })),
+  ];
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
@@ -143,28 +183,29 @@ export default function ChannelPermissionsModal({ channelId, channelName, open, 
 
               <div className="space-y-3">
                 {/* Header */}
-                <div className="grid grid-cols-3 gap-2 text-[10px] uppercase text-[var(--muted)] font-semibold px-1">
+                <div className="grid grid-cols-[1fr_4rem_4rem_1.5rem] gap-2 text-[10px] uppercase text-[var(--muted)] font-semibold px-1">
                   <span>Role</span>
                   <span className="text-center">View</span>
                   <span className="text-center">Send</span>
+                  <span />
                 </div>
 
-                {ROLES.map((role) => {
+                {rows.map(({ key: role, label, color, removable }) => {
                   const perm = getPermission(role);
                   const isSaving = saving === role;
                   return (
                     <div
                       key={role}
-                      className="grid grid-cols-3 gap-2 items-center py-2 px-1 rounded-lg hover:bg-[var(--panel-2)]/30 transition-colors"
+                      className="grid grid-cols-[1fr_4rem_4rem_1.5rem] gap-2 items-center py-2 px-1 rounded-lg hover:bg-[var(--panel-2)]/30 transition-colors"
                     >
-                      <span className="text-sm text-[var(--text)] font-medium">{ROLE_LABELS[role]}</span>
+                      <span className="text-sm text-[var(--text)] font-medium truncate" style={color ? { color } : undefined} title={label}>{label}</span>
                       <div className="flex justify-center">
                         <button
                           onClick={() => togglePermission(role, "canView")}
                           disabled={isSaving}
                           role="switch"
                           aria-checked={perm.canView}
-                          aria-label={`${ROLE_LABELS[role]} can view`}
+                          aria-label={`${label} can view`}
                           className={`w-9 h-5 rounded-full transition-colors relative ${
                             perm.canView ? "bg-[var(--accent)]" : "bg-[var(--accent-2)]/30"
                           } ${isSaving ? "opacity-50" : ""}`}
@@ -180,7 +221,7 @@ export default function ChannelPermissionsModal({ channelId, channelName, open, 
                           disabled={isSaving || !perm.canView}
                           role="switch"
                           aria-checked={perm.canSend}
-                          aria-label={`${ROLE_LABELS[role]} can send messages`}
+                          aria-label={`${label} can send messages`}
                           className={`w-9 h-5 rounded-full transition-colors relative ${
                             perm.canSend ? "bg-[var(--accent)]" : "bg-[var(--accent-2)]/30"
                           } ${isSaving || !perm.canView ? "opacity-50" : ""}`}
@@ -190,10 +231,53 @@ export default function ChannelPermissionsModal({ channelId, channelName, open, 
                           }`} />
                         </button>
                       </div>
+                      {removable ? (
+                        <button
+                          onClick={() => void removeOverride(role)}
+                          disabled={isSaving}
+                          aria-label={`Remove the ${label} override`}
+                          title="Remove override"
+                          className="text-[var(--muted)] hover:text-[var(--danger)] text-lg leading-none disabled:opacity-50"
+                        >
+                          &times;
+                        </button>
+                      ) : <span />}
                     </div>
                   );
                 })}
               </div>
+
+              {addableRoles.length > 0 && (
+                <form
+                  className="flex items-center gap-2"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (!roleToAdd) return;
+                    void savePermission(roleToAdd, { canView: true, canSend: true });
+                    setRoleToAdd("");
+                  }}
+                >
+                  <label htmlFor="channel-permission-role" className="sr-only">Add a role override</label>
+                  <select
+                    id="channel-permission-role"
+                    value={roleToAdd}
+                    onChange={(e) => setRoleToAdd(e.target.value)}
+                    className="flex-1 min-w-0 px-2 py-1.5 text-sm bg-[var(--panel-2)] text-[var(--text)] border border-[var(--accent-2)]/30 rounded focus:outline-none focus:border-[var(--accent)]"
+                  >
+                    <option value="">Add a role override…</option>
+                    {addableRoles.map((role) => (
+                      <option key={role.key} value={role.key}>@{role.name}</option>
+                    ))}
+                  </select>
+                  <button
+                    type="submit"
+                    disabled={!roleToAdd || saving !== null}
+                    className="text-xs px-3 py-1.5 rounded bg-[var(--accent-2)]/40 text-[var(--text)] hover:bg-[var(--accent-2)]/60 disabled:opacity-40 transition-colors"
+                  >
+                    Add
+                  </button>
+                </form>
+              )}
 
               {saved && (
                 <p className="text-xs text-[var(--accent)] text-center" role="status">Saved</p>
@@ -201,7 +285,8 @@ export default function ChannelPermissionsModal({ channelId, channelName, open, 
 
               <div className="pt-2 border-t border-[var(--accent-2)]/20">
                 <p className="text-[10px] text-[var(--muted)] italic">
-                  Changes take effect immediately. Higher roles inherit lower role permissions.
+                  Changes take effect immediately. A custom role override replaces the tier rule for
+                  members who hold that role; with several, the most permissive one wins.
                 </p>
               </div>
             </>

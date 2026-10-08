@@ -117,11 +117,19 @@ describe("double-submits resolve without 500s", () => {
   it("duplicate custom emoji name is a 409", async () => {
     const url = `http://test.local/api/servers/${serverId}/emoji`;
     const params = () => ({ params: Promise.resolve({ serverId }) });
-    const body = { name: "campfire", url: "https://example.test/campfire.png" };
+    const body = { name: "campfire", url: "/uploads/campfire.png" };
     expect((await createEmoji(json(url, "POST", body), params())).status).toBe(201);
     const duplicate = await createEmoji(json(url, "POST", body), params());
     expect(duplicate.status).toBe(409);
     expect((await duplicate.json()).error).toMatch(/already exists/);
+  });
+
+  it("rejects custom emoji images that aren't our own uploads", async () => {
+    const url = `http://test.local/api/servers/${serverId}/emoji`;
+    const params = () => ({ params: Promise.resolve({ serverId }) });
+    for (const bad of ["https://evil.example/x.png", "javascript:alert(1)", "/uploads/../x.png", "/uploads/x.svg"]) {
+      expect((await createEmoji(json(url, "POST", { name: "nope", url: bad }), params())).status).toBe(400);
+    }
   });
 });
 

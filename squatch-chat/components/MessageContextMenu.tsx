@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import EmojiPicker from "./EmojiPicker";
+import type { CustomEmojiMap } from "@/lib/customEmoji";
 
 interface MessageContextMenuProps {
   x: number;
@@ -26,6 +27,8 @@ interface MessageContextMenuProps {
   onTranslate?: () => void;
   /** Report this message to the instance operator (hidden on your own messages). */
   onReport?: () => void;
+  /** This server's custom emoji, offered in the full reaction picker. */
+  customEmojis?: CustomEmojiMap;
   onClose: () => void;
 }
 
@@ -51,6 +54,7 @@ export default function MessageContextMenu({
   onJournal,
   onTranslate,
   onReport,
+  customEmojis,
   onClose,
 }: MessageContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
@@ -194,6 +198,7 @@ export default function MessageContextMenu({
       {showFullPicker && (
         <div className="absolute left-full top-0 ml-1 z-[10000]" onMouseDown={(e) => e.stopPropagation()}>
           <EmojiPicker
+            customEmojis={customEmojis}
             onSelect={(emoji) => { onReact(emoji); onClose(); }}
             onClose={() => setShowFullPicker(false)}
           />

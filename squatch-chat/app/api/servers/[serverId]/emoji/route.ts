@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isSafeCustomEmojiUrl } from "@/lib/customEmoji";
 import { getSession } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { prismaErrorCode } from "@/lib/prismaErrors";
@@ -43,6 +44,10 @@ export async function POST(
 
   if (typeof name !== "string" || !name || typeof url !== "string" || !url) {
     return NextResponse.json({ error: "Name and URL required" }, { status: 400 });
+  }
+  // Only our own uploaded image paths — clients refuse to render anything else anyway.
+  if (!isSafeCustomEmojiUrl(url)) {
+    return NextResponse.json({ error: "Emoji image must be an uploaded PNG, JPG, GIF, or WebP" }, { status: 400 });
   }
 
   if (!/^[a-zA-Z0-9_]{1,32}$/.test(name)) {

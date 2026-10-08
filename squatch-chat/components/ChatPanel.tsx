@@ -5,8 +5,7 @@ import { getSocket } from "@/lib/socket";
 import { truncateName } from "@/lib/utils";
 import { sounds } from "@/lib/sounds";
 import { toast, toastResponseError } from "@/lib/toast";
-import { evaluateUploadPolicy } from "@/lib/uploadPolicy";
-import { ensureRuntimeConfig } from "@/hooks/useRuntimeConfig";
+import { checkUploadAllowed, UPLOAD_ACCEPT, uploadPrivateAttachment } from "@/lib/attachmentUpload";
 import MessageBubble from "./MessageBubble";
 import PinnedMessagesPanel from "./PinnedMessagesPanel";
 import SavedMessagesPanel from "./SavedMessagesPanel";
@@ -21,6 +20,8 @@ import { checkAutoMod } from "./AutoModSettings";
 import { VoiceNoteRecorder } from "./VoiceNoteRecorder";
 import PromptDialog, { type PromptDialogRequest } from "./PromptDialog";
 import ChatIcon, { type ChatIconName } from "./ChatIcons";
+import { useServerEmojis } from "@/hooks/useServerEmojis";
+import type { CustomEmojiMap } from "@/lib/customEmoji";
 
 // ── Formatting toolbar ────────────────────────────────────────────────────────
 
@@ -244,9 +245,6 @@ type SidePanel = "pins" | "journal" | "saved";
 const PAGE_SIZE = 50;
 const MAX_JUMP_PAGES = 10;
 const GROUP_WINDOW_MS = 5 * 60 * 1000;
-// Mirrors the server allow-list in lib/uploadPolicy.ts (voice notes use the recorder).
-const UPLOAD_ACCEPT =
-  "image/jpeg,image/png,image/gif,image/webp,application/pdf,text/plain,application/zip,.jpg,.jpeg,.png,.gif,.webp,.pdf,.txt,.zip";
 
 function isPendingMessage(message: Message): boolean {
   return Boolean(message.pending) || message.id.startsWith("pending-");
@@ -300,7 +298,9 @@ function saveDraft(key: string, text: string) {
 }
 
 export default function ChatPanel(props: ChatPanelProps) {
-  return <ChatPanelContent key={props.channelId} {...props} />;
+  // Fetched here, outside the per-channel remount, so it loads once per server.
+  const customEmojis = useServerEmojis(props.serverId);
+  return <ChatPanelContent key={props.channelId} {...props} customEmojis={customEmojis} />;
 }
 
 function ChatPanelContent({
@@ -319,7 +319,8 @@ function ChatPanelContent({
   onFocusHandled,
   purgedMessageIds,
   onJumpToMessage,
-}: ChatPanelProps) {
+  customEmojis,
+}: ChatPanelProps & { customEmojis: CustomEmojiMap }) {
   const topicBaseline = channelTopic ?? "";
   const [messages, setMessages] = useState<Message[]>([]);
   const [bookmarkedMessageIds, setBookmarkedMessageIds] = useState<Set<string>>(new Set());
@@ -1260,44 +1261,10 @@ function ChatPanelContent({
     }
   }
 
-  function uploadWithProgress(
-    formData: FormData,
-    onProgress: (pct: number) => void,
-  ): Promise<{ attachmentId: string; url: string; name: string }> {
-    return new Promise((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-      xhr.upload.addEventListener("progress", (e) => {
-        if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
-      });
-      xhr.addEventListener("load", () => {
-        let response: { attachmentId?: string; url?: string; name?: string; error?: string } = {};
-        try {
-          response = JSON.parse(xhr.responseText);
-        } catch {
-          // Fall through to the generic upload error below.
-        }
-        if (xhr.status >= 200 && xhr.status < 300) {
-          if (response.attachmentId && response.url && response.name) {
-            resolve({ attachmentId: response.attachmentId, url: response.url, name: response.name });
-          } else {
-            reject(new Error("Upload response was incomplete"));
-          }
-        } else {
-          reject(new Error(response.error || (xhr.status === 413 ? "File too large for this server." : "Upload failed")));
-        }
-      });
-      xhr.addEventListener("error", () => reject(new Error("Upload failed — check your connection.")));
-      xhr.open("POST", "/api/attachments");
-      xhr.send(formData);
-    });
-  }
-
   async function handleVoiceNoteSend(file: File): Promise<void> {
     setUploadProgress(1);
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-      const { attachmentId } = await uploadWithProgress(formData, (pct) =>
+      const { attachmentId } = await uploadPrivateAttachment(file, (pct) =>
         setUploadProgress(pct),
       );
 
@@ -1333,30 +1300,15 @@ function ChatPanelContent({
     if (file) void handleFileDrop(file);
   }
 
-  /** Client-side mirror of the server's upload policy so bad files fail fast with the same message. */
-  async function uploadAllowed(file: File): Promise<boolean> {
-    const config = await ensureRuntimeConfig();
-    const configured = (config as { maxUploadBytes?: unknown }).maxUploadBytes;
-    const maxBytes = typeof configured === "number" && configured > 0 ? configured : Number.POSITIVE_INFINITY;
-    const policy = evaluateUploadPolicy({ name: file.name, type: file.type, size: file.size }, maxBytes);
-    if (!policy.allowed) {
-      toast(policy.error, "error");
-      return false;
-    }
-    return true;
-  }
-
   async function handleFileDrop(file: File) {
     if (slowRemaining > 0) {
       toast(`Slow mode is on — wait ${slowRemaining}s to send again`, "info");
       return;
     }
-    if (!(await uploadAllowed(file))) return;
+    if (!(await checkUploadAllowed(file))) return;
     setUploadProgress(1);
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-      const { attachmentId } = await uploadWithProgress(formData, (pct) => setUploadProgress(pct));
+      const { attachmentId } = await uploadPrivateAttachment(file, (pct) => setUploadProgress(pct));
       const res = await fetch("/api/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1703,6 +1655,7 @@ function ChatPanelContent({
                     translatedText={translations.get(msg.id) ?? null}
                     blocked={blockedUserIds?.has(msg.author.id)}
                     replyAuthorBlocked={!!msg.replyTo && blockedUserIds?.has(msg.replyTo.author.id)}
+                    customEmojis={customEmojis}
                   />
                 </div>
               );
@@ -1779,6 +1732,7 @@ function ChatPanelContent({
         {showEmojiPicker && (
           <div className="absolute bottom-full right-4 mb-2 z-50">
             <EmojiPicker
+              customEmojis={customEmojis}
               onSelect={(emoji) => {
                 setNewMessage((prev) => prev + emoji);
                 inputRef.current?.focus();
@@ -1976,6 +1930,7 @@ function ChatPanelContent({
                   translatedText={translations.get(msg.id) ?? null}
                   blocked={blockedUserIds?.has(msg.author.id)}
                   replyAuthorBlocked={!!msg.replyTo && blockedUserIds?.has(msg.replyTo.author.id)}
+                  customEmojis={customEmojis}
                 />
               ))
             )}

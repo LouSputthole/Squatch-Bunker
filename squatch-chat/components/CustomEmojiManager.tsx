@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import { notifyServerEmojisChanged } from "@/hooks/useServerEmojis";
 import Image from "next/image";
 import { toast, toastResponseError } from "@/lib/toast";
 
@@ -95,6 +96,7 @@ export default function CustomEmojiManager({ serverId, open, onClose }: CustomEm
       }
       const { emoji } = await postRes.json();
       setEmojis((prev) => [...prev, emoji]);
+      notifyServerEmojisChanged(serverId);
       setNewName("");
       if (fileRef.current) fileRef.current.value = "";
     } catch {
@@ -116,6 +118,7 @@ export default function CustomEmojiManager({ serverId, open, onClose }: CustomEm
         return;
       }
       setEmojis((prev) => prev.filter((e) => e.id !== emojiId));
+      notifyServerEmojisChanged(serverId);
     } catch {
       toast("Failed to delete emoji. Check your connection and try again.", "error");
     } finally {

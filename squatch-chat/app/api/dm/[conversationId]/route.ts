@@ -63,6 +63,8 @@ export async function GET(
       include: {
         author: { select: { id: true, username: true, avatar: true } },
       },
+      // readAt drives the reader's own unread badge; it is not a read receipt.
+      omit: { readAt: true },
     });
     const hasOlder = rows.length > limit;
     const messages = hasOlder ? rows.slice(0, limit) : rows;
@@ -184,6 +186,7 @@ export async function POST(
         include: {
           author: { select: { id: true, username: true, avatar: true } },
         },
+        omit: { readAt: true },
       });
       await tx.conversation.update({
         where: { id: conversationId },

@@ -21,7 +21,13 @@ export async function GET() {
         messages: {
           orderBy: { createdAt: "desc" },
           take: 1,
-          select: { content: true, createdAt: true, authorId: true },
+          select: { content: true, attachmentName: true, createdAt: true, authorId: true },
+        },
+        // Unread = the other participant's messages this user has not opened.
+        _count: {
+          select: {
+            messages: { where: { authorId: { not: session.userId }, readAt: null } },
+          },
         },
       },
       orderBy: { updatedAt: "desc" },
@@ -34,6 +40,7 @@ export async function GET() {
         id: c.id,
         otherUser,
         lastMessage,
+        unreadCount: c._count.messages,
         updatedAt: c.updatedAt,
       };
     });

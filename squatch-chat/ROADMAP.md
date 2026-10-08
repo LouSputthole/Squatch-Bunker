@@ -144,13 +144,13 @@ Exit: Campfire covers the high-value Discord workflows its target communities ac
 
 These are the ranked follow-on features after the current ten-feature wave:
 
-1. **Ranger Desk** — a moderation case inbox with evidence, assignment, action history, escalation, and appeals.
+1. **Ranger Desk** — a moderation case inbox with evidence, assignment, action history, escalation, and appeals. **First slice complete (2026-10-08):** moderators with MANAGE_MESSAGES/KICK/BAN see open message reports for channels they can view in their own server and resolve or dismiss them (audited); reports about the viewer and user-level reports never reach server moderators, and the instance admin page lists unscoped reports. Assignment, evidence capture, escalation, and appeals remain.
 2. **Fireside Stage** — **complete in worktree (2026-07-26):** the `fireside-stage` voice-room mode opens with the first arrival hosting; listeners raise hands into a FIFO queue, the host or a MOVE_MEMBERS moderator promotes/demotes, capacity is eight speakers, and host transfer/cleanup runs on leave, kick, move, and disconnect. Stage state shares the Lantern trust boundary: process-local, advisory, client-side audience muting — not media-enforced.
 3. **Trail Boards** — forum-style channels with tags, searchable posts, resolved/archived states, and durable topic ownership.
 4. **Ember Inbox** — **complete in worktree (2026-07-26):** durable per-user notifications (mentions, replies, DMs collapsed per conversation, friend requests) with unread state, mark-read/clear APIs, per-space all/mentions/none policy enforcement, quiet hours (client-evaluated, DB-synced), realtime `notification:new` push, and an inbox UI replacing the ephemeral bell. Digest/email delivery remains future work.
 5. **Gathering Seasons** — recurring Gatherings with external calendar links, host controls, capacity, waitlists, and reminder policy.
 
-Items 2 and 4 describe implementation scope, not a public release — they still pass through the release gates like everything else. Ranger Desk is next: safety tooling is the remaining prerequisite for larger public communities.
+Items 2 and 4 describe implementation scope, not a public release — they still pass through the release gates like everything else. The rest of Ranger Desk is next: safety tooling is the remaining prerequisite for larger public communities.
 
 ## Milestone 6 — deepen Campfire’s own flare
 

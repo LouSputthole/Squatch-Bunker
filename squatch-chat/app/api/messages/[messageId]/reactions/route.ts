@@ -5,6 +5,7 @@ import { getSession } from "@/lib/auth";
 import { resolveChannelAccess } from "@/lib/channelAccess";
 import { MAX_REACTION_EMOJI_LENGTH } from "@/lib/inputLimits";
 import { groupReactions } from "@/lib/messagePayload";
+import { parseCustomEmojiToken } from "@/lib/customEmoji";
 
 export async function POST(
   req: NextRequest,
@@ -56,8 +57,20 @@ export async function POST(
     // A double-click races two toggles. Losing either race is a no-op, not
     // an error: the reaction is already in the state that request wanted.
     if (existing) {
+      // Removing always works, even if a custom emoji was deleted since.
       await prisma.reaction.deleteMany({ where: { id: existing.id } });
     } else {
+      // A `:name:` reaction must be one of THIS server's custom emoji.
+      const customName = parseCustomEmojiToken(emoji);
+      if (customName) {
+        const customEmoji = await prisma.customEmoji.findUnique({
+          where: { serverId_name: { serverId: access.serverId, name: customName } },
+          select: { id: true },
+        });
+        if (!customEmoji) {
+          return NextResponse.json({ error: "Unknown custom emoji" }, { status: 400 });
+        }
+      }
       await prisma.reaction.create({
         data: {
           messageId,

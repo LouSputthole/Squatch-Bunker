@@ -43,6 +43,7 @@ import { useOfflineQueue } from "@/hooks/useOfflineQueue";
 import EmberInbox, { type InboxNotification } from "@/components/EmberInbox";
 import GatheringsPanel from "@/components/GatheringsPanel";
 import GuestUpgradeBanner from "@/components/GuestUpgradeBanner";
+import { useDmUnread } from "@/hooks/useDmUnread";
 
 import type { Channel, Server } from "@/types/chat";
 
@@ -85,6 +86,7 @@ function ChatPageInner() {
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [dmOpen, setDmOpen] = useState(false);
+  const dmUnread = useDmUnread(auth.user?.id, dmOpen);
   const [friendsOpen, setFriendsOpen] = useState(false);
   const [onboardingDone, setOnboardingDone] = useState(false);
   const [profileUserId, setProfileUserId] = useState<string | null>(null);
@@ -424,6 +426,7 @@ function ChatPageInner() {
       onServerCreated={handleServerCreated}
       onServerJoined={handleServerJoined}
       currentUserId={auth.user?.id}
+      dmUnreadCount={dmUnread.total}
       onServerUpdated={({ id, icon }) => {
         if (id === srv.activeServer?.id) srv.updateActiveServer({ icon });
         else srv.setServers((list) => list.map((s) => (s.id === id ? { ...s, icon } : s)));
@@ -473,11 +476,16 @@ function ChatPageInner() {
           </svg>
           <span className="text-[10px]">Camps</span>
         </button>
-        <button onClick={toggleDmPanel} className={mobileTabClass(dmOpen)} aria-label="Direct messages">
+        <button
+          onClick={toggleDmPanel}
+          className={`relative ${mobileTabClass(dmOpen)}`}
+          aria-label={dmUnread.total > 0 ? `Direct messages, ${dmUnread.total} unread` : "Direct messages"}
+        >
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
           </svg>
           <span className="text-[10px]">DMs</span>
+          {dmUnread.total > 0 && <span aria-hidden="true" className="absolute top-1.5 right-3 h-2 w-2 rounded-full bg-[var(--danger)]" />}
         </button>
         <button onClick={toggleFriendsPanel} className={mobileTabClass(friendsOpen)} aria-label="Friends">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -512,6 +520,7 @@ function ChatPageInner() {
             currentAvatar={auth.user.avatar}
             key={dmTargetConversationId ?? "dm"}
             initialConversationId={dmTargetConversationId}
+            onUnreadChange={dmUnread.setTotal}
             onClose={() => { setDmOpen(false); setDmTargetConversationId(null); }}
           />
         </div>

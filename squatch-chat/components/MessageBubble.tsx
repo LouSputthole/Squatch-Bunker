@@ -13,6 +13,8 @@ import BlockedMessageGate from "@/components/BlockedMessageGate";
 import ChatIcon, { type ChatIconName } from "@/components/ChatIcons";
 import PromptDialog from "@/components/PromptDialog";
 import ReportDialog from "@/components/ReportDialog";
+import CustomEmojiImage from "@/components/CustomEmojiImage";
+import { parseCustomEmojiToken, type CustomEmojiMap } from "@/lib/customEmoji";
 import { VOICE_NOTE_LABEL } from "@/lib/uploadPolicy";
 import { toast } from "@/lib/toast";
 
@@ -227,12 +229,13 @@ const EMOJI_DATA: { emoji: string; keywords: string }[] = [
 // Inline markdown + URL + mention combined regex
 // Groups: 1=`code`, 2=**bold**, 3=__bold__, 4=*italic*, 5=_italic_,
 //         6=~~strike~~, 7=URL, 8=@mention, 9=||spoiler||,
-//         10=[link text], 11=link url  (from [text](url) markdown)
+//         10=[link text], 11=link url  (from [text](url) markdown),
+//         12=:custom_emoji:
 const INLINE_RE =
-  /(`[^`\n]+`)|\*\*([^*\n]+)\*\*|__([^_\n]+)__|\*([^*\n]+)\*|_([^_\n]+)_|~~([^~\n]+)~~|(https?:\/\/[^\s<]+[^\s<.,;:!?'")\]])|(@\w+(?:#[a-f0-9]+)?)|(\|\|[^|\n]+\|\|)|\[([^\]\n]+)\]\(([^)\s]+)\)/g;
+  /(`[^`\n]+`)|\*\*([^*\n]+)\*\*|__([^_\n]+)__|\*([^*\n]+)\*|_([^_\n]+)_|~~([^~\n]+)~~|(https?:\/\/[^\s<]+[^\s<.,;:!?'")\]])|(@\w+(?:#[a-f0-9]+)?)|(\|\|[^|\n]+\|\|)|\[([^\]\n]+)\]\(([^)\s]+)\)|(:[A-Za-z0-9_]{1,32}:)/g;
 
 let _inlineKey = 0;
-function renderInline(text: string): React.ReactNode {
+function renderInline(text: string, emojis?: CustomEmojiMap): React.ReactNode {
   const parts: React.ReactNode[] = [];
   let last = 0;
   INLINE_RE.lastIndex = 0;
@@ -240,6 +243,22 @@ function renderInline(text: string): React.ReactNode {
   while ((m = INLINE_RE.exec(text)) !== null) {
     if (m.index > last) parts.push(text.slice(last, m.index));
     const k = _inlineKey++;
+    if (m[12]) {
+      // `:name:` renders as an image only for this server's own emoji (URLs
+      // from the emoji API). Otherwise keep the leading colon as text and
+      // rescan from the next character so `:no:smile:` still finds `:smile:`.
+      const name = parseCustomEmojiToken(m[12]);
+      const url = name ? emojis?.get(name) : undefined;
+      if (name && url) {
+        parts.push(<CustomEmojiImage key={k} name={name} url={url} className="h-[1.375em] w-[1.375em] align-text-bottom" />);
+        last = m.index + m[0].length;
+      } else {
+        parts.push(":");
+        last = m.index + 1;
+        INLINE_RE.lastIndex = last;
+      }
+      continue;
+    }
     if (m[1]) parts.push(<code key={k} className="bg-black/30 text-[var(--accent)] px-1 py-0.5 rounded text-[0.85em] font-mono">{m[1].slice(1, -1)}</code>);
     else if (m[2]) parts.push(<strong key={k} className="font-bold">{m[2]}</strong>);
     else if (m[3]) parts.push(<strong key={k} className="font-bold">{m[3]}</strong>);
@@ -264,7 +283,7 @@ function renderInline(text: string): React.ReactNode {
   return parts.length === 1 && typeof parts[0] === "string" ? parts[0] : <>{parts}</>;
 }
 
-function renderContent(text: string): React.ReactNode {
+function renderContent(text: string, emojis?: CustomEmojiMap): React.ReactNode {
   // Extract ``` code blocks first
   const CODE_BLOCK_RE = /```([^`]*)```/g;
   const segments: Array<{ isBlock: boolean; content: string }> = [];
@@ -295,11 +314,11 @@ function renderContent(text: string): React.ReactNode {
       if (line.startsWith("> ")) {
         nodes.push(
           <span key={`${si}-${li}`} className="flex border-l-[3px] border-[var(--accent-2)] pl-2 my-0.5 text-[var(--muted)] italic">
-            {renderInline(line.slice(2))}
+            {renderInline(line.slice(2), emojis)}
           </span>
         );
       } else {
-        nodes.push(<span key={`${si}-${li}`}>{renderInline(line)}</span>);
+        nodes.push(<span key={`${si}-${li}`}>{renderInline(line, emojis)}</span>);
         if (!isLastLine) nodes.push(<br key={`br-${si}-${li}`} />);
       }
     });
@@ -371,6 +390,8 @@ interface MessageBubbleProps {
   highlighted?: boolean;
   blocked?: boolean;
   replyAuthorBlocked?: boolean;
+  /** This server's custom emoji (name -> URL from the emoji API). Absent in DMs. */
+  customEmojis?: CustomEmojiMap;
 }
 
 function formatTimestamp(iso: string): string {
@@ -501,6 +522,7 @@ export default function MessageBubble({
   highlighted,
   blocked = false,
   replyAuthorBlocked = false,
+  customEmojis,
 }: MessageBubbleProps) {
   const [localEditing, setLocalEditing] = useState(false);
   const editing = onEditingChange ? Boolean(editingProp) : localEditing;
@@ -587,6 +609,9 @@ export default function MessageBubble({
         emoji === emojiSearch
       )
     : EMOJI_DATA;
+  const filteredCustomEmojis = customEmojis
+    ? [...customEmojis].filter(([name]) => name.toLowerCase().includes(emojiSearch.trim().toLowerCase()))
+    : [];
 
   if (message.isSystem) {
     return (
@@ -703,7 +728,7 @@ export default function MessageBubble({
             <>
               {message.content && (
                 <div className="text-[var(--text)] text-sm leading-relaxed break-words">
-                  {renderContent(message.content)}
+                  {renderContent(message.content, customEmojis)}
                   {wasEdited && (
                     <span
                       className="ml-1 select-none text-[10px] text-[var(--muted)]"
@@ -782,7 +807,7 @@ export default function MessageBubble({
                     aria-label={`${emoji} ${data.count} ${data.count === 1 ? "reaction" : "reactions"}`}
                     aria-pressed={iMine}
                   >
-                    <span>{emoji}</span>
+                    <ReactionEmoji emoji={emoji} customEmojis={customEmojis} />
                     <span className="font-medium">{data.count}</span>
                   </button>
                 );
@@ -858,7 +883,25 @@ export default function MessageBubble({
               />
             </div>
             <div className="overflow-y-auto px-1 pb-1.5" style={{ maxHeight: 200 }}>
-              {filteredEmojis.length === 0 ? (
+              {filteredCustomEmojis.length > 0 && (
+                <>
+                  <p className="px-1 pb-0.5 text-[10px] font-semibold uppercase text-[var(--muted)]">This server</p>
+                  <div className="grid grid-cols-8 gap-0.5 mb-1">
+                    {filteredCustomEmojis.map(([name, url]) => (
+                      <button
+                        key={name}
+                        type="button"
+                        onClick={() => handleReact(`:${name}:`)}
+                        className="flex items-center justify-center p-1 rounded hover:bg-[var(--panel-2)] transition-colors"
+                        aria-label={`:${name}:`}
+                      >
+                        <CustomEmojiImage name={name} url={url} size={22} className="h-[22px] w-[22px]" />
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+              {filteredEmojis.length === 0 && filteredCustomEmojis.length === 0 ? (
                 <p className="text-xs text-[var(--muted)] text-center py-3">No results</p>
               ) : (
                 <div className="grid grid-cols-8 gap-0.5">
@@ -927,6 +970,7 @@ export default function MessageBubble({
           onJournal={onJournal ? () => onJournal(message.id) : undefined}
           onTranslate={onTranslate ? () => { void handleTranslate(); } : undefined}
           onReport={canReport ? () => setReporting(true) : undefined}
+          customEmojis={customEmojis}
           onClose={() => setContextMenu(null)}
         />
       )}
@@ -952,7 +996,15 @@ export default function MessageBubble({
   );
 }
 
-function AttachmentPreview({ url, name, onOpenLightbox }: { url: string; name?: string | null; onOpenLightbox: (src: string) => void }) {
+/** A reaction key: a custom `:name:` emoji renders as its image, anything else as text. */
+function ReactionEmoji({ emoji, customEmojis }: { emoji: string; customEmojis?: CustomEmojiMap }) {
+  const name = parseCustomEmojiToken(emoji);
+  const url = name ? customEmojis?.get(name) : undefined;
+  if (name && url) return <CustomEmojiImage name={name} url={url} size={16} className="h-4 w-4" />;
+  return <span>{emoji}</span>;
+}
+
+export function AttachmentPreview({ url, name, onOpenLightbox }: { url: string; name?: string | null; onOpenLightbox: (src: string) => void }) {
   const fileName = name || url.split("/").pop() || "file";
   const fileType = getFileType(fileName);
 
