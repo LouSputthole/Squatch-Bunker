@@ -28,6 +28,8 @@ export interface User {
   email: string;
   avatar?: string | null;
   statusMessage?: string | null;
+  isGuest?: boolean;
+  guestExpiresAt?: string | null;
 }
 
 export interface VoiceParticipant {

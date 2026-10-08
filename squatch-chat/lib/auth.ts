@@ -106,4 +106,11 @@ export function setTokenCookie(response: Response, token: string): void {
   );
 }
 
+export function clearTokenCookie(response: Response): void {
+  response.headers.append(
+    "Set-Cookie",
+    `${COOKIE_NAME}=; ${config.cookieScopeFlags} Max-Age=0`
+  );
+}
+
 export { COOKIE_NAME };

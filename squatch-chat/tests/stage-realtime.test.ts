@@ -27,6 +27,7 @@ interface StageError {
 let httpServer: HttpServer;
 let io: IOServer;
 let port: number;
+let serverId: string;
 let stageChannelId: string;
 let hangoutChannelId: string;
 const userIds: string[] = [];
@@ -111,6 +112,7 @@ beforeAll(async () => {
   const server = await prisma.server.create({
     data: { name: "Stage test", ownerId: users[0].id },
   });
+  serverId = server.id;
   await prisma.serverMember.createMany({
     data: [
       ...users.map((user, index) => ({
@@ -294,5 +296,38 @@ describe("Fireside Stage realtime state", () => {
     outsider.emit("stage:request", stageChannelId);
     await delay(150);
     expect(outsiderUpdates).toEqual([]);
+  });
+
+  it("opens and closes a stage when a live room's mode changes", async () => {
+    const camper = await connect(tokens[0]);
+    const editor = await connect(tokens[1]);
+    await joinVoice(camper, hangoutChannelId);
+    await joinVoice(editor, hangoutChannelId);
+
+    await prisma.channel.update({
+      where: { id: hangoutChannelId },
+      data: { roomMode: "fireside-stage" },
+    });
+    try {
+      // The member who changed the mode is in the room, so they host.
+      const opened = waitForStage(camper, (s) => s.channelId === hangoutChannelId && s.active);
+      editor.emit("channels:updated", { serverId, channelIds: [hangoutChannelId] });
+      const state = await opened;
+      expect(state.hostId).toBe(userIds[1]);
+      expect(state.speakers.map((s) => s.userId)).toEqual([userIds[1]]);
+
+      await prisma.channel.update({
+        where: { id: hangoutChannelId },
+        data: { roomMode: "hangout" },
+      });
+      const closed = waitForStage(camper, (s) => s.channelId === hangoutChannelId && !s.active);
+      editor.emit("channels:updated", { serverId, channelIds: [hangoutChannelId] });
+      await closed;
+    } finally {
+      await prisma.channel.update({
+        where: { id: hangoutChannelId },
+        data: { roomMode: "hangout" },
+      });
+    }
   });
 });

@@ -3,9 +3,11 @@ import { getSession } from "@/lib/auth";
 import { resolveChannelAccess } from "@/lib/channelAccess";
 import { memberHasPermission } from "@/lib/serverRoles";
 import {
-  removeUnreferencedPrivateUpload,
-  removeUnreferencedUpload,
+  cleanupDeletedMessageUploads,
+  collectThreadReplies,
 } from "@/lib/messageRetention";
+import { MAX_MESSAGE_LENGTH } from "@/lib/inputLimits";
+import { channelMessageInclude, toChannelMessagePayload } from "@/lib/messagePayload";
 
 export async function GET(
   _request: Request,
@@ -107,9 +109,9 @@ export async function PATCH(
       const updated = await prisma.message.update({
         where: { id: messageId },
         data: { pinned: body.pinned },
-        include: { author: { select: { id: true, username: true, avatar: true } } },
+        include: channelMessageInclude,
       });
-      return NextResponse.json({ message: updated });
+      return NextResponse.json({ message: toChannelMessagePayload(updated) });
     }
 
     if (!access.canSend) {
@@ -121,15 +123,21 @@ export async function PATCH(
     if (typeof content !== "string" || !content.trim()) {
       return NextResponse.json({ error: "Content is required" }, { status: 400 });
     }
+    if (content.length > MAX_MESSAGE_LENGTH) {
+      return NextResponse.json(
+        { error: `Message too long (max ${MAX_MESSAGE_LENGTH} characters)` },
+        { status: 400 },
+      );
+    }
     if (message.authorId !== session.userId) {
       return NextResponse.json({ error: "Not your message" }, { status: 403 });
     }
     const updated = await prisma.message.update({
       where: { id: messageId },
       data: { content: content.trim(), editedAt: new Date() },
-      include: { author: { select: { id: true, username: true, avatar: true } } },
+      include: channelMessageInclude,
     });
-    return NextResponse.json({ message: updated });
+    return NextResponse.json({ message: toChannelMessagePayload(updated) });
   } catch (err) {
     console.error("[Campfire] Failed to edit message:", err);
     return NextResponse.json({ error: "Failed to edit message" }, { status: 500 });
@@ -185,15 +193,42 @@ export async function DELETE(
       return NextResponse.json({ error: "Not authorized" }, { status: 403 });
     }
 
-    await prisma.message.delete({ where: { id: messageId } });
-    await Promise.all([
-      message.attachmentUrl ? removeUnreferencedUpload(message.attachmentUrl) : Promise.resolve(),
-      message.privateUploadId
-        ? removeUnreferencedPrivateUpload(message.privateUploadId)
-        : Promise.resolve(),
-    ]);
+    // Thread replies go with their parent (reactions, bookmarks, and polls
+    // cascade off each row; Journal snapshots keep their copy). Authors can only
+    // take a thread down with them when every reply is theirs — other members'
+    // replies need MANAGE_MESSAGES.
+    const outcome = await prisma.$transaction(async (tx) => {
+      const replies = await collectThreadReplies(tx, [messageId]);
+      const replyIds = replies.map((reply) => reply.id);
+      if (isAuthor && replyIds.length > 0) {
+        const othersReplied = await tx.message.count({
+          where: { id: { in: replyIds }, authorId: { not: session.userId } },
+        });
+        if (
+          othersReplied > 0 &&
+          !(await memberHasPermission(access.serverId, session.userId, "MANAGE_MESSAGES"))
+        ) {
+          return null;
+        }
+      }
+      await tx.message.deleteMany({ where: { id: { in: [messageId, ...replyIds] } } });
+      return [{ id: messageId, ...message }, ...replies];
+    });
+    if (!outcome) {
+      return NextResponse.json(
+        { error: "Others have replied in this thread, so only a moderator can delete it. You can edit it instead." },
+        { status: 409 },
+      );
+    }
+    const deleted = outcome;
+    await cleanupDeletedMessageUploads(deleted);
 
-    return NextResponse.json({ deleted: true, messageId, channelId: message.channelId });
+    return NextResponse.json({
+      deleted: true,
+      messageId,
+      channelId: message.channelId,
+      deletedMessageIds: deleted.map((row) => row.id),
+    });
   } catch (err) {
     console.error("[Campfire] Failed to delete message:", err);
     return NextResponse.json({ error: "Failed to delete message" }, { status: 500 });

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useEscape } from "@/hooks/useEscape";
 
 interface PurgeMessagesModalProps {
   channelId: string;
@@ -16,6 +17,10 @@ export default function PurgeMessagesModal({ channelId, channelName, open, onClo
   const [purging, setPurging] = useState(false);
   const [result, setResult] = useState<{ deleted: number } | null>(null);
   const [error, setError] = useState("");
+
+  useEscape(() => {
+    if (!purging) onClose();
+  }, open);
 
   async function handlePurge() {
     setPurging(true);
@@ -37,7 +42,7 @@ export default function PurgeMessagesModal({ channelId, channelName, open, onClo
         setResult({ deleted: data.deleted });
         if (data.messageIds?.length && onPurged) onPurged(data.messageIds);
       } else {
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
         setError(data.error || "Failed to purge");
       }
     } catch {
@@ -49,17 +54,20 @@ export default function PurgeMessagesModal({ channelId, channelName, open, onClo
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => { if (!purging) onClose(); }}>
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="purge-messages-title"
         className="w-full max-w-sm bg-[var(--panel)] rounded-xl border border-[var(--accent-2)]/30 shadow-2xl overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--accent-2)]/20">
           <div>
-            <h2 className="text-lg font-bold text-[var(--danger)]">Purge Messages</h2>
+            <h2 id="purge-messages-title" className="text-lg font-bold text-[var(--danger)]">Purge Messages</h2>
             <p className="text-xs text-[var(--muted)]">#{channelName}</p>
           </div>
-          <button onClick={onClose} className="text-[var(--muted)] hover:text-[var(--text)] text-xl leading-none">&times;</button>
+          <button onClick={onClose} aria-label="Close" className="text-[var(--muted)] hover:text-[var(--text)] text-xl leading-none">&times;</button>
         </div>
 
         <div className="p-5 space-y-4">
@@ -68,8 +76,10 @@ export default function PurgeMessagesModal({ channelId, channelName, open, onClo
           </p>
 
           <div>
-            <label className="text-xs text-[var(--muted)] block mb-1">Number of messages (1-100)</label>
+            <label htmlFor="purge-count" className="text-xs text-[var(--muted)] block mb-1">Number of messages (1-100)</label>
             <input
+              id="purge-count"
+              autoFocus
               type="number"
               min={1}
               max={100}
@@ -80,8 +90,9 @@ export default function PurgeMessagesModal({ channelId, channelName, open, onClo
           </div>
 
           <div>
-            <label className="text-xs text-[var(--muted)] block mb-1">Filter by user ID (optional)</label>
+            <label htmlFor="purge-user" className="text-xs text-[var(--muted)] block mb-1">Filter by user ID (optional)</label>
             <input
+              id="purge-user"
               type="text"
               value={userId}
               onChange={(e) => setUserId(e.target.value)}
@@ -90,8 +101,8 @@ export default function PurgeMessagesModal({ channelId, channelName, open, onClo
             />
           </div>
 
-          {error && <p className="text-xs text-[var(--danger)]">{error}</p>}
-          {result && <p className="text-xs text-green-400">Deleted {result.deleted} messages</p>}
+          {error && <p role="alert" className="text-xs text-[var(--danger)]">{error}</p>}
+          {result && <p role="status" className="text-xs text-[var(--accent)]">Deleted {result.deleted} message{result.deleted === 1 ? "" : "s"}</p>}
 
           <button
             onClick={handlePurge}

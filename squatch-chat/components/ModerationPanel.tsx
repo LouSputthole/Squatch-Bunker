@@ -1,6 +1,9 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import PromptDialog, { type PromptDialogRequest } from "@/components/PromptDialog";
+import { useEscape } from "@/hooks/useEscape";
+import { toast, toastResponseError } from "@/lib/toast";
 
 interface Member {
   id: string;
@@ -20,10 +23,11 @@ interface ModerationPanelProps {
 
 const ROLE_OPTIONS = ["admin", "mod", "member"] as const;
 
+// Same warm palette as MemberList.
 const ROLE_COLORS: Record<string, string> = {
-  owner: "#f59e0b",
-  admin: "#ef4444",
-  mod: "#3b82f6",
+  owner: "#f5b942",
+  admin: "#ef5d4f",
+  mod: "#7fb8a4",
   member: "",
 };
 
@@ -46,12 +50,19 @@ export default function ModerationPanel({
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
   const [pendingActions, setPendingActions] = useState<Set<string>>(new Set());
+  const [loadError, setLoadError] = useState(false);
+  const [dialog, setDialog] = useState<PromptDialogRequest | null>(null);
 
   const fetchMembers = useCallback(() => {
     setLoading(true);
+    setLoadError(false);
     fetch(`/api/servers/${serverId}/members`)
-      .then((res) => res.json())
+      .then((res) => {
+        if (!res.ok) throw new Error(`members ${res.status}`);
+        return res.json();
+      })
       .then((data) => setMembers(data.members || []))
+      .catch(() => setLoadError(true))
       .finally(() => setLoading(false));
   }, [serverId]);
 
@@ -60,6 +71,8 @@ export default function ModerationPanel({
     const timer = setTimeout(fetchMembers, 0);
     return () => clearTimeout(timer);
   }, [open, fetchMembers]);
+
+  useEscape(onClose, open && !dialog);
 
   if (!open) return null;
 
@@ -76,38 +89,79 @@ export default function ModerationPanel({
     });
   }
 
-  async function handleRoleChange(userId: string, role: string) {
+  /** Runs a member mutation; toasts the server's error and returns false on failure. */
+  async function memberRequest(userId: string, init: RequestInit, fallback: string): Promise<boolean> {
     setPending(userId, true);
-    const res = await fetch(`/api/servers/${serverId}/members/${userId}`, {
+    try {
+      const res = await fetch(`/api/servers/${serverId}/members/${userId}`, init);
+      if (!res.ok) {
+        await toastResponseError(res, fallback);
+        return false;
+      }
+      return true;
+    } catch {
+      toast(fallback, "error");
+      return false;
+    } finally {
+      setPending(userId, false);
+    }
+  }
+
+  async function handleRoleChange(userId: string, role: string) {
+    const ok = await memberRequest(userId, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ role }),
-    });
-    if (res.ok) setMembers((prev) => prev.map((m) => (m.id === userId ? { ...m, role } : m)));
-    setPending(userId, false);
+    }, "Failed to change role");
+    if (ok) setMembers((prev) => prev.map((m) => (m.id === userId ? { ...m, role } : m)));
   }
 
-  async function handleBan(userId: string, ban: boolean) {
-    if (ban && !confirm("Ban this member?")) return;
-    setPending(userId, true);
-    const res = await fetch(`/api/servers/${serverId}/members/${userId}`, {
+  async function applyBan(userId: string, ban: boolean): Promise<boolean> {
+    const ok = await memberRequest(userId, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ banned: ban }),
+    }, ban ? "Failed to ban member" : "Failed to unban member");
+    if (ok) setMembers((prev) => prev.map((m) => (m.id === userId ? { ...m, banned: ban } : m)));
+    return ok;
+  }
+
+  function handleBan(m: Member, ban: boolean) {
+    if (!ban) {
+      void applyBan(m.id, false);
+      return;
+    }
+    setDialog({
+      title: `Ban ${m.username}?`,
+      message: "They'll be removed and can't rejoin until unbanned.",
+      mode: "confirm",
+      confirmLabel: "Ban",
+      destructive: true,
+      onConfirm: async () => {
+        if (await applyBan(m.id, true)) setDialog(null);
+      },
     });
-    if (res.ok) setMembers((prev) => prev.map((m) => (m.id === userId ? { ...m, banned: ban } : m)));
-    setPending(userId, false);
   }
 
-  async function handleKick(userId: string) {
-    if (!confirm("Kick this member?")) return;
-    setPending(userId, true);
-    const res = await fetch(`/api/servers/${serverId}/members/${userId}`, { method: "DELETE" });
-    if (res.ok) setMembers((prev) => prev.filter((m) => m.id !== userId));
-    setPending(userId, false);
+  function handleKick(m: Member) {
+    setDialog({
+      title: `Kick ${m.username}?`,
+      message: "They'll be removed from the server but can rejoin with an invite.",
+      mode: "confirm",
+      confirmLabel: "Kick",
+      destructive: true,
+      onConfirm: async () => {
+        const ok = await memberRequest(m.id, { method: "DELETE" }, "Failed to kick member");
+        if (!ok) return;
+        setMembers((prev) => prev.filter((member) => member.id !== m.id));
+        setDialog(null);
+      },
+    });
   }
 
-  function MemberRow({ m }: { m: Member }) {
+  // A render helper rather than a nested component, so rows (and their role
+  // <select>) aren't remounted on every state change.
+  function renderMemberRow(m: Member) {
     const isSelf = m.id === currentUserId;
     const canAct = !isSelf && canActOn(currentUserRole, m.role);
     const busy = pendingActions.has(m.id);
@@ -115,7 +169,7 @@ export default function ModerationPanel({
     const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
     return (
-      <li className="flex items-center gap-3 px-4 py-2 hover:bg-[var(--panel-2)]/50 rounded-lg transition-colors">
+      <li key={m.id} className="flex items-center gap-3 px-4 py-2 hover:bg-[var(--panel-2)]/50 rounded-lg transition-colors">
         <div className="w-8 h-8 rounded-full bg-[var(--accent-2)] flex items-center justify-center text-sm font-semibold text-[var(--text)] shrink-0 select-none">
           {m.username[0]?.toUpperCase()}
         </div>
@@ -136,18 +190,18 @@ export default function ModerationPanel({
             >
               {ROLE_OPTIONS.map((r) => <option key={r} value={r}>{cap(r)}</option>)}
             </select>
-            <button disabled={busy} onClick={() => handleKick(m.id)} aria-label={`Kick ${m.username}`}
+            <button disabled={busy} onClick={() => handleKick(m)} aria-label={`Kick ${m.username}`}
               className="text-xs px-2 py-1 rounded bg-[var(--panel-2)] text-[var(--muted)] hover:bg-[var(--danger)]/20 hover:text-[var(--danger)] border border-[var(--accent-2)]/40 transition-colors disabled:opacity-50">
               Kick
             </button>
-            <button disabled={busy} onClick={() => handleBan(m.id, true)} aria-label={`Ban ${m.username}`}
+            <button disabled={busy} onClick={() => handleBan(m, true)} aria-label={`Ban ${m.username}`}
               className="text-xs px-2 py-1 rounded bg-[var(--danger)]/10 text-[var(--danger)] hover:bg-[var(--danger)]/20 border border-[var(--danger)]/30 transition-colors disabled:opacity-50">
               Ban
             </button>
           </div>
         )}
         {canAct && m.banned && (
-          <button disabled={busy} onClick={() => handleBan(m.id, false)} aria-label={`Unban ${m.username}`}
+          <button disabled={busy} onClick={() => handleBan(m, false)} aria-label={`Unban ${m.username}`}
             className="text-xs px-2 py-1 rounded bg-[var(--panel-2)] text-[var(--muted)] hover:text-[var(--text)] border border-[var(--accent-2)]/40 transition-colors disabled:opacity-50">
             Unban
           </button>
@@ -194,6 +248,7 @@ export default function ModerationPanel({
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search members..."
+            autoFocus
             className="w-full text-sm px-3 py-2 rounded-lg border border-[var(--accent-2)]/40 focus:outline-none focus:border-[var(--accent)]"
             style={{ background: "var(--panel-2)", color: "var(--text)" }}
             aria-label="Search members"
@@ -206,6 +261,16 @@ export default function ModerationPanel({
             <div className="flex justify-center py-12 text-sm" style={{ color: "var(--muted)" }}>
               Loading members...
             </div>
+          ) : loadError ? (
+            <div className="flex flex-col items-center gap-2 py-12 text-sm" role="alert" style={{ color: "var(--muted)" }}>
+              Couldn&apos;t load members.
+              <button
+                onClick={fetchMembers}
+                className="text-xs px-3 py-1 rounded bg-[var(--panel-2)] text-[var(--text)] hover:bg-[var(--accent-2)] transition-colors"
+              >
+                Retry
+              </button>
+            </div>
           ) : (
             <>
               {/* Active members */}
@@ -217,7 +282,7 @@ export default function ModerationPanel({
                   <p className="text-xs px-1" style={{ color: "var(--muted)" }}>No members found.</p>
                 ) : (
                   <ul className="space-y-0.5">
-                    {active.map((m) => <MemberRow key={m.id} m={m} />)}
+                    {active.map((m) => renderMemberRow(m))}
                   </ul>
                 )}
               </section>
@@ -229,7 +294,7 @@ export default function ModerationPanel({
                     Banned — {banned.length}
                   </p>
                   <ul className="space-y-0.5 opacity-70">
-                    {banned.map((m) => <MemberRow key={m.id} m={m} />)}
+                    {banned.map((m) => renderMemberRow(m))}
                   </ul>
                 </section>
               )}
@@ -237,6 +302,11 @@ export default function ModerationPanel({
           )}
         </div>
       </div>
+      {dialog && (
+        <div onClick={(e) => e.stopPropagation()}>
+          <PromptDialog key={dialog.title} {...dialog} onCancel={() => setDialog(null)} />
+        </div>
+      )}
     </div>
   );
 }

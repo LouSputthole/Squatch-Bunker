@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { resolveChannelAccess } from "@/lib/channelAccess";
+import { prismaErrorCode } from "@/lib/prismaErrors";
 
 export async function GET() {
   const session = await getSession();
@@ -60,10 +61,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Not authorized" }, { status: 403 });
     }
 
+    const where = { userId_messageId: { userId: session.userId, messageId } };
     const bookmark = await prisma.bookmark.upsert({
-      where: { userId_messageId: { userId: session.userId, messageId } },
+      where,
       create: { userId: session.userId, messageId },
       update: {},
+    }).catch((error: unknown) => {
+      // A concurrent save of the same bookmark won the insert.
+      if (prismaErrorCode(error) !== "P2002") throw error;
+      return prisma.bookmark.findUniqueOrThrow({ where });
     });
     return NextResponse.json({ bookmark }, { status: 201 });
   } catch (err) {
@@ -76,7 +82,14 @@ export async function DELETE(req: NextRequest) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   try {
-    const { messageId } = await req.json();
+    const body: unknown = await req.json().catch(() => null);
+    const messageId = body && typeof body === "object"
+      ? (body as Record<string, unknown>).messageId
+      : undefined;
+    // An undefined filter would match every one of the caller's bookmarks.
+    if (typeof messageId !== "string" || !messageId) {
+      return NextResponse.json({ error: "messageId is required" }, { status: 400 });
+    }
     const { prisma } = await import("@/lib/db");
     await prisma.bookmark.deleteMany({
       where: { userId: session.userId, messageId },

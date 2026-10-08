@@ -1,4 +1,5 @@
 import { unlink } from "node:fs/promises";
+import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { resolvePrivateUploadPath } from "@/lib/privateUploads";
 import { resolveUserMediaPath } from "@/lib/userMedia";
@@ -8,6 +9,51 @@ export const ALLOWED_RETENTION_DAYS = [1, 7, 30] as const;
 
 export function isRetentionDays(value: unknown): value is (typeof ALLOWED_RETENTION_DAYS)[number] {
   return typeof value === "number" && ALLOWED_RETENTION_DAYS.includes(value as 1 | 7 | 30);
+}
+
+export interface DeletableMessage {
+  id: string;
+  attachmentUrl: string | null;
+  privateUploadId: string | null;
+}
+
+/**
+ * Every thread reply beneath the given messages (replies can nest). The
+ * thread FK is ON DELETE SET NULL, so deleting only a parent would drop its
+ * replies into the main timeline; callers delete these alongside it.
+ */
+export async function collectThreadReplies(
+  database: Pick<Prisma.TransactionClient, "message">,
+  parentIds: string[],
+): Promise<DeletableMessage[]> {
+  const seen = new Set(parentIds);
+  const replies: DeletableMessage[] = [];
+  let frontier = parentIds;
+  while (frontier.length > 0) {
+    const children = await database.message.findMany({
+      where: { parentMessageId: { in: frontier } },
+      select: { id: true, attachmentUrl: true, privateUploadId: true },
+    });
+    const fresh = children.filter((child) => !seen.has(child.id));
+    for (const child of fresh) seen.add(child.id);
+    replies.push(...fresh);
+    frontier = fresh.map((child) => child.id);
+  }
+  return replies;
+}
+
+/** Remove upload files no surviving row references after a message delete. */
+export async function cleanupDeletedMessageUploads(messages: DeletableMessage[]) {
+  const attachmentUrls = new Set(
+    messages.map((message) => message.attachmentUrl).filter((url): url is string => !!url),
+  );
+  const privateUploadIds = new Set(
+    messages.map((message) => message.privateUploadId).filter((id): id is string => !!id),
+  );
+  await Promise.all([
+    ...[...attachmentUrls].map(removeUnreferencedUpload),
+    ...[...privateUploadIds].map(removeUnreferencedPrivateUpload),
+  ]);
 }
 
 export function localUploadPath(url: string): string | null {
@@ -174,21 +220,18 @@ export async function sweepExpiredMessages(
     });
     if (expired.length === 0) continue;
 
-    const removed = await prisma.message.deleteMany({
-      where: { id: { in: expired.map((message) => message.id) } },
+    // An expiring thread parent takes its (possibly newer) replies with it.
+    const doomed = await prisma.$transaction(async (tx) => {
+      const replies = await collectThreadReplies(tx, expired.map((message) => message.id));
+      const all = [...expired, ...replies];
+      const removed = await tx.message.deleteMany({
+        where: { id: { in: all.map((message) => message.id) } },
+      });
+      deletedMessages += removed.count;
+      return all;
     });
-    deletedMessages += removed.count;
 
-    const attachmentUrls = new Set(
-      expired.map((message) => message.attachmentUrl).filter((url): url is string => !!url),
-    );
-    const privateUploadIds = new Set(
-      expired.map((message) => message.privateUploadId).filter((id): id is string => !!id),
-    );
-    await Promise.all([
-      ...[...attachmentUrls].map(removeUnreferencedUpload),
-      ...[...privateUploadIds].map(removeUnreferencedPrivateUpload),
-    ]);
+    await cleanupDeletedMessageUploads(doomed);
   }
 
   return { deletedMessages, processedChannels: channels.length };

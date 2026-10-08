@@ -40,7 +40,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ serv
   // Only roles that actually belong to this server.
   const validRoles = await prisma.role.findMany({
     where: { serverId, id: { in: requested } },
-    select: { id: true, permissions: true, position: true },
+    select: { id: true, name: true, permissions: true, position: true },
   });
   const validIds = validRoles.map((r) => r.id);
   if (!actor.isOwner) {
@@ -66,6 +66,17 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ serv
   await prisma.$transaction([
     prisma.serverMemberRole.deleteMany({ where: { memberId: targetMemberId } }),
     ...validIds.map((roleId) => prisma.serverMemberRole.create({ data: { memberId: targetMemberId, roleId } })),
+    prisma.auditLog.create({
+      data: {
+        serverId,
+        actorId: session.userId,
+        targetId: userId,
+        action: "member_role_change",
+        detail: validRoles.length
+          ? `Custom roles set to: ${validRoles.map((role) => role.name).join(", ")}`
+          : "Custom roles cleared",
+      },
+    }),
   ]);
 
   await notifyRealtimeAuthorizationChange({

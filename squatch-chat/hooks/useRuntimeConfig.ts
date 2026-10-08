@@ -13,6 +13,8 @@ export interface RuntimeConfig {
   /** Unix epoch milliseconds; null for no TURN or explicit legacy static credentials. */
   turnExpiresAt: number | null;
   sfuAvailable: boolean;
+  /** Attachment size limit the server enforces for this caller (bytes). */
+  maxUploadBytes?: number;
 }
 
 const DEFAULT_CONFIG: RuntimeConfig = {

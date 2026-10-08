@@ -56,11 +56,17 @@ export const config = {
   // requires Secure). Local http dev stays non-Secure / Lax so cookies work
   // without TLS.
   get cookieFlags(): string {
+    return `${this.cookieScopeFlags} Max-Age=${60 * 60 * 24 * 7}`;
+  },
+
+  // Path/HttpOnly/SameSite/Secure without a lifetime. Clearing the session
+  // cookie must repeat these exactly, or the browser keeps the original.
+  get cookieScopeFlags(): string {
     const crossOrigin = process.env.COOKIE_SECURE === "1";
     const secureEnabled = this.isProduction || crossOrigin;
     const secure = secureEnabled ? " Secure;" : "";
     const sameSite = crossOrigin ? "None" : "Lax";
-    return `Path=/; HttpOnly; SameSite=${sameSite};${secure} Max-Age=${60 * 60 * 24 * 7}`;
+    return `Path=/; HttpOnly; SameSite=${sameSite};${secure}`;
   },
 
   // CORS — supports comma-separated origins for multi-domain

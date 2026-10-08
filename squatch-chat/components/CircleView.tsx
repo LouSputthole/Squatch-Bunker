@@ -121,9 +121,11 @@ export default function CircleView({
         const isSelf = p.userId === currentUserId;
         const isSpeaking = p.speaking && !p.muted;
         const isHighlighted = p.userId === highlightUserId;
+        // Remote video only while their camera flag is on; otherwise a switched-off
+        // camera would leave a frozen last frame on the seat.
         const stream = isSelf
           ? (cameraOn ? localCameraStream : null)
-          : (remoteVideoStreams?.get(p.userId) || null);
+          : (p.camera ? remoteVideoStreams?.get(p.userId) || null : null);
         const hasVideo = !!stream;
 
         return (

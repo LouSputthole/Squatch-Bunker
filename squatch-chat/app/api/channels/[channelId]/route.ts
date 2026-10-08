@@ -6,6 +6,12 @@ import {
   removeUnreferencedUpload,
 } from "@/lib/messageRetention";
 import { notifyRealtimeAuthorizationChange } from "@/lib/realtimeControl";
+import {
+  isSlowModeSeconds,
+  MAX_CHANNEL_DESCRIPTION_LENGTH,
+  MAX_CHANNEL_TOPIC_LENGTH,
+  parseChannelName,
+} from "@/lib/inputLimits";
 
 export async function PATCH(
   req: NextRequest,
@@ -44,9 +50,48 @@ export async function PATCH(
       if (typeof body.name !== "string" || !body.name.trim()) {
         return NextResponse.json({ error: "Channel name cannot be empty" }, { status: 400 });
       }
-      name = body.name.trim().toLowerCase().replace(/\s+/g, "-");
+      const parsedName = parseChannelName(body.name);
+      if (!parsedName.ok) {
+        return NextResponse.json({ error: parsedName.error }, { status: 400 });
+      }
+      name = parsedName.value;
     }
 
+    let topic: string | null | undefined;
+    if ("topic" in body) {
+      topic = typeof body.topic === "string" ? body.topic.trim() || null : null;
+      if (topic && topic.length > MAX_CHANNEL_TOPIC_LENGTH) {
+        return NextResponse.json(
+          { error: `Topic must be at most ${MAX_CHANNEL_TOPIC_LENGTH} characters` },
+          { status: 400 },
+        );
+      }
+    }
+
+    let description: string | null | undefined;
+    if ("description" in body) {
+      if (body.description !== null && typeof body.description !== "string") {
+        return NextResponse.json({ error: "Description must be a string" }, { status: 400 });
+      }
+      description = typeof body.description === "string" ? body.description.trim() || null : null;
+      if (description && description.length > MAX_CHANNEL_DESCRIPTION_LENGTH) {
+        return NextResponse.json(
+          { error: `Description must be at most ${MAX_CHANNEL_DESCRIPTION_LENGTH} characters` },
+          { status: 400 },
+        );
+      }
+    }
+
+    let slowModeSeconds: number | undefined;
+    if ("slowModeSeconds" in body) {
+      if (channel.type !== "text") {
+        return NextResponse.json({ error: "Slow mode only applies to text channels" }, { status: 400 });
+      }
+      if (!isSlowModeSeconds(body.slowModeSeconds)) {
+        return NextResponse.json({ error: "Unsupported slow mode cooldown" }, { status: 400 });
+      }
+      slowModeSeconds = body.slowModeSeconds;
+    }
 
     let roomConfig: ReturnType<typeof normalizeVoiceRoomConfig> | undefined;
     if ("roomMode" in body || "roomScene" in body) {
@@ -79,22 +124,32 @@ export async function PATCH(
         return NextResponse.json({ error: "Retention must be forever, 1, 7, or 30 days" }, { status: 400 });
       }
     }
-    const updated = await prisma.channel.update({
-      where: { id: channelId },
-      data: {
-
-        topic: "topic" in body
-          ? (typeof body.topic === "string" ? body.topic.trim() || null : null)
-          : undefined,
-        name,
-        category: "category" in body
-          ? (typeof body.category === "string" && body.category.trim() ? body.category.trim() : null)
-          : undefined,
-        roomMode: roomConfig?.roomMode,
-        roomScene: roomConfig?.roomScene,
-        retentionDays,
-      },
-    });
+    const data = {
+      topic,
+      name,
+      description,
+      slowModeSeconds,
+      category: "category" in body
+        ? (typeof body.category === "string" && body.category.trim() ? body.category.trim().slice(0, 100) : null)
+        : undefined,
+      roomMode: roomConfig?.roomMode,
+      roomScene: roomConfig?.roomScene,
+      retentionDays,
+    };
+    const changedFields = Object.entries(data)
+      .filter(([, value]) => value !== undefined)
+      .map(([key]) => key);
+    const [updated] = await prisma.$transaction([
+      prisma.channel.update({ where: { id: channelId }, data }),
+      prisma.auditLog.create({
+        data: {
+          serverId: channel.serverId,
+          actorId: session.userId,
+          action: "channel_update",
+          detail: `Updated #${channel.name}: ${changedFields.join(", ") || "no changes"}`,
+        },
+      }),
+    ]);
 
     return NextResponse.json({ channel: updated });
   } catch (err) {
@@ -122,6 +177,7 @@ export async function DELETE(
       select: {
         id: true,
         serverId: true,
+        name: true,
       },
     });
     if (!channel) {
@@ -153,6 +209,14 @@ export async function DELETE(
       await tx.webhook.deleteMany({ where: { channelId } });
       await tx.message.deleteMany({ where: { channelId } });
       await tx.channel.delete({ where: { id: channelId } });
+      await tx.auditLog.create({
+        data: {
+          serverId: channel.serverId,
+          actorId: session.userId,
+          action: "channel_delete",
+          detail: `Deleted #${channel.name}`,
+        },
+      });
       return {
         attachmentUrls: [...new Set(
           messages

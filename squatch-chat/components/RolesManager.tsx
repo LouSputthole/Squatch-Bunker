@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { PERMISSIONS, PERMISSION_DESCRIPTIONS, type PermKey } from "@/lib/permissions";
+import PromptDialog from "@/components/PromptDialog";
 
 interface Role {
   id: string;
@@ -12,7 +13,10 @@ interface Role {
   isDefault: boolean;
 }
 
-const PERM_KEYS = Object.keys(PERMISSIONS) as PermKey[];
+// Permissions that exist in the model but don't gate anything yet — hidden so
+// the editor doesn't offer toggles that do nothing. Saved values are preserved.
+const INERT_PERMISSIONS = new Set<PermKey>(["TIMEOUT_MEMBERS", "MENTION_EVERYONE", "MANAGE_SOUNDSCAPE"]);
+const PERM_KEYS = (Object.keys(PERMISSIONS) as PermKey[]).filter((p) => !INERT_PERMISSIONS.has(p));
 
 export default function RolesManager({ serverId }: { serverId: string }) {
   const [roles, setRoles] = useState<Role[]>([]);
@@ -21,16 +25,18 @@ export default function RolesManager({ serverId }: { serverId: string }) {
   const [newName, setNewName] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
       const r = await fetch(`/api/servers/${serverId}/roles`);
-      if (r.ok) {
-        const d = await r.json();
-        setRoles(d.roles || []);
-        setCanManage(!!d.canManageRoles);
-      }
-    } catch { /* ignore */ }
+      if (!r.ok) throw new Error(`roles ${r.status}`);
+      const d = await r.json();
+      setRoles(d.roles || []);
+      setCanManage(!!d.canManageRoles);
+    } catch {
+      setError("Couldn't load roles");
+    }
   }, [serverId]);
 
   useEffect(() => {
@@ -82,8 +88,10 @@ export default function RolesManager({ serverId }: { serverId: string }) {
       if (selectedId === id) setSelectedId(null);
       await load();
     } catch (e) { setError(e instanceof Error ? e.message : "Error"); }
-    finally { setBusy(false); }
+    finally { setBusy(false); setConfirmDeleteId(null); }
   }
+
+  const roleToDelete = roles.find((r) => r.id === confirmDeleteId) || null;
 
   function togglePerm(p: PermKey) {
     const next = perms.includes(p) ? perms.filter((x) => x !== p) : [...perms, p];
@@ -112,6 +120,7 @@ export default function RolesManager({ serverId }: { serverId: string }) {
           <div className="pt-2 border-t border-[var(--accent-2)]/20 mt-2">
             <input
               value={newName}
+              aria-label="New role name"
               onChange={(e) => setNewName(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") createRole(); }}
               placeholder="New role…"
@@ -126,7 +135,7 @@ export default function RolesManager({ serverId }: { serverId: string }) {
 
       {/* Editor */}
       <div className="flex-1 min-w-0 overflow-y-auto">
-        {error && <div className="mb-2 px-2 py-1 bg-red-500/10 text-red-400 text-xs rounded">{error}</div>}
+        {error && <div role="alert" className="mb-2 px-2 py-1 bg-[var(--danger)]/10 text-[var(--danger)] text-xs rounded">{error}</div>}
         {!role ? (
           <div className="h-full flex items-center justify-center text-[var(--muted)] text-sm">Select a role to edit</div>
         ) : (
@@ -139,16 +148,18 @@ export default function RolesManager({ serverId }: { serverId: string }) {
                 onChange={(e) => patchRole({ color: e.target.value })}
                 className="w-8 h-8 rounded bg-transparent border border-[var(--accent-2)]/30 cursor-pointer"
                 title="Role color"
+                aria-label="Role color"
               />
               <input
                 value={role.name}
+                aria-label="Role name"
                 disabled={!canManage}
                 onChange={(e) => setRoles((rs) => rs.map((r) => (r.id === role.id ? { ...r, name: e.target.value } : r)))}
                 onBlur={(e) => { if (e.target.value.trim() && e.target.value !== role.name) patchRole({ name: e.target.value.trim() }); }}
                 className="flex-1 text-sm px-2 py-1.5 bg-[var(--panel-2)] border border-[var(--accent-2)]/30 rounded text-[var(--text)] focus:outline-none"
               />
               {canManage && !role.isDefault && (
-                <button onClick={() => deleteRole(role.id)} className="text-xs px-2 py-1.5 text-red-400 hover:bg-red-500/10 rounded" title="Delete role">Delete</button>
+                <button onClick={() => setConfirmDeleteId(role.id)} className="text-xs px-2 py-1.5 text-[var(--danger)] hover:bg-[var(--danger)]/10 rounded" title="Delete role">Delete</button>
               )}
             </div>
             {role.isDefault && <p className="text-[10px] text-[var(--muted)]">This is the base role given to everyone — it can&apos;t be deleted.</p>}
@@ -176,6 +187,17 @@ export default function RolesManager({ serverId }: { serverId: string }) {
           </div>
         )}
       </div>
+      {roleToDelete && (
+        <PromptDialog
+          title={`Delete the ${roleToDelete.name} role?`}
+          message="Members with this role lose its permissions. This can't be undone."
+          mode="confirm"
+          confirmLabel="Delete role"
+          destructive
+          onConfirm={() => deleteRole(roleToDelete.id)}
+          onCancel={() => setConfirmDeleteId(null)}
+        />
+      )}
     </div>
   );
 }

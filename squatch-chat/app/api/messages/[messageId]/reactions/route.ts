@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { prismaErrorCode } from "@/lib/prismaErrors";
 import { getSession } from "@/lib/auth";
 import { resolveChannelAccess } from "@/lib/channelAccess";
+import { MAX_REACTION_EMOJI_LENGTH } from "@/lib/inputLimits";
+import { groupReactions } from "@/lib/messagePayload";
 
 export async function POST(
   req: NextRequest,
@@ -13,10 +16,14 @@ export async function POST(
   }
 
   const { messageId } = await params;
-  const { emoji } = await req.json();
+  const body: unknown = await req.json().catch(() => null);
+  const emoji = body && typeof body === "object" ? (body as Record<string, unknown>).emoji : undefined;
 
   if (!emoji || typeof emoji !== "string") {
     return NextResponse.json({ error: "Emoji required" }, { status: 400 });
+  }
+  if (emoji.length > MAX_REACTION_EMOJI_LENGTH) {
+    return NextResponse.json({ error: "Emoji is too long" }, { status: 400 });
   }
 
   try {
@@ -46,8 +53,10 @@ export async function POST(
       },
     });
 
+    // A double-click races two toggles. Losing either race is a no-op, not
+    // an error: the reaction is already in the state that request wanted.
     if (existing) {
-      await prisma.reaction.delete({ where: { id: existing.id } });
+      await prisma.reaction.deleteMany({ where: { id: existing.id } });
     } else {
       await prisma.reaction.create({
         data: {
@@ -55,6 +64,8 @@ export async function POST(
           userId: session.userId,
           emoji,
         },
+      }).catch((error: unknown) => {
+        if (prismaErrorCode(error) !== "P2002") throw error;
       });
     }
 
@@ -68,16 +79,7 @@ export async function POST(
       },
     });
 
-    // Group by emoji
-    const grouped = reactions.reduce<Record<string, { count: number; users: string[]; userIds: string[] }>>((acc, r) => {
-      if (!acc[r.emoji]) acc[r.emoji] = { count: 0, users: [], userIds: [] };
-      acc[r.emoji].count++;
-      acc[r.emoji].users.push(r.user.username);
-      acc[r.emoji].userIds.push(r.userId);
-      return acc;
-    }, {});
-
-    return NextResponse.json({ reactions: grouped });
+    return NextResponse.json({ reactions: groupReactions(reactions) });
   } catch (err) {
     console.error("[Campfire] Reaction error:", err);
     return NextResponse.json({ error: "Failed to react" }, { status: 500 });

@@ -4,7 +4,7 @@ import { Server } from "socket.io";
 import { parse } from "cookie";
 import { config } from "@/lib/config";
 import { prisma } from "@/lib/db";
-import { validateSessionToken } from "@/lib/auth";
+import { verifyToken } from "@/lib/auth";
 import { requireMembership } from "@/lib/membership";
 import { resolveChannelAccess } from "@/lib/channelAccess";
 import { memberHasPermission } from "@/lib/serverRoles";
@@ -13,7 +13,7 @@ import {
   type RealtimeAuthorizationChange,
 } from "@/lib/realtimeControl";
 import { usersHaveBlock } from "@/lib/userBlocks";
-import { checkRateLimit } from "@/lib/rateLimit";
+import { checkRateLimit, checkWeightedLimit } from "@/lib/rateLimit";
 import { createOriginPolicy } from "@/lib/originPolicy";
 import {
   createChannelMessageNotifications,
@@ -63,15 +63,20 @@ process.on("unhandledRejection", (reason) => {
 });
 
 // ─── Shared State ───
-const onlineUsers = new Map<string, Map<string, { username: string; socketId: string }>>();
+// Presence is per USER, not per viewed server: a user is listed in every server
+// they belong to while ANY of their sockets is connected.
+const onlineUsers = new Map<string, Map<string, { username: string }>>();
 const voiceRooms = new Map<string, Map<string, { username: string; socketId: string; muted: boolean; deafened: boolean; camera: boolean; avatar?: string | null }>>();
 const voiceChannelServer = new Map<string, string>();
 const userVoiceChannel = new Map<string, string>();
 type PresenceStatus = "online" | "idle" | "dnd" | "invisible";
 const userStatus = new Map<string, PresenceStatus>();
+// A chosen status survives a short reconnect (no "online" flash for an invisible
+// user) but resets once every tab has been gone this long — a fresh session starts online.
+const STATUS_GRACE_MS = 60_000;
+const statusResetTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const serverMuted = new Set<string>();
 const serverDeafened = new Set<string>();
-const heartbeats = new Map<string, number>();
 // Track every live socket per user so presence/voice are only torn down when a
 // user's LAST tab disconnects (multi-tab no longer creates ghost seats).
 const userSockets = new Map<string, Set<string>>();
@@ -108,9 +113,43 @@ const MAX_OFFSHOOTS_PER_PARENT = 3;
 const MAX_OFFSHOOT_MEMBERS = 4;
 const MAX_OFFSHOOT_NAME_LENGTH = 32;
 
-const HEARTBEAT_INTERVAL = 15000;
-const HEARTBEAT_TIMEOUT = 45000;
+// Liveness is engine.io's ping/pong (answered from the socket's message handler,
+// so it keeps working in throttled background tabs). The old app-level
+// heartbeat kick relied on page timers and dropped hidden tabs every minute.
 const SESSION_REVALIDATE_INTERVAL = 60_000;
+// Speaking flips are bursty but tiny; they get their own budget instead of the
+// shared 30/min limiter, which stalled indicators after ~20s of talking.
+const SPEAKING_LIMIT = { max: 10, windowMs: 1_000 };
+
+export type SessionCheck = "valid" | "invalid" | "unavailable";
+
+/**
+ * Tri-state twin of validateSessionToken for the periodic socket sweep. That
+ * helper fails closed (null) on a DB error, which would disconnect every
+ * connected user on one transient hiccup. Here only a definite answer
+ * ("invalid") disconnects; "unavailable" keeps the socket until the next sweep.
+ * Keep the stateful rules in step with validateSessionToken in lib/auth.ts.
+ */
+export async function checkSessionToken(token: string): Promise<SessionCheck> {
+  const payload = verifyToken(token);
+  if (!payload) return "invalid";
+  let user: { tokenVersion: number; isGuest: boolean; guestExpiresAt: Date | null } | null;
+  try {
+    user = await prisma.user.findUnique({
+      where: { id: payload.userId },
+      select: { tokenVersion: true, isGuest: true, guestExpiresAt: true },
+    });
+  } catch (error) {
+    console.error("[Campfire] session revalidation skipped (database unavailable):", error);
+    return "unavailable";
+  }
+  if (!user) return "invalid";
+  if ((payload.tokenVersion ?? 0) !== user.tokenVersion) return "invalid";
+  if (user.isGuest && user.guestExpiresAt && user.guestExpiresAt.getTime() <= Date.now()) {
+    return "invalid";
+  }
+  return "valid";
+}
 
 // Wrap a socket handler so a thrown error (sync) or a rejected promise (async)
 // is logged instead of crashing the shared server.
@@ -148,7 +187,7 @@ export function attachSocketIO(
 
   // Auth middleware — run the SAME validation the HTTP session uses so a socket
   // can't be authorized by a token the HTTP layer would reject.
-  // validateSessionToken pins HS256, loads the user, and enforces tokenVersion
+  // checkSessionToken (like validateSessionToken) pins HS256, loads the user, and enforces tokenVersion
   // revocation and guest expiry (previously the socket path did none of this).
   // Password resets disconnect active sockets immediately through the realtime
   // control bridge, and a periodic sweep closes sessions invalidated by expiry,
@@ -159,13 +198,27 @@ export function attachSocketIO(
     const parsed = parse(rawCookie);
     const token = parsed[COOKIE_NAME];
     if (!token) return next(new Error("Unauthorized"));
-    const payload = await validateSessionToken(token);
+    // "Unavailable" (DB hiccup) must not look like a revoked session — clients log out on "Unauthorized".
+    const check = await checkSessionToken(token);
+    if (check === "unavailable") return next(new Error("Unavailable"));
+    const payload = check === "valid" ? verifyToken(token) : null;
     if (!payload) return next(new Error("Unauthorized"));
     socket.data.userId = payload.userId;
     socket.data.username = payload.username;
     socket.data.sessionToken = token;
     next();
   });
+
+  // Server mute/deafen are keyed per server; a voice channel's server is
+  // cached in voiceChannelServer when anyone joins it.
+  function moderationFlags(channelId: string, userId: string) {
+    const serverId = voiceChannelServer.get(channelId);
+    const key = `${serverId}:${userId}`;
+    return {
+      serverMuted: !!serverId && serverMuted.has(key),
+      serverDeafened: !!serverId && serverDeafened.has(key),
+    };
+  }
 
   function voiceParticipantsPayload(channelId: string) {
     const room = voiceRooms.get(channelId);
@@ -179,6 +232,7 @@ export function attachSocketIO(
             deafened: info.deafened,
             camera: info.camera,
             avatar: info.avatar,
+            ...moderationFlags(channelId, userId),
           }))
         : [],
     };
@@ -385,7 +439,13 @@ export function attachSocketIO(
     broadcastRealtimeStage(channelId);
   }
 
-  async function evictVoiceParticipant(channelId: string, userId: string): Promise<void> {
+  // `reason` tells the evicted user's clients to leave the room (voice:error)
+  // instead of sitting in a dead call; moderator kicks send their own event.
+  async function evictVoiceParticipant(
+    channelId: string,
+    userId: string,
+    reason?: string,
+  ): Promise<void> {
     const room = voiceRooms.get(channelId);
     const entry = room?.get(userId);
     const socketIds = new Set(userSockets.get(userId) ?? []);
@@ -401,6 +461,7 @@ export function attachSocketIO(
       }
     }));
     if (!wasParticipant) return;
+    if (reason) io.to(`user:${userId}`).emit("voice:error", { channelId, error: reason });
 
     if (entry) {
       room?.delete(userId);
@@ -409,6 +470,8 @@ export function attachSocketIO(
         userId,
         socketId: entry.socketId,
       });
+      // Peers drop any share from the departed user instead of freezing on it.
+      io.to(`voice:${channelId}`).emit("screen:stopped", { userId });
     }
     if (userVoiceChannel.get(userId) === channelId) userVoiceChannel.delete(userId);
     removeUserFromRealtimeOffshoot(channelId, userId);
@@ -431,7 +494,11 @@ export function attachSocketIO(
       }));
     }
     if (!access?.canView || channel?.type !== "voice") {
-      await evictVoiceParticipant(channelId, userId);
+      await evictVoiceParticipant(
+        channelId,
+        userId,
+        "You no longer have access to this voice channel.",
+      );
     }
   }
 
@@ -460,7 +527,7 @@ export function attachSocketIO(
     ));
   }
 
-  function broadcastPresenceState(serverId: string): void {
+  function presencePayload(serverId: string) {
     const serverMap = onlineUsers.get(serverId);
     const members = serverMap
       ? Array.from(serverMap.entries()).map(([userId, info]) => ({
@@ -469,7 +536,31 @@ export function attachSocketIO(
           status: userStatus.get(userId) || "online",
         }))
       : [];
-    io.to(`server:${serverId}`).emit("presence:update", { serverId, members });
+    return { serverId, members };
+  }
+
+  function broadcastPresenceState(serverId: string): void {
+    io.to(`server:${serverId}`).emit("presence:update", presencePayload(serverId));
+  }
+
+  /** Lists the user as online in a server; true when that changed anything. */
+  function markPresent(serverId: string, userId: string, username: string): boolean {
+    let serverMap = onlineUsers.get(serverId);
+    if (!serverMap) {
+      serverMap = new Map();
+      onlineUsers.set(serverId, serverMap);
+    }
+    if (serverMap.has(userId)) return false;
+    serverMap.set(userId, { username });
+    return true;
+  }
+
+  /** Drops the user from a server's online list; true when that changed anything. */
+  function clearPresence(serverId: string, userId: string): boolean {
+    const serverMap = onlineUsers.get(serverId);
+    if (!serverMap?.delete(userId)) return false;
+    if (serverMap.size === 0) onlineUsers.delete(serverId);
+    return true;
   }
 
   async function refreshMemberForServer(serverId: string, userId: string): Promise<void> {
@@ -480,8 +571,7 @@ export function attachSocketIO(
         const memberSocket = io.sockets.sockets.get(socketId);
         if (memberSocket) await memberSocket.leave(`server:${serverId}`);
       }));
-      onlineUsers.get(serverId)?.delete(userId);
-      if (onlineUsers.get(serverId)?.size === 0) onlineUsers.delete(serverId);
+      clearPresence(serverId, userId);
       serverMuted.delete(`${serverId}:${userId}`);
       serverDeafened.delete(`${serverId}:${userId}`);
       broadcastPresenceState(serverId);
@@ -550,42 +640,29 @@ export function attachSocketIO(
   );
   httpServer.once("close", unregisterNotificationEmitter);
 
-  // Heartbeat cleanup
-  const heartbeatTimer = setInterval(() => {
-    const now = Date.now();
-    for (const [socketId, lastBeat] of heartbeats) {
-      if (now - lastBeat > HEARTBEAT_TIMEOUT) {
-        const sock = io.sockets.sockets.get(socketId);
-        if (sock) {
-          console.log(`[Campfire] Heartbeat timeout: ${sock.data.username}`);
-          sock.disconnect(true);
-        }
-        heartbeats.delete(socketId);
-      }
-    }
-  }, HEARTBEAT_INTERVAL);
-  heartbeatTimer.unref();
-
+  // Periodic sweep for sessions invalidated by expiry, user deletion, or a
+  // missed cross-process notification. Only a definite "invalid" disconnects:
+  // a DB hiccup must not kick everyone. One lookup per token per sweep.
   const sessionRevalidationTimer = setInterval(() => {
+    const checks = new Map<string, Promise<SessionCheck>>();
     for (const socket of io.sockets.sockets.values()) {
       const token = socket.data.sessionToken as string | undefined;
       if (!token) {
         socket.disconnect(true);
         continue;
       }
-      void validateSessionToken(token)
-        .then((payload) => {
-          if (!payload && socket.connected) socket.disconnect(true);
-        })
-        .catch((error) => {
-          console.error("[Campfire] realtime session revalidation failed:", error);
-          if (socket.connected) socket.disconnect(true);
-        });
+      let check = checks.get(token);
+      if (!check) {
+        check = checkSessionToken(token);
+        checks.set(token, check);
+      }
+      void check.then((result) => {
+        if (result === "invalid" && socket.connected) socket.disconnect(true);
+      });
     }
   }, SESSION_REVALIDATE_INTERVAL);
   sessionRevalidationTimer.unref();
   httpServer.once("close", () => {
-    clearInterval(heartbeatTimer);
     clearInterval(sessionRevalidationTimer);
   });
 
@@ -595,12 +672,33 @@ export function attachSocketIO(
     const currentUsername = socket.data.username as string;
     console.log(`[Campfire] Authenticated socket: ${currentUsername}`);
 
-    heartbeats.set(socket.id, Date.now());
     if (!userSockets.has(currentUserId)) userSockets.set(currentUserId, new Set());
     userSockets.get(currentUserId)!.add(socket.id);
     socket.join(`user:${currentUserId}`);
-    socket.on("heartbeat", safeHandler(() => { heartbeats.set(socket.id, Date.now()); }));
-    userStatus.set(currentUserId, "online");
+    // A second tab or a reconnect must not reset a chosen DND/invisible status;
+    // clients re-send their chosen status on every connect.
+    clearTimeout(statusResetTimers.get(currentUserId));
+    statusResetTimers.delete(currentUserId);
+    if (!userStatus.has(currentUserId)) userStatus.set(currentUserId, "online");
+
+    // Online in every server this user belongs to, not only the one on screen.
+    void prisma.serverMember
+      .findMany({
+        where: { userId: currentUserId, banned: false },
+        select: { serverId: true },
+      })
+      .then((memberships) => {
+        // The user's last socket may have dropped while the query ran.
+        if (!userSockets.get(currentUserId)?.size) return;
+        for (const { serverId } of memberships) {
+          if (markPresent(serverId, currentUserId, currentUsername)) {
+            broadcastPresenceState(serverId);
+          }
+        }
+      })
+      .catch((error) => {
+        console.error("[Campfire] presence membership lookup failed:", error);
+      });
 
     // Drop high-frequency / broadcast emits that exceed the shared rate limit.
     // Keyed per authenticated user + event so reconnects and extra tabs cannot reset it.
@@ -821,23 +919,41 @@ export function attachSocketIO(
     }));
 
     // ─── Server Presence ───
+    // Someone opening a server sees who is already sitting in its voice rooms
+    // (only rooms they may view) instead of empty rooms until the next change.
+    async function emitVoiceRosters(serverId: string): Promise<void> {
+      await Promise.all(Array.from(voiceRooms.entries(), async ([channelId, room]) => {
+        if (room.size === 0 || (await channelServerId(channelId)) !== serverId) return;
+        const access = await resolveChannelAccess(channelId, currentUserId);
+        if (access?.canView) {
+          socket.emit("voice:participants-update", voiceParticipantsPayload(channelId));
+        }
+      }));
+    }
+
     socket.on("server:join", safeHandler(async (data: string | { serverId: string }) => {
       const serverId = typeof data === "string" ? data : data?.serverId;
       if (!isStr(serverId)) return;
       // Authoritative role comes from the DB — never trust a client-supplied
       // role. Non-members (or banned users) get no presence and no role.
       const membership = await requireMembership(serverId, currentUserId);
-      if (!membership) return;
+      // A socket that dropped during the lookup must not leave stale presence.
+      if (!membership || !socket.connected) return;
       socket.join(`server:${serverId}`);
-      if (!onlineUsers.has(serverId)) onlineUsers.set(serverId, new Map());
-      onlineUsers.get(serverId)!.set(currentUserId, { username: currentUsername, socketId: socket.id });
-      broadcastPresence(serverId);
+      // Covers memberships created after this socket connected.
+      if (markPresent(serverId, currentUserId, currentUsername)) {
+        broadcastPresenceState(serverId);
+      } else {
+        socket.emit("presence:update", presencePayload(serverId));
+      }
+      await emitVoiceRosters(serverId);
     }));
 
+    // Viewing another server only changes which broadcasts this tab receives;
+    // presence is per user and lasts until the user's last socket disconnects.
     socket.on("server:leave", safeHandler((serverId: string) => {
       if (!isStr(serverId)) return;
       socket.leave(`server:${serverId}`);
-      removeFromPresence(serverId, currentUserId);
     }));
 
     // ─── Messages ───
@@ -903,13 +1019,14 @@ export function attachSocketIO(
       if (!access?.canView) return;
       const msg = await prisma.message.findFirst({
         where: { id: data.messageId, channelId: data.channelId },
-        select: { content: true, updatedAt: true },
+        select: { content: true, updatedAt: true, editedAt: true },
       });
       if (!msg) return;
       socket.to(`channel:${data.channelId}`).emit(`message:edited:${data.channelId}`, {
         messageId: data.messageId,
         content: msg.content,
         updatedAt: msg.updatedAt,
+        editedAt: msg.editedAt,
       });
     }));
 
@@ -922,6 +1039,26 @@ export function attachSocketIO(
       const msg = await prisma.message.findFirst({ where: { id: data.messageId, channelId: data.channelId }, select: { id: true } });
       if (msg) return;
       socket.to(`channel:${data.channelId}`).emit(`message:deleted:${data.channelId}`, { messageId: data.messageId });
+    }));
+
+    // Bulk form of message:delete for purges: one limiter hit per batch, and
+    // only ids the authorized HTTP purge really removed are relayed.
+    const MAX_PURGE_RELAY_IDS = 200;
+    socket.on("messages:purge", safeHandler(async (data: { channelId: string; messageIds: string[] }) => {
+      if (!isObj(data) || !isStr(data.channelId) || !Array.isArray(data.messageIds)) return;
+      const ids = Array.from(new Set(data.messageIds.filter(isStr))).slice(0, MAX_PURGE_RELAY_IDS);
+      if (ids.length === 0) return;
+      if (overLimit("messages:purge")) return;
+      const access = await resolveChannelAccess(data.channelId, currentUserId);
+      if (!access?.canView) return;
+      const remaining = await prisma.message.findMany({
+        where: { id: { in: ids }, channelId: data.channelId },
+        select: { id: true },
+      });
+      const stillThere = new Set(remaining.map((message) => message.id));
+      const goneIds = ids.filter((id) => !stillThere.has(id));
+      if (goneIds.length === 0) return;
+      socket.to(`channel:${data.channelId}`).emit(`message:deleted:${data.channelId}`, { messageIds: goneIds });
     }));
 
     socket.on("message:react", safeHandler(async (data: { channelId: string; messageId: string; reactions: Record<string, { count: number; users: string[]; userIds: string[] }> }) => {
@@ -978,16 +1115,16 @@ export function attachSocketIO(
     } as const;
 
     async function relayChannelSnapshot(event: "channel:created" | "channels:updated", data: { serverId: string; channelIds: string[] }) {
-      if (!isObj(data) || !isStr(data.serverId) || !Array.isArray(data.channelIds)) return;
+      if (!isObj(data) || !isStr(data.serverId) || !Array.isArray(data.channelIds)) return null;
       const ids = data.channelIds.filter(isStr).slice(0, 100);
-      if (ids.length === 0) return;
-      if (!(await requireMembership(data.serverId, currentUserId))) return;
+      if (ids.length === 0) return null;
+      if (!(await requireMembership(data.serverId, currentUserId))) return null;
       // Only channels that really exist in THIS server are broadcast.
       const channels = await prisma.channel.findMany({
         where: { id: { in: ids }, serverId: data.serverId },
         select: CHANNEL_BROADCAST_SELECT,
       });
-      if (channels.length === 0) return;
+      if (channels.length === 0) return null;
       const recipients = io.sockets.adapter.rooms.get(`server:${data.serverId}`) ?? [];
       await Promise.all(Array.from(recipients, async (socketId) => {
         const recipient = io.sockets.sockets.get(socketId);
@@ -1002,6 +1139,25 @@ export function attachSocketIO(
           recipient.emit(event, { serverId: data.serverId, channels: visible });
         }
       }));
+      return channels;
+    }
+
+    // A live room switched into (or out of) Fireside Stage mode gets its stage
+    // state created (or torn down) now, not only when the room next empties.
+    function reconcileStageRoom(channel: { id: string; type: string; roomMode: string }) {
+      if (channel.type !== "voice") return;
+      const room = voiceRooms.get(channel.id);
+      const isStage = channel.roomMode === "fireside-stage";
+      if (isStage && !stageRooms.has(channel.id) && room && room.size > 0) {
+        const hostId = room.has(currentUserId)
+          ? currentUserId
+          : (room.keys().next().value as string);
+        stageRooms.set(channel.id, { hostId, speakers: new Set([hostId]), queue: [] });
+        broadcastStage(channel.id);
+      } else if (!isStage && stageRooms.has(channel.id)) {
+        stageRooms.delete(channel.id);
+        broadcastStage(channel.id);
+      }
     }
 
     socket.on("channel:created", safeHandler(async (data: { serverId: string; channelId: string }) => {
@@ -1012,7 +1168,8 @@ export function attachSocketIO(
 
     socket.on("channels:updated", safeHandler(async (data: { serverId: string; channelIds: string[] }) => {
       if (!isObj(data) || !isStr(data.serverId) || !Array.isArray(data.channelIds) || overLimit("channels:updated")) return;
-      await relayChannelSnapshot("channels:updated", data);
+      const channels = await relayChannelSnapshot("channels:updated", data);
+      channels?.forEach(reconcileStageRoom);
     }));
 
     socket.on("channel:deleted", safeHandler(async (data: { serverId: string; channelId: string }) => {
@@ -1033,7 +1190,7 @@ export function attachSocketIO(
       if (overLimit("presence:status")) return;
       userStatus.set(currentUserId, status as PresenceStatus);
       for (const [serverId, members] of onlineUsers) {
-        if (members.has(currentUserId)) broadcastPresence(serverId);
+        if (members.has(currentUserId)) broadcastPresenceState(serverId);
       }
     }));
 
@@ -1054,9 +1211,13 @@ export function attachSocketIO(
     }));
 
     // ─── Voice Chat (WebRTC Signaling) ───
-    socket.on("voice:join", safeHandler(async (data: string | { channelId: string; serverId?: string; avatar?: string | null }) => {
+    socket.on("voice:join", safeHandler(async (data: string | { channelId: string; serverId?: string; avatar?: string | null; muted?: boolean; deafened?: boolean }) => {
       const channelId = typeof data === "string" ? data : data?.channelId;
       const avatar = typeof data === "string" ? undefined : data?.avatar;
+      // Initial self mute/deafen ride along with the join: a separate
+      // voice:mute sent right after would land before the async join finishes.
+      const selfMuted = typeof data === "object" && data?.muted === true;
+      const selfDeafened = typeof data === "object" && data?.deafened === true;
       if (!isStr(channelId)) return;
 
       const [access, channel] = await Promise.all([
@@ -1084,9 +1245,19 @@ export function attachSocketIO(
       );
       socket.emit("voice:participants", { channelId, participants: existing });
 
+      // Server mute/deafen survive leaving and rejoining.
+      const flags = moderationFlags(channelId, currentUserId);
+      const deafened = selfDeafened || flags.serverDeafened;
       voiceRooms.get(channelId)!.set(currentUserId, {
-        username: currentUsername, socketId: socket.id, muted: false, deafened: false, camera: false, avatar: avatar || null,
+        username: currentUsername,
+        socketId: socket.id,
+        muted: selfMuted || deafened || flags.serverMuted,
+        deafened,
+        camera: false,
+        avatar: avatar || null,
       });
+      if (flags.serverMuted) socket.emit("mod:force-mute", { muted: true, by: "a moderator" });
+      if (flags.serverDeafened) socket.emit("mod:force-deafen", { deafened: true, by: "a moderator" });
       socket.emit("offshoot:update", offshootPayload(channelId));
       if (lanternRooms.has(channelId)) {
         socket.emit("lantern:update", lanternPayload(channelId));
@@ -1113,20 +1284,38 @@ export function attachSocketIO(
       leaveVoiceChannel(channelId);
     }));
 
+    // A moderator's server mute/deafen outranks the user's own toggle: refuse
+    // the self-unmute and re-assert the moderation state on that client.
     socket.on("voice:mute", safeHandler((data: { channelId: string; muted: boolean }) => {
       if (!isObj(data) || !isStr(data.channelId)) return;
-      const room = voiceRooms.get(data.channelId);
-      if (room?.has(currentUserId)) { room.get(currentUserId)!.muted = data.muted; broadcastVoiceParticipants(data.channelId); }
+      const entry = voiceRooms.get(data.channelId)?.get(currentUserId);
+      if (!entry) return;
+      const muted = data.muted === true;
+      const flags = moderationFlags(data.channelId, currentUserId);
+      if (!muted && flags.serverMuted) {
+        socket.emit("mod:force-mute", { muted: true, by: "a moderator" });
+        return;
+      }
+      if (!muted && flags.serverDeafened) {
+        socket.emit("mod:force-deafen", { deafened: true, by: "a moderator" });
+        return;
+      }
+      entry.muted = muted;
+      broadcastVoiceParticipants(data.channelId);
     }));
 
     socket.on("voice:deafen", safeHandler((data: { channelId: string; deafened: boolean }) => {
       if (!isObj(data) || !isStr(data.channelId)) return;
-      const room = voiceRooms.get(data.channelId);
-      if (room?.has(currentUserId)) {
-        room.get(currentUserId)!.deafened = data.deafened;
-        if (data.deafened) room.get(currentUserId)!.muted = true;
-        broadcastVoiceParticipants(data.channelId);
+      const entry = voiceRooms.get(data.channelId)?.get(currentUserId);
+      if (!entry) return;
+      const deafened = data.deafened === true;
+      if (!deafened && moderationFlags(data.channelId, currentUserId).serverDeafened) {
+        socket.emit("mod:force-deafen", { deafened: true, by: "a moderator" });
+        return;
       }
+      entry.deafened = deafened;
+      if (deafened) entry.muted = true;
+      broadcastVoiceParticipants(data.channelId);
     }));
 
     socket.on("voice:camera", safeHandler((data: { channelId: string; camera: boolean }) => {
@@ -1137,7 +1326,12 @@ export function attachSocketIO(
 
     socket.on("voice:speaking", safeHandler((data: { channelId: string; speaking: boolean }) => {
       if (!isObj(data) || !isStr(data.channelId)) return;
-      if (overLimit("voice:speaking")) return;
+      if (!checkWeightedLimit(
+        `realtime:${currentUserId}:voice:speaking`,
+        1,
+        SPEAKING_LIMIT.max,
+        SPEAKING_LIMIT.windowMs,
+      ).allowed) return;
       if (!voiceRooms.get(data.channelId)?.has(currentUserId)) return;
       socket.to(`voice:${data.channelId}`).emit("voice:speaking", { userId: currentUserId, speaking: data.speaking });
     }));
@@ -1491,10 +1685,13 @@ export function attachSocketIO(
       if (!ctx) return;
       const key = `${ctx.serverId}:${data.targetUserId}`;
       if (data.muted) serverMuted.add(key); else serverMuted.delete(key);
-      const room = voiceRooms.get(data.channelId);
-      if (room?.has(data.targetUserId)) { room.get(data.targetUserId)!.muted = data.muted; broadcastVoiceParticipants(data.channelId); }
-      const targetEntry = room?.get(data.targetUserId);
-      if (targetEntry) io.to(targetEntry.socketId).emit("mod:force-mute", { muted: data.muted, by: currentUsername });
+      const targetEntry = voiceRooms.get(data.channelId)?.get(data.targetUserId);
+      if (targetEntry) {
+        // Lifting a server mute frees the user to unmute; it never opens a mic.
+        if (data.muted) targetEntry.muted = true;
+        broadcastVoiceParticipants(data.channelId);
+        io.to(targetEntry.socketId).emit("mod:force-mute", { muted: data.muted, by: currentUsername });
+      }
     }));
 
     socket.on("mod:server-deafen", safeHandler(async (data: { channelId: string; targetUserId: string; deafened: boolean }) => {
@@ -1506,8 +1703,11 @@ export function attachSocketIO(
       const room = voiceRooms.get(data.channelId);
       if (room?.has(data.targetUserId)) {
         const entry = room.get(data.targetUserId)!;
-        entry.deafened = data.deafened;
-        if (data.deafened) entry.muted = true;
+        // As with mute: lifting it lets the user undeafen; it does not do so.
+        if (data.deafened) {
+          entry.deafened = true;
+          entry.muted = true;
+        }
         broadcastVoiceParticipants(data.channelId);
         io.to(entry.socketId).emit("mod:force-deafen", { deafened: data.deafened, by: currentUsername });
       }
@@ -1570,6 +1770,7 @@ export function attachSocketIO(
       removeUserFromOffshoot(data.targetUserId);
       await targetSocket.leave(`voice:${data.fromChannelId}`);
       io.to(`voice:${data.fromChannelId}`).emit("voice:user-left", { channelId: data.fromChannelId, userId: data.targetUserId, socketId: targetEntry.socketId });
+      io.to(`voice:${data.fromChannelId}`).emit("screen:stopped", { userId: data.targetUserId });
       broadcastVoiceParticipants(data.fromChannelId);
       await targetSocket.join(`voice:${data.toChannelId}`);
       if (!voiceRooms.has(data.toChannelId)) voiceRooms.set(data.toChannelId, new Map());
@@ -1610,6 +1811,8 @@ export function attachSocketIO(
         room.delete(currentUserId);
         if (userVoiceChannel.get(currentUserId) === channelId) userVoiceChannel.delete(currentUserId);
         socket.to(`voice:${channelId}`).emit("voice:user-left", { channelId, userId: currentUserId, socketId: socket.id });
+        // Also covers tabs that close mid-share without sending screen:stop.
+        socket.to(`voice:${channelId}`).emit("screen:stopped", { userId: currentUserId });
         leaveCurrentOffshoot();
         if (room.size === 0) voiceRooms.delete(channelId);
         removeFromLantern(channelId, currentUserId);
@@ -1692,7 +1895,6 @@ export function attachSocketIO(
     // ─── Disconnect ───
     socket.on("disconnect", safeHandler(() => {
       console.log(`[Campfire] Disconnected: ${currentUsername}`);
-      heartbeats.delete(socket.id);
       // Leave any voice room this specific socket occupied (guarded by socketId).
       for (const [channelId] of voiceRooms) leaveVoiceChannel(channelId);
 
@@ -1703,25 +1905,15 @@ export function attachSocketIO(
         // Only the user's final tab tears down user-level presence/voice state.
         userSockets.delete(currentUserId);
         userVoiceChannel.delete(currentUserId);
-        userStatus.delete(currentUserId);
-        for (const [serverId] of onlineUsers) removeFromPresence(serverId, currentUserId, true);
+        statusResetTimers.set(currentUserId, setTimeout(() => {
+          statusResetTimers.delete(currentUserId);
+          if (!userSockets.has(currentUserId)) userStatus.delete(currentUserId);
+        }, STATUS_GRACE_MS).unref());
+        for (const serverId of Array.from(onlineUsers.keys())) {
+          if (clearPresence(serverId, currentUserId)) broadcastPresenceState(serverId);
+        }
       }
     }));
-
-    function removeFromPresence(serverId: string, userId: string, force = false) {
-      const serverMap = onlineUsers.get(serverId);
-      if (!serverMap) return;
-      const entry = serverMap.get(userId);
-      if (entry && (force || entry.socketId === socket.id)) { serverMap.delete(userId); broadcastPresence(serverId); }
-      if (serverMap.size === 0) onlineUsers.delete(serverId);
-    }
-
-    function broadcastPresence(serverId: string) {
-      const serverMap = onlineUsers.get(serverId);
-      if (!serverMap) return;
-      const members = Array.from(serverMap.entries()).map(([userId, info]) => ({ userId, username: info.username, status: userStatus.get(userId) || "online" }));
-      io.to(`server:${serverId}`).emit("presence:update", { serverId, members });
-    }
   });
 
   return io;
