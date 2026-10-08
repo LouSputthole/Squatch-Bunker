@@ -185,7 +185,7 @@ export default function DMPanel({ currentUserId, initialConversationId, onUnread
   }, []);
 
   // New DMs in conversations that are not open: bump their unread badge. The
-  // open conversation is handled by `dm:message` below.
+  // open conversation is handled (deduped) by the per-conversation effect below.
   useEffect(() => {
     const socket = getSocket();
     function handleNotification(message: DMMessage) {
@@ -233,6 +233,8 @@ export default function DMPanel({ currentUserId, initialConversationId, onUnread
       typingTimeoutRef.current = setTimeout(() => setTypingUser(null), 3000);
     }
 
+    // Also fed by the user-room `dm:notification`: right after opening or reconnecting,
+    // dm:join may not have landed yet and that copy is the only one that arrives.
     function handleMessage(message: DMMessage) {
       if (message.conversationId && message.conversationId !== conversationId) return;
       setMessages((previous) => {
@@ -258,10 +260,12 @@ export default function DMPanel({ currentUserId, initialConversationId, onUnread
     socket.on("connect", handleConnect);
     socket.on("dm:typing", handleTyping);
     socket.on("dm:message", handleMessage);
+    socket.on("dm:notification", handleMessage);
     return () => {
       socket.off("connect", handleConnect);
       socket.off("dm:typing", handleTyping);
       socket.off("dm:message", handleMessage);
+      socket.off("dm:notification", handleMessage);
       socket.emit("dm:leave", conversationId);
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
       if (markReadTimerRef.current) {

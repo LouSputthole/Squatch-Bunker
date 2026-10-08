@@ -26,6 +26,7 @@ export const REPORT_REVIEW_PERMISSIONS: PermKey[] = ["MANAGE_MESSAGES", "KICK_ME
 
 const SNIPPET_LENGTH = 200;
 const MAX_LISTED = 200;
+const MAX_CANDIDATE_BATCHES = 10;
 const RECENT_HANDLED_MS = 30 * 24 * 60 * 60 * 1000;
 
 export function parseReportResolution(value: unknown): ReportResolution | null {
@@ -43,6 +44,15 @@ export async function canReviewReports(serverId: string, userId: string): Promis
 interface ReportRow {
   targetUserId: string;
   messageId: string | null;
+}
+
+interface ReportCandidate extends ReportRow {
+  id: string;
+  status: string;
+  reason: string;
+  createdAt: Date;
+  reporter: { id: string; username: string };
+  targetUser: { id: string; username: string };
 }
 
 interface ScopedMessage {
@@ -132,23 +142,35 @@ export async function listServerReports(
     : { status: "open" };
 
   // SQL narrows to message reports whose target posted in this server;
-  // scopeReportsForViewer applies the exact message + channel-access rule.
-  const rows = await prisma.report.findMany({
-    where: {
-      ...statusFilter,
-      messageId: { not: null },
-      targetUserId: { not: viewerId },
-      targetUser: { messages: { some: { channel: { serverId } } } },
-    },
-    orderBy: { createdAt: "desc" },
-    take: MAX_LISTED,
-    include: {
-      reporter: { select: { id: true, username: true } },
-      targetUser: { select: { id: true, username: true } },
-    },
-  });
+  // scopeReportsForViewer applies the exact message + channel-access rule. Report has
+  // no message relation, so page through candidates until MAX_LISTED are visible —
+  // otherwise reports from other servers/hidden channels could crowd out this queue.
+  // ponytail: bounded batches; a Report.serverId column would make this one query.
+  const where = {
+    ...statusFilter,
+    messageId: { not: null },
+    targetUserId: { not: viewerId },
+    targetUser: { messages: { some: { channel: { serverId } } } },
+  };
+  const scoped: Array<{ report: ReportCandidate; message: ScopedMessage }> = [];
+  let cursor: string | undefined;
+  for (let batch = 0; batch < MAX_CANDIDATE_BATCHES && scoped.length < MAX_LISTED; batch++) {
+    const rows: ReportCandidate[] = await prisma.report.findMany({
+      where,
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: MAX_LISTED,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      include: {
+        reporter: { select: { id: true, username: true } },
+        targetUser: { select: { id: true, username: true } },
+      },
+    });
+    scoped.push(...(await scopeReportsForViewer(serverId, viewerId, rows)));
+    if (rows.length < MAX_LISTED) break;
+    cursor = rows[rows.length - 1].id;
+  }
 
-  const reports: ServerReportView[] = (await scopeReportsForViewer(serverId, viewerId, rows))
+  const reports: ServerReportView[] = scoped.slice(0, MAX_LISTED)
     .map(({ report, message }) => ({
       id: report.id,
       status: report.status,
