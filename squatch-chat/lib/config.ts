@@ -63,7 +63,9 @@ export const config = {
   // cookie must repeat these exactly, or the browser keeps the original.
   get cookieScopeFlags(): string {
     const crossOrigin = process.env.COOKIE_SECURE === "1";
-    const secureEnabled = this.isProduction || crossOrigin;
+    // COOKIE_SECURE=0: plain-HTTP desktop/LAN hosting — browsers drop Secure cookies
+    // on http://192.168.x.x, so LAN guests could never stay signed in.
+    const secureEnabled = process.env.COOKIE_SECURE === "0" ? false : this.isProduction || crossOrigin;
     const secure = secureEnabled ? " Secure;" : "";
     const sameSite = crossOrigin ? "None" : "Lax";
     return `Path=/; HttpOnly; SameSite=${sameSite};${secure}`;

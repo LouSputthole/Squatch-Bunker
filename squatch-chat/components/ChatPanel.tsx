@@ -1855,14 +1855,14 @@ function ChatPanelContent({
             onKeyDown={handleComposerKeyDown}
             placeholder={uploading ? "Uploading..." : slowRemaining > 0 ? `Wait ${slowRemaining}s to send again` : `Message #${channelName}`}
             rows={1}
-            className="flex-1 px-2 py-3 bg-transparent text-[var(--text)] focus:outline-none placeholder:text-[var(--muted)] resize-none overflow-y-auto"
+            className="flex-1 min-w-0 px-2 py-3 bg-transparent text-[var(--text)] focus:outline-none placeholder:text-[var(--muted)] placeholder:truncate resize-none overflow-y-auto"
             style={{ minHeight: "44px", maxHeight: "200px" }}
             disabled={uploading || slowRemaining > 0}
           />
           <button
             type="button"
             onClick={() => setShowToolbar((v) => !v)}
-            className={`px-2 py-3 text-xs font-semibold transition-colors ${showToolbar ? "text-[var(--accent-2)]" : "text-[var(--muted)] hover:text-[var(--text)]"}`}
+            className={`hidden sm:block px-2 py-3 text-xs font-semibold transition-colors ${showToolbar ? "text-[var(--accent-2)]" : "text-[var(--muted)] hover:text-[var(--text)]"}`}
             title="Toggle formatting toolbar"
             aria-label="Toggle formatting toolbar"
             aria-pressed={showToolbar}
@@ -1890,7 +1890,7 @@ function ChatPanelContent({
           <button
             type="submit"
             disabled={!newMessage.trim() || uploading || slowRemaining > 0}
-            className="px-4 py-3 text-[var(--accent-2)] hover:text-[var(--accent)] disabled:opacity-30 transition-colors"
+            className="px-3 sm:px-4 py-3 text-[var(--accent-2)] hover:text-[var(--accent)] disabled:opacity-30 transition-colors"
             aria-label="Send message"
           >
             Send
