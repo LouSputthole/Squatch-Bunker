@@ -12,24 +12,31 @@ interface VoiceStatusBarProps {
   muted: boolean;
   deafened: boolean;
   reconnecting: boolean;
+  /** Moderator server mute/deafen: locks the mute button while muted. */
+  serverMuted?: boolean;
   onReturn: () => void;
   onToggleMute: () => void;
   onToggleDeafen: () => void;
   onDisconnect: () => void;
 }
 
+// Fixed height: h-12 = 48px (incl. the 1px top border), so a parent can
+// reserve exactly that much space for it.
 export default function VoiceStatusBar({
   channelName,
   muted,
   deafened,
   reconnecting,
+  serverMuted = false,
   onReturn,
   onToggleMute,
   onToggleDeafen,
   onDisconnect,
 }: VoiceStatusBarProps) {
+  const muteLocked = muted && serverMuted;
+  // No positioning of its own: the parent places it (above the mobile tab bar).
   return (
-    <div className="flex items-center gap-2 px-3 py-2 bg-[var(--panel-2)] border-t border-[var(--accent-2)]/40 shadow-lg">
+    <div className="flex h-12 shrink-0 items-center gap-2 px-3 bg-[var(--panel-2)] border-t border-[var(--accent-2)]/40 shadow-lg">
       {/* Status + channel name — click to jump back into the room */}
       <button
         onClick={onReturn}
@@ -57,10 +64,11 @@ export default function VoiceStatusBar({
       <div className="flex items-center gap-1 shrink-0">
         <button
           onClick={onToggleMute}
-          title={muted ? "Unmute" : "Mute"}
-          aria-label={muted ? "Unmute microphone" : "Mute microphone"}
+          disabled={muteLocked}
+          title={muteLocked ? "Server-muted by a moderator" : muted ? "Unmute" : "Mute"}
+          aria-label={muteLocked ? "Server-muted by a moderator" : muted ? "Unmute microphone" : "Mute microphone"}
           aria-pressed={muted}
-          className={`p-1.5 rounded transition-colors ${muted ? "text-[var(--danger)] bg-[var(--danger)]/15" : "text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--panel)]"}`}
+          className={`p-1.5 rounded transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${muted ? "text-[var(--danger)] bg-[var(--danger)]/15" : "text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--panel)]"}`}
         >
           {muted ? (
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
