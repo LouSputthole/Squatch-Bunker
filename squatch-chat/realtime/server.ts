@@ -71,6 +71,10 @@ const voiceChannelServer = new Map<string, string>();
 const userVoiceChannel = new Map<string, string>();
 type PresenceStatus = "online" | "idle" | "dnd" | "invisible";
 const userStatus = new Map<string, PresenceStatus>();
+// A chosen status survives a short reconnect (no "online" flash for an invisible
+// user) but resets once every tab has been gone this long — a fresh session starts online.
+const STATUS_GRACE_MS = 60_000;
+const statusResetTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const serverMuted = new Set<string>();
 const serverDeafened = new Set<string>();
 // Track every live socket per user so presence/voice are only torn down when a
@@ -673,6 +677,8 @@ export function attachSocketIO(
     socket.join(`user:${currentUserId}`);
     // A second tab or a reconnect must not reset a chosen DND/invisible status;
     // clients re-send their chosen status on every connect.
+    clearTimeout(statusResetTimers.get(currentUserId));
+    statusResetTimers.delete(currentUserId);
     if (!userStatus.has(currentUserId)) userStatus.set(currentUserId, "online");
 
     // Online in every server this user belongs to, not only the one on screen.
@@ -1899,8 +1905,10 @@ export function attachSocketIO(
         // Only the user's final tab tears down user-level presence/voice state.
         userSockets.delete(currentUserId);
         userVoiceChannel.delete(currentUserId);
-        // userStatus is kept: a reconnecting invisible/DND user must not flash "online" to
-        // every server before their client re-sends it. ponytail: one entry per user per process.
+        statusResetTimers.set(currentUserId, setTimeout(() => {
+          statusResetTimers.delete(currentUserId);
+          if (!userSockets.has(currentUserId)) userStatus.delete(currentUserId);
+        }, STATUS_GRACE_MS).unref());
         for (const serverId of Array.from(onlineUsers.keys())) {
           if (clearPresence(serverId, currentUserId)) broadcastPresenceState(serverId);
         }

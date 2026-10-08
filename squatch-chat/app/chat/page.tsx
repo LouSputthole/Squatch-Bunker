@@ -435,7 +435,13 @@ function ChatPageInner() {
         <GuestUpgradeBanner
           username={auth.user.username}
           guestExpiresAt={auth.user.guestExpiresAt}
-          onUpgraded={(fields) => auth.updateUser({ ...fields, isGuest: false, guestExpiresAt: null })}
+          onUpgraded={(fields) => {
+            auth.updateUser({ ...fields, isGuest: false, guestExpiresAt: null });
+            // The socket still carries the guest JWT + name; re-handshake with the new cookie.
+            const socket = getSocket();
+            socket.disconnect();
+            socket.connect();
+          }}
         />
       )}
 

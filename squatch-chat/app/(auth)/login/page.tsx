@@ -196,6 +196,7 @@ export default function LoginPage() {
                   {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
                   <a
                     href="/api/auth/oauth/github"
+                    onClick={(e) => { e.currentTarget.href = `/api/auth/oauth/github${window.location.search}`; }}
                     className="flex items-center justify-center gap-2 w-full py-2 bg-[#24292e] text-white rounded hover:bg-[#2f363d] transition-colors text-sm font-medium"
                   >
                     <svg aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
@@ -211,6 +212,7 @@ export default function LoginPage() {
                   {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
                   <a
                     href="/api/auth/oauth/google"
+                    onClick={(e) => { e.currentTarget.href = `/api/auth/oauth/google${window.location.search}`; }}
                     className="flex items-center justify-center gap-2 w-full py-2 bg-white text-[#333] rounded hover:bg-gray-100 transition-colors text-sm font-medium border border-gray-300"
                   >
                     <svg aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 24 24">
