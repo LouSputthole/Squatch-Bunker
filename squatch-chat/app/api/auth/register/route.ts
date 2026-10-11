@@ -4,6 +4,7 @@ import { checkRateLimit } from "@/lib/rateLimit";
 import { parseAccountCredentials } from "@/lib/accountCredentials";
 import { clientIp } from "@/lib/clientIp";
 import { betaAccessAllowed } from "@/lib/betaAccess";
+import { emailIdentityHash, isIdentityBanned } from "@/lib/instanceModeration";
 
 export async function POST(request: Request) {
   const { allowed, remaining, resetAt } = checkRateLimit(`register:${clientIp(request)}`);
@@ -52,7 +53,9 @@ export async function POST(request: Request) {
       where: { OR: [{ email }, { username }] },
     });
 
-    if (existing) {
+    // A banned account's email can't sign up again. Same answer as a taken
+    // email, so typing someone's address never reveals that they were banned.
+    if (existing || await isIdentityBanned([emailIdentityHash(email)])) {
       return NextResponse.json(
         { error: "Email or username already taken" },
         { status: 409 }

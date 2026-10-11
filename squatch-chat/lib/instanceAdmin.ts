@@ -1,3 +1,6 @@
+/** What every sign-in path tells a suspended account (lib/instanceModeration.ts). */
+export const ACCOUNT_SUSPENDED_MESSAGE = "This account is suspended";
+
 /**
  * Instance-wide analytics expose cross-server metadata, so access is denied
  * unless the authenticated user's immutable ID is explicitly allowlisted.

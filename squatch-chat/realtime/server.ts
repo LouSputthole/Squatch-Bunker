@@ -133,11 +133,11 @@ export type SessionCheck = "valid" | "invalid" | "unavailable";
 export async function checkSessionToken(token: string): Promise<SessionCheck> {
   const payload = verifyToken(token);
   if (!payload) return "invalid";
-  let user: { tokenVersion: number; isGuest: boolean; guestExpiresAt: Date | null } | null;
+  let user: { tokenVersion: number; isGuest: boolean; guestExpiresAt: Date | null; disabledAt: Date | null } | null;
   try {
     user = await prisma.user.findUnique({
       where: { id: payload.userId },
-      select: { tokenVersion: true, isGuest: true, guestExpiresAt: true },
+      select: { tokenVersion: true, isGuest: true, guestExpiresAt: true, disabledAt: true },
     });
   } catch (error) {
     console.error("[Campfire] session revalidation skipped (database unavailable):", error);
@@ -145,6 +145,7 @@ export async function checkSessionToken(token: string): Promise<SessionCheck> {
   }
   if (!user) return "invalid";
   if ((payload.tokenVersion ?? 0) !== user.tokenVersion) return "invalid";
+  if (user.disabledAt) return "invalid";
   if (user.isGuest && user.guestExpiresAt && user.guestExpiresAt.getTime() <= Date.now()) {
     return "invalid";
   }
@@ -613,6 +614,12 @@ export function attachSocketIO(
   ): Promise<void> {
     if (change.scope === "session") {
       io.in(`user:${change.userId}`).disconnectSockets(true);
+      return;
+    }
+    if (change.scope === "messages") {
+      io.to(`channel:${change.channelId}`).emit(`message:deleted:${change.channelId}`, {
+        messageIds: change.messageIds,
+      });
       return;
     }
     if (change.scope === "channel") {

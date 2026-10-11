@@ -30,6 +30,10 @@ model User {
   resetExpiry              DateTime?
   quietHoursStart          Int?
   quietHoursEnd            Int?
+  // Instance-wide suspension by the operator (lib/instanceModeration.ts):
+  // every session is refused while set.
+  disabledAt               DateTime?
+  disabledReason           String?
   createdAt                DateTime  @default(now())
   updatedAt                DateTime  @updatedAt
 
@@ -599,4 +603,42 @@ model TelemetryInstall {
 
   @@index([lastSeenAt])
   @@index([firstSeenAt])
+}
+
+// Instance-operator moderation (lib/instanceModeration.ts, /admin). One row
+// per operator action: ids and the operator's reason, never message content.
+model InstanceAuditLog {
+  id         String   @id @default(uuid())
+  actorId    String
+  action     String
+  targetType String
+  targetId   String
+  reason     String?
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+// Sign-up identities of banned accounts: SHA-256 of the normalized email or of
+// a GitHub/Google account id. Never a raw email.
+model BannedIdentity {
+  hash      String   @id
+  kind      String // "email" | "oauth"
+  createdAt DateTime @default(now())
+}
+
+// Content the operator removed under an evidence hold: a frozen JSON copy of
+// the removed rows and the names of the files moved to the private evidence
+// folder. Deleted with those files once expiresAt passes.
+model EvidenceHold {
+  id         String   @id @default(uuid())
+  actorId    String
+  targetType String // "message" | "direct_message" | "file"
+  targetId   String
+  reason     String
+  snapshot   String
+  createdAt  DateTime @default(now())
+  expiresAt  DateTime
+
+  @@index([expiresAt])
 }

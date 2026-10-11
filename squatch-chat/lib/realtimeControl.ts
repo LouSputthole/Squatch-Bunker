@@ -3,13 +3,15 @@
  *
  * The optional userId narrows a channel/server refresh when the caller knows
  * only one member changed. Omitting it asks every attached realtime server to
- * sweep all connected users in that scope.
+ * sweep all connected users in that scope. "messages" tells open channels that
+ * messages were removed server-side (no client sent the delete to relay).
  */
 export type RealtimeAuthorizationChange =
   | { scope: "session"; userId: string }
   | { scope: "member"; serverId: string; userId: string }
   | { scope: "channel"; channelId: string; userId?: string }
-  | { scope: "server"; serverId: string; userId?: string };
+  | { scope: "server"; serverId: string; userId?: string }
+  | { scope: "messages"; channelId: string; messageIds: string[] };
 
 export type RealtimeAuthorizationListener = (
   change: RealtimeAuthorizationChange,

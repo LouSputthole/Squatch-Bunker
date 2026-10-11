@@ -2,12 +2,9 @@ import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { assertFeature } from "@/lib/features";
 import { parseInviteRegeneration } from "@/lib/invites";
-import {
-  removeUnreferencedPrivateUpload,
-  removeUnreferencedUpload,
-} from "@/lib/messageRetention";
+import { removeUnreferencedUpload } from "@/lib/messageRetention";
 import { memberHasPermission } from "@/lib/serverRoles";
-import { notifyRealtimeAuthorizationChange } from "@/lib/realtimeControl";
+import { deleteServerWithContent } from "@/lib/serverDeletion";
 import { MAX_SERVER_DESCRIPTION_LENGTH, parseServerName } from "@/lib/inputLimits";
 
 export async function PATCH(
@@ -159,100 +156,9 @@ export async function DELETE(
       return NextResponse.json({ error: "Only the server owner can do this" }, { status: 403 });
     }
 
-    const { attachmentUrls, privateUploadIds, channelIds } = await prisma.$transaction(async (tx) => {
-      const channels = await tx.channel.findMany({
-        where: { serverId },
-        select: { id: true },
-      });
-      const channelIds = channels.map((c) => c.id);
-      const messages = channelIds.length
-        ? await tx.message.findMany({
-            where: { channelId: { in: channelIds } },
-            select: { attachmentUrl: true, privateUploadId: true },
-          })
-        : [];
-      const journalEntries = await tx.journalEntry.findMany({
-        where: { serverId },
-        select: { attachmentUrl: true, privateUploadId: true },
-      });
-      const [serverMedia, customEmojis] = await Promise.all([
-        tx.server.findUnique({
-          where: { id: serverId },
-          select: { icon: true, banner: true },
-        }),
-        tx.customEmoji.findMany({
-          where: { serverId },
-          select: { url: true },
-        }),
-      ]);
-
-
-      await tx.notificationPreference.deleteMany({
-        where: {
-          OR: [
-            { serverId },
-            { channelId: { in: channelIds } },
-          ],
-        },
-      });
-      if (channelIds.length > 0) {
-        await tx.reaction.deleteMany({
-          where: { message: { channelId: { in: channelIds } } },
-        });
-        // ScheduledMessage and Webhook FK channels but have no onDelete cascade,
-        // so they must be removed before their channels.
-        await tx.scheduledMessage.deleteMany({ where: { channelId: { in: channelIds } } });
-        await tx.webhook.deleteMany({ where: { channelId: { in: channelIds } } });
-        await tx.message.deleteMany({ where: { channelId: { in: channelIds } } });
-        await tx.channel.deleteMany({ where: { serverId } });
-      }
-
-      // Server-scoped records without an onDelete cascade: remove explicitly or
-      // they FK-block the server delete (Postgres) / orphan it (SQLite).
-      await tx.customEmoji.deleteMany({ where: { serverId } });
-      await tx.auditLog.deleteMany({ where: { serverId } });
-
-      await tx.serverMember.deleteMany({ where: { serverId } });
-      await tx.server.delete({ where: { id: serverId } });
-
-      return {
-        channelIds,
-        attachmentUrls: [
-          ...new Set(
-            [
-              ...messages.map((message) => message.attachmentUrl),
-              ...journalEntries.map((entry) => entry.attachmentUrl),
-              serverMedia?.icon,
-              serverMedia?.banner,
-              ...customEmojis.map((emoji) => emoji.url),
-            ].filter(
-              (url): url is string => Boolean(url),
-            ),
-          ),
-        ],
-        privateUploadIds: [
-          ...new Set(
-            [...messages, ...journalEntries]
-              .map((record) => record.privateUploadId)
-              .filter((id): id is string => Boolean(id)),
-          ),
-        ],
-      };
-    });
-    const sideEffects = await Promise.allSettled([
-      ...channelIds.map((channelId) =>
-        notifyRealtimeAuthorizationChange({ scope: "channel", channelId }),
-      ),
-      notifyRealtimeAuthorizationChange({ scope: "server", serverId }),
-      ...attachmentUrls.map(removeUnreferencedUpload),
-      ...privateUploadIds.map(removeUnreferencedPrivateUpload),
-    ]);
-    for (const result of sideEffects) {
-      if (result.status === "rejected") {
-        console.error("[Campfire] Post-delete server cleanup failed:", result.reason);
-      }
+    if (!(await deleteServerWithContent(serverId))) {
+      return NextResponse.json({ error: "Server not found" }, { status: 404 });
     }
-
     return NextResponse.json({ success: true });
   } catch (err) {
     console.error("[Campfire] Failed to delete server:", err);

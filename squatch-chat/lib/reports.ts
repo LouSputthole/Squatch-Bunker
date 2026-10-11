@@ -112,7 +112,7 @@ export async function viewerCanReviewReport(
   return (await scopeReportsForViewer(serverId, viewerId, [report])).length === 1;
 }
 
-function snippetOf(content: string): string {
+export function snippetOf(content: string): string {
   const collapsed = content.replace(/\s+/g, " ").trim();
   return collapsed.length > SNIPPET_LENGTH ? `${collapsed.slice(0, SNIPPET_LENGTH - 1)}…` : collapsed;
 }

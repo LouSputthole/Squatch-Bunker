@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { verifyPassword, createToken, setTokenCookie } from "@/lib/auth";
 import { checkRateLimit } from "@/lib/rateLimit";
 import { clientIp } from "@/lib/clientIp";
+import { ACCOUNT_SUSPENDED_MESSAGE } from "@/lib/instanceAdmin";
 
 export async function POST(request: Request) {
   const { allowed, remaining, resetAt } = checkRateLimit(`login:${clientIp(request)}`);
@@ -45,6 +46,11 @@ export async function POST(request: Request) {
         { error: "Invalid email or password" },
         { status: 401 }
       );
+    }
+    // Only after the password checks out, so this never reveals a suspension
+    // to someone who merely knows the email.
+    if (user.disabledAt) {
+      return NextResponse.json({ error: ACCOUNT_SUSPENDED_MESSAGE }, { status: 403 });
     }
 
     const token = createToken({ userId: user.id, username: user.username, tokenVersion: user.tokenVersion });

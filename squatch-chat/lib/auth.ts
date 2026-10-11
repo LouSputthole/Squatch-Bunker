@@ -64,18 +64,20 @@ export async function validateSessionToken(
   const payload = verifyToken(token);
   if (!payload) return null;
 
-  // Stateful checks: load the user to enforce token revocation (tokenVersion)
-  // and guest-session expiry. Fail closed if the user is gone or the DB errors.
+  // Stateful checks: load the user to enforce token revocation (tokenVersion),
+  // operator suspension, and guest-session expiry. Fail closed if the user is
+  // gone or the DB errors.
   let currentUsername: string | undefined;
   try {
     const { prisma } = await import("@/lib/db");
     const user = await prisma.user.findUnique({
       where: { id: payload.userId },
-      select: { tokenVersion: true, isGuest: true, guestExpiresAt: true, username: true },
+      select: { tokenVersion: true, isGuest: true, guestExpiresAt: true, username: true, disabledAt: true },
     });
     if (!user) return null;
     currentUsername = user.username;
     if ((payload.tokenVersion ?? 0) !== user.tokenVersion) return null;
+    if (user.disabledAt) return null;
     if (
       user.isGuest &&
       user.guestExpiresAt &&

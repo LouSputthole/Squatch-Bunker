@@ -5,7 +5,9 @@ const path = require("node:path");
 
 // 6: Ember Inbox (Notification, User quiet hours) and TelemetryInstall, which
 // version 5 databases (including every upgraded v0.0.3 install) never received.
-const DESKTOP_SCHEMA_VERSION = 6;
+// 7: instance moderation (User.disabledAt/disabledReason, InstanceAuditLog,
+// BannedIdentity, EvidenceHold).
+const DESKTOP_SCHEMA_VERSION = 7;
 
 const TABLES = [
   [
@@ -151,6 +153,30 @@ const TABLES = [
     "firstSeenAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "lastSeenAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`,
+  `CREATE TABLE IF NOT EXISTS "InstanceAuditLog" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "actorId" TEXT NOT NULL,
+    "action" TEXT NOT NULL,
+    "targetType" TEXT NOT NULL,
+    "targetId" TEXT NOT NULL,
+    "reason" TEXT,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+  `CREATE TABLE IF NOT EXISTS "BannedIdentity" (
+    "hash" TEXT NOT NULL PRIMARY KEY,
+    "kind" TEXT NOT NULL,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+  `CREATE TABLE IF NOT EXISTS "EvidenceHold" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "actorId" TEXT NOT NULL,
+    "targetType" TEXT NOT NULL,
+    "targetId" TEXT NOT NULL,
+    "reason" TEXT NOT NULL,
+    "snapshot" TEXT NOT NULL,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "expiresAt" DATETIME NOT NULL
+  )`,
 ];
 
 const INDEXES = [
@@ -180,6 +206,8 @@ const INDEXES = [
   'CREATE INDEX IF NOT EXISTS "Notification_userId_createdAt_idx" ON "Notification"("userId", "createdAt")',
   'CREATE INDEX IF NOT EXISTS "TelemetryInstall_lastSeenAt_idx" ON "TelemetryInstall"("lastSeenAt")',
   'CREATE INDEX IF NOT EXISTS "TelemetryInstall_firstSeenAt_idx" ON "TelemetryInstall"("firstSeenAt")',
+  'CREATE INDEX IF NOT EXISTS "InstanceAuditLog_createdAt_idx" ON "InstanceAuditLog"("createdAt")',
+  'CREATE INDEX IF NOT EXISTS "EvidenceHold_expiresAt_idx" ON "EvidenceHold"("expiresAt")',
 ];
 
 function quoteIdentifier(identifier) {
@@ -273,7 +301,14 @@ function assertIntegrity(database) {
 
 function assertCurrentSchema(database) {
   const requiredColumns = {
-    User: ["billingCheckoutPendingAt", "billingEventAt", "quietHoursStart", "quietHoursEnd"],
+    User: [
+      "billingCheckoutPendingAt",
+      "billingEventAt",
+      "quietHoursStart",
+      "quietHoursEnd",
+      "disabledAt",
+      "disabledReason",
+    ],
     Server: [
       "inviteExpiresAt",
       "inviteMaxUses",
@@ -307,6 +342,9 @@ function assertCurrentSchema(database) {
     GatheringRsvp: ["id", "gatheringId", "userId", "status"],
     Notification: ["id", "userId", "type", "readAt", "createdAt"],
     TelemetryInstall: ["installId", "kind", "lastSeenAt"],
+    InstanceAuditLog: ["id", "actorId", "action", "targetType", "targetId", "createdAt"],
+    BannedIdentity: ["hash", "kind"],
+    EvidenceHold: ["id", "targetType", "targetId", "snapshot", "expiresAt"],
   };
   for (const [table, columns] of Object.entries(requiredColumns)) {
     const present = tableColumns(database, table);
@@ -399,6 +437,8 @@ function upgradeDesktopDatabase({
       addColumn(database, "User", "billingEventAt", "DATETIME");
       addColumn(database, "User", "quietHoursStart", "INTEGER");
       addColumn(database, "User", "quietHoursEnd", "INTEGER");
+      addColumn(database, "User", "disabledAt", "DATETIME");
+      addColumn(database, "User", "disabledReason", "TEXT");
 
       for (const sql of TABLES) database.exec(sql);
       addColumn(
