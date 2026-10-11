@@ -19,6 +19,7 @@ public/uploads/
 public/avatars/
 desktop/.stage/
 desktop/dist/
+desktop/node_modules/
 coverage/
 *.db
 *.db-*

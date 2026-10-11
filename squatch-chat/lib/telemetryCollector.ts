@@ -94,7 +94,11 @@ export interface ReleaseDownloads {
   releases: { name: string; downloads: number }[];
 }
 
-/** GitHub release asset downloads, cached for an hour; null when GitHub can't be reached. */
+// People downloading Campfire. Installed copies also fetch latest.yml (every 6 h)
+// and .blockmap files (differential updates); those are update checks, not downloads.
+const DOWNLOAD_ASSET = /\.(exe|zip)$/i;
+
+/** GitHub release downloads of the exes, cached for an hour; null when GitHub can't be reached. */
 export async function githubReleaseDownloads(): Promise<ReleaseDownloads | null> {
   try {
     const response = await fetch(RELEASES_URL, {
@@ -109,8 +113,11 @@ export async function githubReleaseDownloads(): Promise<ReleaseDownloads | null>
       name: String(release?.tag_name ?? release?.name ?? "untagged"),
       downloads: Array.isArray(release?.assets)
         ? release.assets.reduce(
-            (sum: number, asset: { download_count?: unknown }) =>
-              sum + (Number.isSafeInteger(asset?.download_count) ? (asset.download_count as number) : 0),
+            (sum: number, asset: { name?: unknown; download_count?: unknown }) =>
+              sum +
+              (typeof asset?.name === "string" && DOWNLOAD_ASSET.test(asset.name) && Number.isSafeInteger(asset.download_count)
+                ? (asset.download_count as number)
+                : 0),
             0,
           )
         : 0,

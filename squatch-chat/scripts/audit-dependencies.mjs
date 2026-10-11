@@ -26,17 +26,22 @@ if (!(failLevel in SEVERITY_RANK)) {
   process.exit(2);
 }
 
-const lock = JSON.parse(readFileSync(new URL("../package-lock.json", import.meta.url), "utf8"));
+// The web app, plus the desktop launcher's own runtime deps (electron-updater),
+// which ship inside every Windows installer.
+const lockFiles = ["../package-lock.json", "../desktop/package-lock.json"];
 
 // version -> is this copy reachable outside dev-only paths?
 const installed = new Map();
-for (const [path, entry] of Object.entries(lock.packages ?? {})) {
-  if (!path || !entry.version) continue;
-  const name = path.slice(path.lastIndexOf("node_modules/") + "node_modules/".length);
-  if (!installed.has(name)) installed.set(name, new Map());
-  const versions = installed.get(name);
-  const isProd = !entry.dev;
-  versions.set(entry.version, (versions.get(entry.version) ?? false) || isProd);
+for (const lockFile of lockFiles) {
+  const lock = JSON.parse(readFileSync(new URL(lockFile, import.meta.url), "utf8"));
+  for (const [path, entry] of Object.entries(lock.packages ?? {})) {
+    if (!path || !entry.version) continue;
+    const name = path.slice(path.lastIndexOf("node_modules/") + "node_modules/".length);
+    if (!installed.has(name)) installed.set(name, new Map());
+    const versions = installed.get(name);
+    const isProd = !entry.dev;
+    versions.set(entry.version, (versions.get(entry.version) ?? false) || isProd);
+  }
 }
 
 const payload = {};

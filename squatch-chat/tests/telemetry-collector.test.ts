@@ -6,6 +6,7 @@ import {
   isTelemetryCollector,
   telemetrySummary,
 } from "@/lib/telemetryCollector";
+import { parseTelemetryNotice } from "@/lib/telemetryProtocol";
 
 // POST /api/telemetry/ping against the test DB, plus the /admin aggregates.
 // Each test pings from its own documentation-range IP so the in-memory
@@ -39,10 +40,14 @@ function desktopPing(installId: string, version = "1.0.0") {
 
 beforeEach(() => {
   process.env.CAMPFIRE_TELEMETRY_COLLECTOR = "1";
+  // No broadcast notice unless a test sets one, so pings answer 204.
+  vi.stubEnv("CAMPFIRE_NOTICE", "");
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
+  vi.restoreAllMocks();
 });
 
 afterAll(() => {
@@ -88,7 +93,7 @@ describe("POST /api/telemetry/ping", () => {
     expect(await prisma.telemetryInstall.count({ where: { installId: "streamed-big-install" } })).toBe(0);
   });
 
-  it("records a new install and answers 204 with no body", async () => {
+  it("records a new install and answers 204 with no body while no notice is set", async () => {
     const res = await ping(desktopPing("new-install-abcdef12"), "198.51.100.4");
     expect(res.status).toBe(204);
     expect(res.headers.get("cache-control")).toBe("no-store");
@@ -103,6 +108,39 @@ describe("POST /api/telemetry/ping", () => {
       edition: null,
       users: null,
     });
+  });
+
+  it("answers 200 with the parsed notice when CAMPFIRE_NOTICE is set, still recording the ping", async () => {
+    vi.stubEnv(
+      "CAMPFIRE_NOTICE",
+      JSON.stringify({ id: "v0-2-ready", text: " Campfire 0.2 is out. ", url: "https://campfire.example/download", urlLabel: "Get it", extra: 1 }),
+    );
+    const res = await ping(desktopPing("notice-install-abcdef"), "198.51.100.9");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    const body = await res.json();
+    expect(body).toEqual({
+      notice: { id: "v0-2-ready", text: "Campfire 0.2 is out.", url: "https://campfire.example/download", urlLabel: "Get it" },
+    });
+    // Clients run the same strict parse on the wire body.
+    expect(parseTelemetryNotice(body.notice)).toEqual(body.notice);
+    expect(await prisma.telemetryInstall.count({ where: { installId: "notice-install-abcdef" } })).toBe(1);
+  });
+
+  it("ignores an invalid CAMPFIRE_NOTICE and keeps answering 204", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.stubEnv("CAMPFIRE_NOTICE", "{not json");
+    expect((await ping(desktopPing("bad-notice-install-01"), "198.51.100.10")).status).toBe(204);
+    vi.stubEnv("CAMPFIRE_NOTICE", JSON.stringify({ id: "plain-http", text: "Hi", url: "http://campfire.example" }));
+    expect((await ping(desktopPing("bad-notice-install-02"), "198.51.100.10")).status).toBe(204);
+    expect(warn).toHaveBeenCalledTimes(2);
+  });
+
+  it("never attaches the notice to a rejected ping", async () => {
+    vi.stubEnv("CAMPFIRE_NOTICE", JSON.stringify({ id: "rejected", text: "Hi" }));
+    const res = await ping({ ...desktopPing("bad-kind-notice-0001"), kind: "phone" }, "198.51.100.11");
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "Invalid ping" });
   });
 
   it("refreshes an existing install but keeps when it was first seen", async () => {
@@ -189,10 +227,13 @@ describe("telemetrySummary", () => {
 });
 
 describe("githubReleaseDownloads", () => {
-  it("sums asset downloads per release and overall", async () => {
+  it("sums exe downloads per release and overall", async () => {
     const releases = Array.from({ length: 7 }, (_, i) => ({
       tag_name: `v0.${7 - i}.0`,
-      assets: [{ download_count: 10 }, { download_count: i }],
+      assets: [
+        { name: `Campfire-Setup-0.${7 - i}.0-x64.exe`, download_count: 10 },
+        { name: `Campfire-Portable-0.${7 - i}.0-x64.exe`, download_count: i },
+      ],
     }));
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(releases))));
 
@@ -200,6 +241,24 @@ describe("githubReleaseDownloads", () => {
     expect(downloads?.total).toBe(7 * 10 + (0 + 1 + 2 + 3 + 4 + 5 + 6));
     expect(downloads?.releases).toHaveLength(5);
     expect(downloads?.releases[0]).toEqual({ name: "v0.7.0", downloads: 10 });
+  });
+
+  it("ignores the auto-update feed files installed copies fetch on their own", async () => {
+    const releases = [
+      {
+        tag_name: "v1.0.0",
+        assets: [
+          { name: "Campfire-Setup-1.0.0-x64.exe", download_count: 3 },
+          { name: "Campfire-Setup-1.0.0-x64.exe.blockmap", download_count: 500 },
+          { name: "latest.yml", download_count: 9000 },
+          { name: "Campfire-1.0.0-win.zip", download_count: 2 },
+          { download_count: 7 },
+        ],
+      },
+    ];
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(releases))));
+
+    expect(await githubReleaseDownloads()).toEqual({ total: 5, releases: [{ name: "v1.0.0", downloads: 5 }] });
   });
 
   it("fails soft when GitHub errors or is unreachable", async () => {

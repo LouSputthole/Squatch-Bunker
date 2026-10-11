@@ -43,6 +43,8 @@ COPY --chown=node:node --from=builder /app/prisma.postgresql.config.ts ./
 COPY --chown=node:node --from=builder /app/next.config.ts ./
 COPY --chown=node:node --from=builder /app/tsconfig.json ./
 COPY --chown=node:node --from=builder /app/scripts/preflight-postgresql.ts ./scripts/
+# Fly's release command (fly.toml): `npm run deploy:release`.
+COPY --chown=node:node --from=builder /app/scripts/launch-checklist.ts ./scripts/
 COPY --chown=node:node --from=builder /app/scripts/verify-realtime.ts ./scripts/
 
 COPY <<'EOF' /app/start.sh

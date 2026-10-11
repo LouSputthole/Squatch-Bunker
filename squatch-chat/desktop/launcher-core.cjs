@@ -86,11 +86,111 @@ function buildDesktopPing({ installId, mode, version, platform, arch }) {
   };
 }
 
+// ─── Broadcast notice (rides the ping response; contract: TelemetryNotice in lib/telemetryProtocol.ts) ───
+
+const NOTICE_ID = /^[A-Za-z0-9_-]{1,64}$/;
+// Ids of notices already shown; older ones fall off (a notice id is never reused).
+const MAX_REMEMBERED_NOTICES = 50;
+// A valid notice is well under 2 KB; anything bigger is not one.
+const MAX_NOTICE_BODY_CHARS = 8192;
+
+/** Hand-written twin of parseTelemetryNotice (tests assert both agree on the same inputs). */
+function parseTelemetryNotice(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  if (typeof raw.id !== "string" || !NOTICE_ID.test(raw.id)) return null;
+  if (typeof raw.text !== "string") return null;
+  const text = raw.text.trim();
+  if (!text || text.length > 280) return null;
+  let url = null;
+  if (raw.url != null) {
+    if (typeof raw.url !== "string" || raw.url.length > 500) return null;
+    try {
+      const parsed = new URL(raw.url);
+      if (parsed.protocol !== "https:") return null;
+      url = parsed.toString();
+    } catch {
+      return null;
+    }
+  }
+  let urlLabel = null;
+  if (raw.urlLabel != null) {
+    if (typeof raw.urlLabel !== "string" || !raw.urlLabel.trim() || raw.urlLabel.length > 40) return null;
+    urlLabel = raw.urlLabel.trim();
+  }
+  return { id: raw.id, text, url, urlLabel: url ? urlLabel : null };
+}
+
+/** The collector answers 200 {"notice": ...} when a notice is set, else 204. Anything else: no notice. */
+function noticeFromPingResponse(statusCode, body) {
+  if (statusCode !== 200 || typeof body !== "string" || body.length > MAX_NOTICE_BODY_CHARS) return null;
+  try {
+    return parseTelemetryNotice(JSON.parse(body)?.notice);
+  } catch {
+    return null;
+  }
+}
+
+/** Host mode only (Campfire Online shows its own web banner), and each notice id once. */
+function shouldShowNotice({ notice, mode, dismissedIds }) {
+  return Boolean(notice) && mode === "host" && !(Array.isArray(dismissedIds) && dismissedIds.includes(notice.id));
+}
+
+/** dismissedIds with id appended (most recent last), capped at MAX_REMEMBERED_NOTICES. */
+function rememberNotice(dismissedIds, id) {
+  const kept = Array.isArray(dismissedIds) ? dismissedIds.filter((value) => typeof value === "string" && value !== id) : [];
+  return [...kept, id].slice(-MAX_REMEMBERED_NOTICES);
+}
+
+// ─── Updates ───
+
+/**
+ * "auto": electron-updater downloads in the background and installs (installed NSIS builds).
+ * "manual": prompt to download from GitHub (portable builds have no installer to re-run).
+ * "off": unpackaged dev runs.
+ * @param {{ isPackaged: boolean, platform: string, portableDirectory?: string | null }} options
+ * @returns {"auto" | "manual" | "off"}
+ */
+function updateMode({ isPackaged, platform, portableDirectory = null }) {
+  if (!isPackaged) return "off";
+  return platform === "win32" && !portableDirectory ? "auto" : "manual";
+}
+
+/** Semver prerelease ("0.1.0-beta.1"); build metadata alone ("1.0.0+5") is not one.
+ * Only prerelease installs follow prerelease updates, so stable users never get a beta. */
+function isPrerelease(version) {
+  return /^v?\d+\.\d+\.\d+-/.test(String(version ?? "").trim());
+}
+
+/** Same version, ignoring a leading "v" (GitHub tags have one; electron-updater versions don't). */
+function sameVersion(a, b) {
+  const normalize = (value) => String(value ?? "").trim().replace(/^v/i, "");
+  return normalize(a) !== "" && normalize(a) === normalize(b);
+}
+
+/**
+ * Smoke-test override: CAMPFIRE_UPDATE_FEED_URL points electron-updater's generic provider at a
+ * folder holding latest.yml + the setup exe + its blockmap (https, or http on localhost).
+ * Null = the GitHub feed electron-builder bakes into resources/app-update.yml.
+ * @param {Record<string, string | undefined>} env
+ */
+function updateFeedOverride(env) {
+  const url = parseAllowedUrl(env.CAMPFIRE_UPDATE_FEED_URL);
+  return url ? { provider: "generic", url: url.href } : null;
+}
+
 module.exports = {
   TELEMETRY_PING_PATH,
   buildDesktopPing,
   defaultMode,
+  isPrerelease,
+  noticeFromPingResponse,
   parseCloudOrigin,
+  parseTelemetryNotice,
+  rememberNotice,
+  sameVersion,
+  shouldShowNotice,
   telemetryEnabled,
   telemetryTarget,
+  updateFeedOverride,
+  updateMode,
 };

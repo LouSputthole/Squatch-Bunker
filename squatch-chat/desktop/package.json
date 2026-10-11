@@ -6,5 +6,8 @@
   "author": "Squatch Bunker",
   "license": "AGPL-3.0-only",
   "main": "main.cjs",
-  "campfireCloudUrl": ""
+  "campfireCloudUrl": "",
+  "dependencies": {
+    "electron-updater": "6.8.9"
+  }
 }

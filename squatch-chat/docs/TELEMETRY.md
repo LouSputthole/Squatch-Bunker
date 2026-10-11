@@ -14,7 +14,7 @@ this page and that file change together.
 | Sender | When | `kind` |
 |---|---|---|
 | Windows app (the desktop launcher) | About 20 seconds after launch, then once a day while it runs | `desktop` |
-| A self-hosted server (`npm run host`, Docker) in production | About a minute after start, then once a day | `server` |
+| A self-hosted server (`npm run host:prod`, Docker) in production | About a minute after start, then once a day | `server` |
 | Campfire Online itself (the collector) | Never. It counts its own users directly. | none |
 
 - The server bundled inside the Windows app does not ping on its own; the
@@ -29,8 +29,9 @@ this page and that file change together.
 ## Where it goes
 
 Each ping is one HTTPS `POST` of JSON (at most 2 KB) to Campfire Online's
-`/api/telemetry/ping`, which answers `204 No Content`. The target is chosen in
-this order:
+`/api/telemetry/ping`, which answers `204 No Content`, or `200` with a
+broadcast notice (see [The answer](#the-answer-broadcast-notices)). The target
+is chosen in this order:
 
 1. `CAMPFIRE_TELEMETRY_URL`, a full URL (for example
    `http://localhost:3000/api/telemetry/ping` when testing);
@@ -62,6 +63,49 @@ A desktop ping looks like this:
 
 The collector validates every field strictly. Unknown fields are ignored and a
 ping with any invalid field is rejected without storing anything.
+
+## The answer: broadcast notices
+
+A recorded ping gets `204 No Content`, unless Campfire Online has a broadcast
+notice set (`CAMPFIRE_NOTICE`, see [LAUNCH.md](./LAUNCH.md#announcing-a-new-version-or-campfire-pro)).
+Then it gets `200` with that notice and nothing else:
+
+```json
+{"notice":{"id":"v0-2","text":"Campfire 0.2 is out.","url":"https://github.com/LouSputthole/Squatch-Bunker/releases/latest","urlLabel":"Get it"}}
+```
+
+| Field | Meaning |
+|---|---|
+| `id` | 1-64 letters, digits, `-` or `_`. Clients remember the id they dismissed, so a new id shows again. |
+| `text` | The message, at most 280 characters. |
+| `url` | An `https://` link, or `null`. |
+| `urlLabel` | Link button text (at most 40 characters), or `null`; always `null` without a `url`. |
+
+The notice is the same for every caller and says nothing about the caller.
+Clients check it with the same rules as `parseTelemetryNotice` in
+`lib/telemetryProtocol.ts` and treat anything invalid as no notice; a client
+that ignores the body keeps working. Errors
+(`400`, `404`, `413`, `429`, `500`) never carry a notice.
+
+A self-hosted server's reporter ignores the body: our announcements are never
+shown on someone else's server. Each instance's own web users see only that
+instance's own `CAMPFIRE_NOTICE`, read from `GET /api/notice` (public,
+`{"notice": ... }` or `{"notice": null}`).
+
+The Windows app shows a notice only in **Host on this PC** mode (in Campfire
+Online mode the window already shows the web banner). It shows each id once,
+as a small dialog, and remembers the last 50 shown ids in
+`desktop-settings.json` (`dismissedNoticeIds`). Turning the usage ping off
+also turns these notices off, since they ride its answer.
+
+## Update checks (separate from the ping)
+
+Packaged Windows builds also contact GitHub to look for new versions, whether
+or not the usage ping is on, so GitHub sees the IP address like any download.
+Installed copies fetch the release feed (`releases.atom`, `releases/latest`,
+and the release's `latest.yml`) about 15 seconds after launch and then every 6
+hours; portable copies call `api.github.com` once per launch. Nothing about
+the install is sent.
 
 ## How install IDs are made
 

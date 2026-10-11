@@ -1,9 +1,14 @@
 # Deploying Campfire on the public internet
 
-The self-host quick start (`npm ci && npm run host`) covers LAN use. This
+The self-host quick start (`npm ci && npm run host:prod`) covers LAN use. This
 guide takes the same build to a public domain with HTTPS and working
 internet voice. Target: one small VPS (1–2 GB RAM), Ubuntu 22.04/24.04, a
 domain name, ~30 minutes.
+
+Deploying the hosted Campfire Online instead? It runs on Fly.io with
+[`fly.toml`](../fly.toml) and managed PostgreSQL; follow
+[LAUNCH.md: Go live](./LAUNCH.md#go-live). Its voice relay uses
+[TURN-only host](#turn-only-host-campfire-on-flyio) below.
 
 What you end up with:
 
@@ -79,8 +84,7 @@ After=network-online.target
 [Service]
 User=campfire
 WorkingDirectory=/opt/campfire/app/squatch-chat
-ExecStart=/usr/bin/npm run host
-Environment=NODE_ENV=production
+ExecStart=/usr/bin/npm run host:prod
 Restart=on-failure
 
 [Install]
@@ -270,6 +274,55 @@ Authenticated `/api/config` responses contain only time-limited
 `timestamp:user-id` credentials and the three URLs. Anonymous responses
 contain none of them, and `TURN_AUTH_SECRET` must never reach a browser.
 
+### TURN-only host (Campfire on Fly.io)
+
+Campfire Online runs on Fly.io ([LAUNCH.md](./LAUNCH.md#go-live)), which
+cannot host coturn's UDP relay range, so a small VPS (for example a $6
+DigitalOcean droplet: 1 GB RAM, 1 TB transfer) runs coturn alone. Point
+`turn.<domain>` at it, skip sections 1 and 2, and follow section 3 above
+plus [section 4](#4-firewall) with these changes:
+
+1. **Certificate:** install coturn first (it creates the `turnserver`
+   group), then get a Let's Encrypt certificate with certbot's standalone mode
+   (port 80 is open in section 4) and use its files as the two
+   `/secure/path/to/...` sources in the certificate commands:
+
+   ```bash
+   sudo apt-get install -y certbot
+   sudo ufw allow 80/tcp
+   sudo certbot certonly --standalone -d turn.campfire.example.com
+   # fullchain: /etc/letsencrypt/live/turn.campfire.example.com/fullchain.pem
+   # key:       /etc/letsencrypt/live/turn.campfire.example.com/privkey.pem
+   ```
+
+   Renewals then copy the new pair into place and reload it:
+
+   ```bash
+   sudo tee /etc/letsencrypt/renewal-hooks/deploy/coturn.sh >/dev/null <<'EOF'
+   #!/bin/sh
+   set -e
+   install -o root -g turnserver -m 640 "$RENEWED_LINEAGE/fullchain.pem" /etc/coturn/tls/fullchain.pem
+   install -o root -g turnserver -m 640 "$RENEWED_LINEAGE/privkey.pem" /etc/coturn/tls/privkey.pem
+   systemctl kill --kill-who=main --signal=SIGUSR2 coturn
+   EOF
+   sudo chmod 755 /etc/letsencrypt/renewal-hooks/deploy/coturn.sh
+   sudo certbot renew --dry-run
+   ```
+
+2. **Campfire settings** go into Fly secrets instead of `.env`, and setting
+   them restarts the app (there is no `systemctl restart campfire`). Print
+   the secret once with `sudo cat /root/campfire-turn-auth-secret`, then from
+   your own machine:
+
+   ```bash
+   fly secrets set \
+     TURN_URLS='["turn:turn.campfire.example.com:3478?transport=udp","turn:turn.campfire.example.com:3478?transport=tcp","turns:turn.campfire.example.com:5349?transport=tcp"]' \
+     TURN_AUTH_SECRET='PASTE-EXACT-TURN_AUTH_SECRET-HERE'
+   ```
+
+The acceptance gate in [section 5](#turn-live-acceptance-gate) applies
+unchanged; read coturn's logs with `sudo journalctl -u coturn`.
+
 ### Non-beta legacy compatibility
 
 Singular `TURN_URL` plus static username/password remains only for old
@@ -440,7 +493,7 @@ version, and only then start Campfire. Do not run old application code against
 a database that has already been migrated forward.
 
 SQLite schema synchronization runs during `npm ci` or `npm run setup`, not
-during `npm run host`. Do not skip it on an SQLite upgrade. PostgreSQL upgrades
+during `npm run host` or `npm run host:prod`. Do not skip it on an SQLite upgrade. PostgreSQL upgrades
 use `npm run db:migrate` while the service is stopped.
 
 ## Backups
@@ -957,14 +1010,17 @@ to the beta go/no-go record.
 - **Cloudflare Tunnel / ngrok** get you HTTPS signaling in minutes with no
   server exposed — but voice media does not go through the tunnel (WebRTC is
   peer-to-peer), so cross-network voice still needs a TURN server somewhere.
-  A rented TURN service (e.g. metered.ca) plugs into the same three env vars.
+  A rented TURN service with one fixed username and password only fits the
+  legacy static mode above, which hands that password to every signed-in
+  user. Cloudflare's TURN issues per-user credentials through its own API,
+  which Campfire does not call yet; coturn's shared secret is the supported
+  path.
 - **PaaS (Fly.io etc.)** needs persistent database storage plus persistent
   public uploads, avatars, and private attachments. Prefer one durable
   `CAMPFIRE_UPLOAD_DIR` with all three subdirectories; mounting only `data/`
-  or only public media loses part of user media. Coturn wants a plain VM with
-  a wide UDP range; if you're
-  renting a machine for TURN anyway, the VPS recipe above is less moving
-  parts.
+  or only public media loses part of user media. [`fly.toml`](../fly.toml)
+  does exactly that for Campfire Online. Coturn wants a plain VM with a wide
+  UDP range: see [TURN-only host](#turn-only-host-campfire-on-flyio).
 
 ## Scale ceiling
 
