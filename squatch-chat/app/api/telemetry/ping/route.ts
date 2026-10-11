@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { clientIp, clientNetwork } from "@/lib/clientIp";
+import { currentNotice } from "@/lib/notice";
 import { checkWeightedLimit } from "@/lib/rateLimit";
 import { isTelemetryCollector, recordTelemetryPing } from "@/lib/telemetryCollector";
 import { parseTelemetryPing, TELEMETRY_MAX_BODY_BYTES } from "@/lib/telemetryProtocol";
@@ -43,7 +44,8 @@ async function boundedText(request: Request): Promise<string | null> {
 /**
  * Anonymous install ping (lib/telemetryProtocol.ts). No auth by design: the
  * body carries nothing user-identifying, and the caller's IP is only an
- * in-memory limiter key — it is never stored.
+ * in-memory limiter key — it is never stored. Answers 204, or 200 {notice}
+ * while CAMPFIRE_NOTICE is set (lib/notice.ts).
  */
 export async function POST(request: Request) {
   if (!isTelemetryCollector()) return fail(404, "Not found");
@@ -88,6 +90,8 @@ export async function POST(request: Request) {
       checkWeightedLimit("telemetry:new-installs", 1, NEW_INSTALLS_PER_HOUR, HOUR_MS).allowed,
     );
     if (!recorded) return fail(503, "Collector busy");
+    const notice = currentNotice();
+    if (notice) return NextResponse.json({ notice }, { headers: NO_STORE_HEADERS });
     return new NextResponse(null, { status: 204, headers: NO_STORE_HEADERS });
   } catch {
     return fail(500, "Ping not recorded");

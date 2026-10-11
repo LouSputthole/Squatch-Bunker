@@ -25,16 +25,26 @@ const { importLegacyDesktopState } = require("./legacy-state.cjs");
 const {
   buildDesktopPing,
   defaultMode,
+  isPrerelease,
+  noticeFromPingResponse,
   parseCloudOrigin,
+  rememberNotice,
+  sameVersion,
+  shouldShowNotice,
   telemetryEnabled,
   telemetryTarget,
+  updateFeedOverride,
+  updateMode,
 } = require("./launcher-core.cjs");
 
 const APP_NAME = "Campfire";
 const STARTUP_TIMEOUT_MS = 45_000;
 // Fixed port while sharing on the LAN so the link friends saved keeps working.
 const LAN_PORT = 3939;
+// Same repo as "publish" in packaging/electron-builder.json (desktop:verify checks).
 const UPDATE_REPO = "LouSputthole/Squatch-Bunker";
+const UPDATE_FIRST_CHECK_MS = 15_000;
+const UPDATE_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const TELEMETRY_FIRST_PING_MS = 20_000;
 // First launch only: time to read the notice and opt out before anything is sent.
 const TELEMETRY_NOTICE_GRACE_MS = 5 * 60 * 1000;
@@ -54,6 +64,11 @@ let quitting = false;
 let restarting = false;
 let settings = {};
 let launch = null;
+// electron-updater on installed builds; null = prompt-to-download (portable, dev, or it failed to load).
+let autoUpdater = null;
+// Downloaded and waiting for a restart (installs on quit otherwise).
+let readyUpdateVersion = null;
+let updatePromptOpen = false;
 
 function configureUserDataPath() {
   const portableDirectory = process.env.PORTABLE_EXECUTABLE_DIR;
@@ -328,7 +343,8 @@ async function startServer() {
     cwd: launch.serverRoot,
     env: environment,
     windowsHide: true,
-    stdio: ["ignore", "pipe", "pipe"],
+    // "ipc": stopServer() asks the server to drain; Windows has no SIGTERM.
+    stdio: ["ignore", "pipe", "pipe", "ipc"],
   });
   serverProcess = child;
   const log = serverLog;
@@ -353,17 +369,29 @@ async function startServer() {
   ready = true;
 }
 
+/** Resolves true when the child exits within `ms`. */
+function waitForExit(child, ms) {
+  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => resolve(false), ms);
+    child.once("exit", () => {
+      clearTimeout(timeout);
+      resolve(true);
+    });
+  });
+}
+
+/** Graceful first: on Windows child.kill() is TerminateProcess, which skips the server's drain
+ * (sockets, HTTP, Prisma/SQLite). It asks over IPC and force-kills only if that hangs. */
 async function stopServer() {
   const child = serverProcess;
-  if (child && child.exitCode === null) {
-    child.kill();
-    await new Promise((resolve) => {
-      const timeout = setTimeout(resolve, 3_000);
-      child.once("exit", () => {
-        clearTimeout(timeout);
-        resolve();
-      });
-    });
+  if (child && child.exitCode === null && child.signalCode === null) {
+    // The callback keeps a failed send from becoming an "error" event; kill() below covers it.
+    if (child.connected) child.send("shutdown", () => {});
+    if (!child.connected || !(await waitForExit(child, 3_000))) {
+      child.kill();
+      await waitForExit(child, 3_000);
+    }
   }
   serverLog?.end();
 }
@@ -562,13 +590,37 @@ function sendTelemetryPing() {
       timeout: 10_000,
     },
     (response) => {
-      response.resume();
       if (response.statusCode >= 300) logDesktop(`[desktop] usage ping: collector responded ${response.statusCode}`);
+      let reply = "";
+      response.setEncoding("utf8");
+      response.on("data", (chunk) => {
+        if (reply.length <= 8192) reply += chunk; // oversized = not a notice; keep draining
+      });
+      response.on("end", () => void showNotice(noticeFromPingResponse(response.statusCode, reply)));
+      response.on("error", (error) => logDesktop(`[desktop] usage ping reply failed: ${error.message}`));
     },
   );
   request.on("timeout", () => request.destroy(new Error("timed out")));
   request.on("error", (error) => logDesktop(`[desktop] usage ping failed: ${error.message}`));
   request.end(body);
+}
+
+/** "A better version is out" etc. from the collector. Remembered before it opens, so it shows once. */
+async function showNotice(notice) {
+  if (!shouldShowNotice({ notice, mode: currentMode(), dismissedIds: settings.dismissedNoticeIds })) return;
+  settings.dismissedNoticeIds = rememberNotice(settings.dismissedNoticeIds, notice.id);
+  saveSettings();
+  logDesktop(`[desktop] showing notice ${notice.id}`);
+  const { response } = await dialog.showMessageBox({
+    type: "info",
+    title: APP_NAME,
+    message: notice.text,
+    buttons: notice.url ? [notice.urlLabel || "Learn more", "Dismiss"] : ["OK"],
+    defaultId: 0,
+    cancelId: notice.url ? 1 : 0,
+    noLink: true,
+  });
+  if (notice.url && response === 0) openExternal(notice.url);
 }
 
 /** Opt-outs are re-checked on every send, so the tray toggle applies without a restart. */
@@ -598,6 +650,139 @@ function scheduleTelemetry() {
 }
 
 // ─── Updates ───
+// Installed (NSIS) builds update themselves: electron-updater reads latest.yml from the newest
+// GitHub release (docs/RELEASE_CHECKLIST.md §7), downloads in the background, and installs on
+// "Restart now" or on the next quit. Portable builds, and a failed interactive check, use the
+// prompt-to-download flow (checkForUpdates).
+
+/** electron-updater for an installed build, or null to keep the download prompt. */
+function createAutoUpdater() {
+  try {
+    const updater = require("electron-updater").autoUpdater;
+    // Its own "error" listener logs through this; a failed check or download never throws at us.
+    updater.logger = {
+      info: (message) => logDesktop(`[updater] ${message}`),
+      warn: (message) => logDesktop(`[updater] warning: ${message}`),
+      error: (message) => logDesktop(`[updater] error: ${message}`),
+    };
+    updater.allowPrerelease = isPrerelease(app.getVersion());
+    updater.autoDownload = true;
+    updater.autoInstallOnAppQuit = true;
+    updater.disableWebInstaller = true;
+    // electron-updater sends a random per-install id (%APPDATA%\Campfire\.updaterId) as a header
+    // on every feed and download request, even with the usage ping off; requestHeaders override
+    // it so update checks stay anonymous. Staged rollouts still work: they read the local file.
+    updater.requestHeaders = { "x-user-staging-id": "00000000-0000-0000-0000-000000000000" };
+    // Unsigned builds: electron-updater verifies the downloaded installer's Authenticode signature
+    // only when resources/app-update.yml names a publisherName, and electron-builder writes one only
+    // for signed builds — so unsigned updates install, protected by HTTPS to GitHub plus latest.yml's
+    // sha512 (which whoever can publish a release also controls). ponytail: code signing is the real
+    // fix; once releases are signed, an unsigned update is refused (RELEASE_CHECKLIST.md §7).
+    const feed = updateFeedOverride(process.env);
+    if (feed) {
+      updater.setFeedURL(feed);
+      logDesktop(`[desktop] update feed override: ${feed.url}`);
+    } else if (process.env.CAMPFIRE_UPDATE_FEED_URL) {
+      logDesktop("[desktop] ignoring invalid CAMPFIRE_UPDATE_FEED_URL (https, or http on localhost)");
+    }
+    updater.on("update-downloaded", (info) => onUpdateDownloaded(info.version));
+    return updater;
+  } catch (error) {
+    logDesktop(`[desktop] auto-update unavailable, using download prompts: ${error.message}`);
+    return null;
+  }
+}
+
+function onUpdateDownloaded(version) {
+  // Every later check re-announces the cached download; prompt once per version.
+  if (readyUpdateVersion === version) return;
+  readyUpdateVersion = version;
+  refreshTrayMenu();
+  if (!sameVersion(settings.skipUpdateVersion, version)) void promptRestartToUpdate();
+}
+
+/** One prompt at a time, parented to nothing so the call window stays usable. */
+async function promptRestartToUpdate() {
+  if (updatePromptOpen || !readyUpdateVersion) return;
+  updatePromptOpen = true;
+  try {
+    const { response } = await dialog.showMessageBox({
+      type: "info",
+      title: APP_NAME,
+      message: `Campfire v${readyUpdateVersion} is ready`,
+      detail: "Restart now to finish updating, or choose Later and it installs the next time Campfire quits. Your messages and settings are kept.",
+      buttons: ["Restart now", "Later"],
+      // Later is the default so a stray Enter mid-call can't restart the app.
+      defaultId: 1,
+      cancelId: 1,
+      noLink: true,
+    });
+    if (response === 0) restartToUpdate();
+  } finally {
+    updatePromptOpen = false;
+  }
+}
+
+/** Silent install, then relaunch; before-quit still stops the local server first. */
+function restartToUpdate() {
+  autoUpdater?.quitAndInstall(true, true);
+}
+
+function checkForUpdatesInBackground() {
+  if (!autoUpdater) return void checkForUpdates(false);
+  autoUpdater
+    .checkForUpdates()
+    .then((result) => result?.downloadPromise)
+    .catch(() => {}); // already logged by the updater's "error" listener
+}
+
+/** Tray "Check for updates…". Any updater failure falls back to the download prompt. */
+async function checkForUpdatesNow() {
+  if (!autoUpdater) return checkForUpdates(true);
+  if (readyUpdateVersion) return promptRestartToUpdate();
+  try {
+    const result = await autoUpdater.checkForUpdates();
+    if (!result) throw new Error("updater inactive");
+    if (!result.isUpdateAvailable) {
+      void dialog.showMessageBox(mainWindow ?? undefined, {
+        type: "info",
+        title: APP_NAME,
+        message: "You're up to date.",
+        detail: `Campfire ${app.getVersion()} is the latest version.`,
+        buttons: ["OK"],
+        noLink: true,
+      });
+      return;
+    }
+    void dialog.showMessageBox(mainWindow ?? undefined, {
+      type: "info",
+      title: APP_NAME,
+      message: `Downloading Campfire v${result.updateInfo.version}…`,
+      detail: "Keep using Campfire; you'll be asked to restart when it's ready.",
+      buttons: ["OK"],
+      noLink: true,
+    });
+    await result.downloadPromise;
+    void promptRestartToUpdate(); // even for a skipped version: the user asked
+  } catch {
+    void checkForUpdates(true);
+  }
+}
+
+function scheduleUpdateChecks() {
+  const mode = updateMode({
+    isPackaged: app.isPackaged,
+    platform: process.platform,
+    portableDirectory: process.env.PORTABLE_EXECUTABLE_DIR || null,
+  });
+  if (mode === "off") return;
+  if (mode === "auto") autoUpdater = createAutoUpdater();
+  setTimeout(() => {
+    checkForUpdatesInBackground();
+    // The download prompt asks once per launch; the silent updater keeps checking.
+    if (autoUpdater) setInterval(checkForUpdatesInBackground, UPDATE_INTERVAL_MS).unref();
+  }, UPDATE_FIRST_CHECK_MS).unref();
+}
 
 function fetchLatestRelease() {
   return new Promise((resolve, reject) => {
@@ -718,10 +903,11 @@ function createTray() {
 function refreshTrayMenu() {
   if (!tray) return;
   const hosting = currentMode() === "host";
-  const items = [
-    { label: "Open Campfire", click: showMainWindow },
-    { type: "separator" },
-  ];
+  const items = [{ label: "Open Campfire", click: showMainWindow }];
+  if (readyUpdateVersion) {
+    items.push({ label: `Restart to update to v${readyUpdateVersion}`, click: restartToUpdate });
+  }
+  items.push({ type: "separator" });
   if (cloudOrigin) {
     items.push(
       {
@@ -765,7 +951,7 @@ function refreshTrayMenu() {
   }
   items.push(
     { type: "separator" },
-    { label: "Check for updates…", click: () => void checkForUpdates(true) },
+    { label: "Check for updates…", click: () => void checkForUpdatesNow() },
   );
   if (telemetryTarget(process.env, cloudOrigin)) {
     items.push({
@@ -863,9 +1049,13 @@ function openExternal(rawUrl) {
   }
 }
 
-// Every window (the main one and any same-origin child it opens) stays on the
-// trusted origin. Anything else opens in the system browser, server redirects
-// included: an OAuth hop to github.com must not strand the chrome-less window.
+// Every window (the main one and any same-origin child it opens, like an
+// attachment in a new tab) stays on the trusted origin. This fires for each new
+// webContents, popups of popups included, so a link inside one (/download's
+// GitHub button) still leaves for the browser instead of browsing or
+// downloading inside Electron. Anything off-origin opens in the system browser,
+// server redirects included: an OAuth hop to github.com must not strand the
+// chrome-less window.
 app.on("web-contents-created", (_event, contents) => {
   contents.setWindowOpenHandler(({ url }) => {
     if (isTrustedUrl(url)) return { action: "allow" };
@@ -910,6 +1100,7 @@ function createWindow() {
     },
   });
 
+  // Navigation guards: app.on("web-contents-created") above.
   mainWindow.webContents.on("did-fail-load", (_event, errorCode, errorDescription, _url, isMainFrame) => {
     // -3 (ERR_ABORTED) is a superseded navigation, not an outage.
     if (!isMainFrame || errorCode === -3 || currentMode() !== "cloud") return;
@@ -978,7 +1169,7 @@ app.whenReady().then(async () => {
     configurePermissions();
     createWindow();
     createTray();
-    if (app.isPackaged) setTimeout(() => void checkForUpdates(false), 15_000).unref?.();
+    scheduleUpdateChecks();
     scheduleTelemetry();
   } catch (error) {
     const message = error instanceof Error ? error.stack || error.message : String(error);

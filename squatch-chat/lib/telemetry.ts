@@ -49,9 +49,13 @@ export function telemetryTarget(env: Environment = process.env): string | null {
   }
 }
 
+/** The operator's "no phoning home" switches: CAMPFIRE_TELEMETRY=off (or 0/false/no), DO_NOT_TRACK=1. */
+export function telemetryOptedOut(env: Environment = process.env): boolean {
+  return OPT_OUT_VALUES.has(env.CAMPFIRE_TELEMETRY?.trim().toLowerCase() ?? "") || flagSet(env.DO_NOT_TRACK);
+}
+
 export function telemetryEnabled(env: Environment = process.env): boolean {
-  if (OPT_OUT_VALUES.has(env.CAMPFIRE_TELEMETRY?.trim().toLowerCase() ?? "")) return false;
-  if (flagSet(env.DO_NOT_TRACK)) return false;
+  if (telemetryOptedOut(env)) return false;
   // The hosted service counts its own web users directly.
   if (flagSet(env.CAMPFIRE_TELEMETRY_COLLECTOR)) return false;
   // Dev servers stay silent unless someone is explicitly testing a collector.

@@ -8,6 +8,7 @@ import {
   serverInstallId,
   startTelemetryReporter,
   telemetryEnabled,
+  telemetryOptedOut,
   telemetryTarget,
 } from "@/lib/telemetry";
 import { TELEMETRY_PING_PATH, parseTelemetryPing } from "@/lib/telemetryProtocol";
@@ -80,6 +81,16 @@ describe("telemetryEnabled", () => {
   it("never pings from the collector itself or without a target", () => {
     expect(telemetryEnabled({ ...PROD, CAMPFIRE_TELEMETRY_COLLECTOR: "1" })).toBe(false);
     expect(telemetryEnabled({ ...PROD, CAMPFIRE_CLOUD_URL: "http://campfire.test" })).toBe(false);
+  });
+});
+
+describe("telemetryOptedOut", () => {
+  // Also gates /admin's GitHub release lookup, which must work before a cloud URL exists.
+  it("is only the operator's explicit switches, not the missing-target or dev cases", () => {
+    expect(telemetryOptedOut({})).toBe(false);
+    expect(telemetryOptedOut({ NODE_ENV: "development", CAMPFIRE_TELEMETRY: "on", DO_NOT_TRACK: "0" })).toBe(false);
+    expect(telemetryOptedOut({ CAMPFIRE_TELEMETRY: " OFF " })).toBe(true);
+    expect(telemetryOptedOut({ DO_NOT_TRACK: "true" })).toBe(true);
   });
 });
 

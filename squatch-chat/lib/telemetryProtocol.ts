@@ -28,6 +28,50 @@ export interface TelemetryPing {
   activeUsers: number | null;
 }
 
+/**
+ * Broadcast notice ("a better version is out", "Campfire Pro is here").
+ * The collector answers a ping with 200 {"notice": TelemetryNotice} when one is
+ * set (CAMPFIRE_NOTICE on the hosted instance), otherwise 204 with no body.
+ * Clients that ignore the body keep working.
+ */
+export interface TelemetryNotice {
+  /** Stable id; clients remember dismissed ids. */
+  id: string;
+  text: string;
+  /** https only. */
+  url: string | null;
+  urlLabel: string | null;
+}
+
+const NOTICE_ID = /^[A-Za-z0-9_-]{1,64}$/;
+
+/** Strict parse of an untrusted notice (from env on the server, from the network on clients). */
+export function parseTelemetryNotice(raw: unknown): TelemetryNotice | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const notice = raw as Record<string, unknown>;
+  if (typeof notice.id !== "string" || !NOTICE_ID.test(notice.id)) return null;
+  if (typeof notice.text !== "string") return null;
+  const text = notice.text.trim();
+  if (!text || text.length > 280) return null;
+  let url: string | null = null;
+  if (notice.url != null) {
+    if (typeof notice.url !== "string" || notice.url.length > 500) return null;
+    try {
+      const parsed = new URL(notice.url);
+      if (parsed.protocol !== "https:") return null;
+      url = parsed.toString();
+    } catch {
+      return null;
+    }
+  }
+  let urlLabel: string | null = null;
+  if (notice.urlLabel != null) {
+    if (typeof notice.urlLabel !== "string" || !notice.urlLabel.trim() || notice.urlLabel.length > 40) return null;
+    urlLabel = notice.urlLabel.trim();
+  }
+  return { id: notice.id, text, url, urlLabel: url ? urlLabel : null };
+}
+
 const INSTALL_ID = /^[A-Za-z0-9_-]{16,64}$/;
 const VERSION = /^[0-9A-Za-z.+-]{1,40}$/;
 const PLATFORM = /^[0-9A-Za-z._-]{1,32}$/;

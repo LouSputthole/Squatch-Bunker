@@ -89,7 +89,7 @@ Record commands, versions, and output in the release evidence rather than pastin
 
 ## 6. Web and Docker operations
 
-- [ ] Production launches with `npm run host`, not `npm start`; Socket.IO, scheduled delivery, and retention workers are all observed.
+- [ ] Production launches with `npm run host:prod` (or the Docker image), not `npm start`; Socket.IO, scheduled delivery, and retention workers are all observed.
 - [ ] The PostgreSQL-only Compose stack starts from empty volumes with strong, unique `JWT_SECRET` and `DB_PASSWORD` values supplied by the operator.
 - [ ] PostgreSQL dependency health, migrations, application health check, shutdown, and restart are verified.
 - [ ] Database, public uploads/avatars, and private attachments survive container replacement.
@@ -112,7 +112,33 @@ npm run desktop:verify -- --require-stage
 npm run desktop:portable
 npm run desktop:installer
 npm run desktop:dist
+npm run desktop:verify -- --require-stage --require-package
 ```
+
+### Publishing a desktop release (auto-update feed)
+
+Installed (NSIS) copies update themselves: every 6 hours `electron-updater` reads `latest.yml` from the newest GitHub release of `LouSputthole/Squatch-Bunker`, downloads the setup exe in the background (only changed blocks when both releases have a `.blockmap`), asks "Restart now / Later", and installs on the next quit if the user picks Later. Portable copies keep the Download / Later / Skip prompt, which reads GitHub's `releases/latest`. **A release without `latest.yml` makes auto-update silently do nothing**: installs log `Cannot find latest.yml` to `%APPDATA%\Campfire\logs\desktop.log` and stay on their version.
+
+Tag the exact candidate commit (`v<version>`, as CI checks), then attach all four built files to a draft and publish it once they are all there:
+
+```text
+gh release create v<version> --repo LouSputthole/Squatch-Bunker --draft --verify-tag \
+  --title "Campfire <version>" --notes-file docs/releases/<version>.md \
+  desktop/dist/Campfire-Setup-<version>-x64.exe \
+  desktop/dist/Campfire-Setup-<version>-x64.exe.blockmap \
+  desktop/dist/latest.yml \
+  desktop/dist/Campfire-Portable-<version>-x64.exe
+gh release view v<version> --repo LouSputthole/Squatch-Bunker
+gh release edit v<version> --repo LouSputthole/Squatch-Bunker --draft=false
+```
+
+- Keep the built file names. `latest.yml` names the setup exe, so a renamed asset 404s for every install.
+- Upload the `latest.yml` from the same `desktop:dist` run as the exe. Its sha512 must match, or every install rejects the download.
+- Leave older releases and their `.blockmap` files in place. Differential downloads diff against them.
+- `--prerelease` hides a release from stable-version installs, `/download` and portable users (they read `releases/latest`). Installs running a prerelease version (`-beta.N`) also follow prereleases. While every version is a beta, publish normal releases.
+- Copies built without auto-update (`0.0.3`, and any earlier beta build) see the download prompt once, then update themselves after that.
+- **Signing.** Releases are unsigned today. `electron-updater` checks the installer's Authenticode signature only when the installed app was signed (`resources/app-update.yml` then carries `publisherName`), so unsigned updates install. Their only protection is HTTPS to GitHub plus the sha512 in `latest.yml`, which anyone who can publish a release also controls. That means the GitHub account (2FA, scoped tokens) is the update key. Code signing is the real fix. After the first signed release, never publish an unsigned one: signed installs refuse it (`ERR_UPDATER_INVALID_SIGNATURE`) and fall back to the download prompt. Keep the certificate's publisher name when renewing.
+- **Smoke test before publishing.** This replaces the installed Campfire, so use a spare Windows account or Windows Sandbox. Install the previous auto-updating setup exe, then serve the candidate's `desktop/dist` with `npx --yes http-server@14.1.1 desktop/dist -p 8080`. Launch the installed copy with `CAMPFIRE_UPDATE_FEED_URL=http://localhost:8080/` set. Within about 15 seconds `desktop.log` shows `[updater] Found version`, then the "Campfire v<version> is ready" prompt appears.
 
 Historical `0.0.3` worktree evidence (2026-07-13; not beta sign-off): Node
 v24.14.1/npm 11.11.0 passed 373 tests, lint, TypeScript, provider checks,
@@ -131,6 +157,9 @@ acceptance, desktop staging/verification, and unsigned desktop builds. None of t
 - [ ] Portable and installer artifacts are code-signed; credentials come from the release environment and never enter the repository or artifact payload.
 - [ ] SHA-256 checksums, exact filenames, sizes, supported Windows versions, and signature verification instructions are published.
 - [ ] Smoke tests run against the actual portable and installer artifacts, not only the staged directory.
+- [ ] `npm run desktop:verify -- --require-stage --require-package` passes after `desktop:dist`. It checks that `electron-updater` and its dependencies are inside `app.asar`, and that `latest.yml`, the setup `.blockmap` and `resources/app-update.yml` match this build. It also refuses a built-in Campfire Online URL that is not `https://` (a smoke build's `http://127.0.0.1`), since auto-update would push it to every install, and prints the URL it found: check it is the intended domain (or none) right before publishing.
+- [ ] The GitHub release carries the setup exe, its `.blockmap`, `latest.yml` and the portable exe under their built names, and is published (not a draft).
+- [ ] Auto-update smoke test passes for both choices: the previous installed version reaches the candidate through `CAMPFIRE_UPDATE_FEED_URL` with "Restart now", and with Later followed by quitting from the tray.
 - [ ] A cloud build's staging log shows `[Campfire] Campfire Online: <origin>` with the intended origin (`campfireCloudUrl` in `desktop/package.json`, or `CAMPFIRE_CLOUD_URL` when running `desktop:stage` or `desktop:dist`).
 - [ ] On a cloud build, a fresh profile opens Campfire Online; a profile that already has `%APPDATA%\Campfire\data\campfire.db` (or v0.0.3 state) opens in **Host on this PC** with its communities intact; switching modes from the tray works both ways.
 - [ ] Upgrading over a real v0.0.3 install and a beta install keeps existing data, writes a `campfire.db.pre-v<schema>` backup, and the upgraded camp can sign in, post, and open the Ember Inbox.

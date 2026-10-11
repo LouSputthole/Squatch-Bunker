@@ -1,10 +1,145 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { needsBuild, productionEnv } from "@/scripts/host-prod.mjs";
+import { launchChecklist } from "@/scripts/launch-checklist";
 
 function projectFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), "utf8");
 }
+
+const READY_CLOUD_ENV = {
+  CAMPFIRE_EDITION: "cloud",
+  DATABASE_URL: "postgresql://campfire:secret@db.example.com/campfire?sslmode=require",
+  JWT_SECRET: "0123456789abcdef0123456789abcdef0123456789abcdef",
+  NEXT_PUBLIC_APP_URL: "https://campfire.example.com",
+  RESEND_API_KEY: "re_test",
+  CAMPFIRE_EMAIL_FROM: "Campfire <account@campfire.example.com>",
+  STRICT_CORS: "true",
+  CORS_ORIGINS: "https://campfire.example.com",
+  CAMPFIRE_TRUST_PROXY_HOPS: "2",
+  INSTANCE_ADMIN_USER_IDS: "user-1",
+  TURN_URLS: '["turn:turn.campfire.example.com:3478?transport=udp"]',
+  TURN_AUTH_SECRET: "0123456789abcdef0123456789abcdef",
+};
+
+describe("Campfire Online on Fly.io", () => {
+  it("runs one always-on machine with health checks, media volume, and cloud settings", () => {
+    const fly = projectFile("fly.toml");
+
+    expect(fly).toContain('auto_stop_machines = "off"');
+    expect(fly).toContain("internal_port = 3000");
+    expect(fly).toContain("force_https = true");
+    expect(fly).toContain('path = "/api/health"');
+    expect(fly).toContain('destination = "/app/media"');
+    // Free Cloud allows 100 MB uploads; Fly ignores the threshold without both increment and limit.
+    expect(fly).toMatch(/^\s*auto_extend_size_threshold = \d+$/m);
+    expect(fly).toMatch(/^\s*auto_extend_size_increment = "\d+GB"$/m);
+    expect(fly).toMatch(/^\s*auto_extend_size_limit = "\d+GB"$/m);
+    expect(fly).toContain('CAMPFIRE_UPLOAD_DIR = "/app/media"');
+    expect(fly).toContain('CAMPFIRE_EDITION = "cloud"');
+    expect(fly).toContain('STRICT_CORS = "true"');
+    expect(fly).toContain('CAMPFIRE_TELEMETRY_COLLECTOR = "1"');
+    expect(fly).toContain('CAMPFIRE_TRUST_PROXY_HOPS = "2"');
+    // Secrets live in `fly secrets`, never in the committed config.
+    for (const secret of ["DATABASE_URL", "JWT_SECRET", "RESEND_API_KEY", "TURN_AUTH_SECRET"]) {
+      expect(fly).not.toMatch(new RegExp(`^\\s*${secret}\\s*=`, "m"));
+    }
+  });
+
+  it("gates each deploy on the launch check and migrations, with both in the image", () => {
+    const fly = projectFile("fly.toml");
+    const scripts = JSON.parse(projectFile("package.json")).scripts;
+    const dockerfile = projectFile("Dockerfile");
+
+    expect(fly).toContain('release_command = "npm run deploy:release"');
+    expect(scripts["deploy:release"]).toBe("tsx scripts/launch-checklist.ts && npm run db:migrate");
+    expect(dockerfile).toContain("/app/scripts/launch-checklist.ts ./scripts/");
+    expect(dockerfile).toContain("/app/scripts/preflight-postgresql.ts ./scripts/");
+  });
+});
+
+describe("launch checklist", () => {
+  it("passes a complete cloud environment with no advice beyond free billing", () => {
+    const result = launchChecklist(READY_CLOUD_ENV);
+    expect(result.edition).toBe("cloud");
+    expect(result.errors).toEqual([]);
+    expect(result.advice).toEqual([
+      expect.stringContaining("Cloud billing is disabled"),
+    ]);
+  });
+
+  it("applies production rules even when NODE_ENV says development", () => {
+    const result = launchChecklist({ CAMPFIRE_EDITION: "cloud", NODE_ENV: "development" });
+    expect(result.errors).toEqual(expect.arrayContaining([
+      "Cloud production requires a PostgreSQL DATABASE_URL",
+      "Cloud production requires an HTTPS NEXT_PUBLIC_APP_URL",
+      "Cloud production requires STRICT_CORS=true and CORS_ORIGINS",
+    ]));
+  });
+
+  it("fails on broken TURN or beta settings and advises on missing launch extras", () => {
+    const broken = launchChecklist({
+      ...READY_CLOUD_ENV,
+      TURN_AUTH_SECRET: "too-short",
+      CAMPFIRE_BETA_ACCESS_CODE: "short",
+    });
+    expect(broken.errors).toEqual([
+      expect.stringContaining("CAMPFIRE_BETA_ACCESS_CODE"),
+      expect.stringContaining("TURN_AUTH_SECRET"),
+    ]);
+
+    const bare = launchChecklist({
+      ...READY_CLOUD_ENV,
+      TURN_URLS: "",
+      TURN_AUTH_SECRET: "",
+      INSTANCE_ADMIN_USER_IDS: "",
+      CAMPFIRE_TRUST_PROXY_HOPS: "",
+    });
+    expect(bare.errors).toEqual([]);
+    expect(bare.advice.join("\n")).toMatch(/TURN_URLS/);
+    expect(bare.advice.join("\n")).toMatch(/INSTANCE_ADMIN_USER_IDS/);
+    expect(bare.advice.join("\n")).toMatch(/CAMPFIRE_TRUST_PROXY_HOPS/);
+  });
+});
+
+describe("npm run host:prod", () => {
+  it("runs production, keeping plain-HTTP LAN sign-in working", () => {
+    expect(productionEnv({}).NODE_ENV).toBe("production");
+    expect(productionEnv({ NODE_ENV: "development" }).NODE_ENV).toBe("production");
+    expect(productionEnv({}).COOKIE_SECURE).toBe("0");
+    expect(productionEnv({ NEXT_PUBLIC_APP_URL: "http://192.168.1.20:3000" }).COOKIE_SECURE).toBe("0");
+  });
+
+  it("keeps Secure cookies behind HTTPS and never overrides an explicit choice", () => {
+    expect(productionEnv({ NEXT_PUBLIC_APP_URL: "https://campfire.example.com" }).COOKIE_SECURE)
+      .toBeUndefined();
+    expect(productionEnv({}, { NEXT_PUBLIC_APP_URL: "https://campfire.example.com" }).COOKIE_SECURE)
+      .toBeUndefined();
+    expect(productionEnv({ COOKIE_SECURE: "1" }).COOKIE_SECURE).toBe("1");
+    expect(productionEnv({}, { COOKIE_SECURE: "1" }).COOKIE_SECURE).toBeUndefined();
+  });
+
+  it("builds when there is no build or package.json is newer than it", () => {
+    const dir = mkdtempSync(join(tmpdir(), "campfire-host-prod-"));
+    try {
+      writeFileSync(join(dir, "package.json"), "{}");
+      expect(needsBuild(dir)).toBe(true);
+
+      mkdirSync(join(dir, ".next"));
+      writeFileSync(join(dir, ".next", "BUILD_ID"), "build");
+      utimesSync(join(dir, "package.json"), new Date(1_000_000), new Date(1_000_000));
+      utimesSync(join(dir, ".next", "BUILD_ID"), new Date(2_000_000), new Date(2_000_000));
+      expect(needsBuild(dir)).toBe(false);
+
+      utimesSync(join(dir, "package.json"), new Date(3_000_000), new Date(3_000_000));
+      expect(needsBuild(dir)).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
 
 describe("hosted deployment safety", () => {
   it("keeps local state and desktop outputs out of Docker build contexts", () => {
@@ -15,6 +150,7 @@ describe("hosted deployment safety", () => {
       "public/avatars/",
       "desktop/.stage/",
       "desktop/dist/",
+      "desktop/node_modules/",
       "*.db",
     ]) {
       expect(dockerIgnore).toContain(pattern);
@@ -115,7 +251,7 @@ describe("hosted deployment safety", () => {
       "GITHUB_CLIENT_SECRET",
       "GOOGLE_CLIENT_ID",
       "GOOGLE_CLIENT_SECRET",
-      // The usage-ping opt-outs and target (docs/TELEMETRY.md).
+      // The usage-ping opt-outs and target: docs/TELEMETRY.md tells self-hosters to opt out in .env.
       "CAMPFIRE_TELEMETRY",
       "DO_NOT_TRACK",
       "CAMPFIRE_CLOUD_URL",
@@ -123,6 +259,12 @@ describe("hosted deployment safety", () => {
     ]) {
       expect(compose).toContain(variable + ': "${' + variable);
     }
+  });
+
+  it("keeps CI's production servers from pinging Campfire Online", () => {
+    const releaseWorkflow = projectFile("../.github/workflows/release-gates.yml");
+    // Workflow-level, so every job's servers and the Compose stack inherit it.
+    expect(releaseWorkflow).toMatch(/^env:\n {2}CAMPFIRE_TELEMETRY: "off"$/m);
   });
 
   it("documents ephemeral multi-transport TURN and gates legacy credentials", () => {

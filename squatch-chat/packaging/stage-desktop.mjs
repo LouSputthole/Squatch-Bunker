@@ -38,9 +38,9 @@ function assertInside(parent, child) {
   }
 }
 
-function run(command, args, environment = process.env) {
+function run(command, args, environment = process.env, cwd = projectRoot) {
   const result = spawnSync(command, args, {
-    cwd: projectRoot,
+    cwd,
     env: environment,
     stdio: "inherit",
     shell: false,
@@ -145,6 +145,21 @@ async function main() {
   const cloudOrigin = parseCloudOrigin(cloudUrl);
   if (cloudUrl && !cloudOrigin) {
     throw new Error(`Campfire Online URL must be https:// (http:// only for localhost): ${cloudUrl}`);
+  }
+
+  // The launcher's own runtime deps (electron-updater) ship inside app.asar. electron-builder
+  // collects them from desktop/node_modules; were it empty, it would fall back to collecting
+  // the whole web app's dependency tree. So install exactly the lockfile, every stage.
+  const npmCli = process.env.npm_execpath;
+  if (!npmCli || !/\.c?js$/.test(npmCli)) {
+    throw new Error("Run desktop staging through npm (npm run desktop:stage) so it can install desktop dependencies");
+  }
+  run(process.execPath, [npmCli, "ci", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund"], process.env, desktopRoot);
+  const updaterPackage = JSON.parse(
+    readFileSync(join(desktopRoot, "node_modules", "electron-updater", "package.json"), "utf8"),
+  );
+  if (updaterPackage.version !== desktopPackage.dependencies?.["electron-updater"]) {
+    throw new Error(`desktop/node_modules has electron-updater ${updaterPackage.version}; expected ${desktopPackage.dependencies?.["electron-updater"]}`);
   }
 
   if (!skipNextBuild) {

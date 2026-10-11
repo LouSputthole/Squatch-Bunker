@@ -52,7 +52,7 @@ runs on SQLite out of the box.
 ```bash
 cd squatch-chat
 npm install      # installs deps + creates .env + sets up a local SQLite DB
-npm run host     # Next.js + realtime server on one port
+npm run host:prod  # builds once, then Next.js + realtime server on one port
 ```
 
 Open **http://localhost:3000**. Share the printed **Network URL** to let

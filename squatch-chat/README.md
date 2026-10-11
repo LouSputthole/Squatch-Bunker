@@ -10,7 +10,7 @@ All free, three ways in:
 
 - **In your browser:** Campfire Online, the shared hosted Campfire (public address announced at launch). Sign up or join as a guest; nothing to install.
 - **Windows app:** grab the setup or portable `.exe` from [GitHub Releases](https://github.com/LouSputthole/Squatch-Bunker/releases) or Campfire Online's `/download` page. From the first release after Campfire Online launches, it joins Campfire Online by default; switch to **Host on this PC** from the tray menu to run a camp for your own network. Earlier builds (such as v0.0.3) only host on your PC. Builds are not code-signed yet, so SmartScreen may ask you to click **More info**, then **Run anyway**.
-- **Host your own:** the [quick start](#quick-start-local-or-trusted-lan-self-host) below (`npm run host`) or [Docker](#docker).
+- **Host your own:** the [quick start](#quick-start-local-or-trusted-lan-self-host) below (`npm run host:prod`) or [Docker](#docker).
 
 From that same release, production servers and the Windows app send a small anonymous usage ping (version and install counts, nothing personal); [TELEMETRY.md](./docs/TELEMETRY.md) shows exactly what is sent and how to turn it off. The owner's launch runbook is [LAUNCH.md](./docs/LAUNCH.md).
 
@@ -50,12 +50,16 @@ From this directory:
 
 ```bash
 npm ci
-npm run host
+npm run host:prod
 ```
 
-When neither `.env` nor `DATABASE_URL` exists, install creates a local `.env` with a random JWT secret, configures SQLite, generates the Prisma client, and initializes `data/campfire.db`. Open <http://localhost:3000>.
+When neither `.env` nor `DATABASE_URL` exists, install creates a local `.env` with a random JWT secret, configures SQLite, generates the Prisma client, and initializes `data/campfire.db`. The first `npm run host:prod` builds the app (a few minutes), then starts it. Open <http://localhost:3000>.
 
-`npm run host` is the canonical runtime command. It starts the custom unified server that serves Next.js, attaches Socket.IO, and runs scheduled-message, leave-no-trace, and abandoned-private-upload workers. **Do not substitute `npm start`/`next start` for a complete Campfire service.**
+`npm run host:prod` is the canonical runtime command. It starts the custom unified server in production mode: it serves Next.js, attaches Socket.IO, and runs scheduled-message, leave-no-trace, and abandoned-private-upload workers. `npm run host` starts the same server in development mode, for changing the code: slower pages and verbose logs. **Do not substitute `npm start`/`next start` for a complete Campfire service.**
+
+- **Updating:** `git pull`, `npm ci`, then `npm run host:prod` again. It rebuilds by itself when the version in `package.json` changed; after pulling unreleased commits, run `npm run build` first.
+- **Plain HTTP:** without an `https://` `NEXT_PUBLIC_APP_URL` in `.env`, `host:prod` sends session cookies without the Secure flag, so browsers on your network can sign in over `http://`. Behind HTTPS, set `NEXT_PUBLIC_APP_URL` ([DEPLOY.md](./docs/DEPLOY.md)).
+- **Usage ping:** from the first release after Campfire Online launches, a production server sends one anonymous ping a day (version and account counts; [TELEMETRY.md](./docs/TELEMETRY.md)). Set `CAMPFIRE_TELEMETRY=off` in `.env` to turn it off.
 
 The printed network URL is useful on a trusted LAN. Browsers generally require HTTPS for microphone, camera, and screen-capture access, so a plain `http://192.168.x.x` client may have text access without working media.
 
@@ -86,7 +90,7 @@ npm ci
 npm run db:migrate
 npm run db:check
 npm run build
-npm run host
+npm run host:prod
 ```
 
 How you set environment variables depends on your shell or service manager. Do not commit `.env`, and do not use the example JWT secret in production.
