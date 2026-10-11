@@ -341,7 +341,8 @@ async function startServer() {
     cwd: launch.serverRoot,
     env: environment,
     windowsHide: true,
-    stdio: ["ignore", "pipe", "pipe"],
+    // "ipc": stopServer() asks the server to drain; Windows has no SIGTERM.
+    stdio: ["ignore", "pipe", "pipe", "ipc"],
   });
   serverProcess = child;
   const log = serverLog;
@@ -364,17 +365,29 @@ async function startServer() {
   await waitForServer(appOrigin);
 }
 
+/** Resolves true when the child exits within `ms`. */
+function waitForExit(child, ms) {
+  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => resolve(false), ms);
+    child.once("exit", () => {
+      clearTimeout(timeout);
+      resolve(true);
+    });
+  });
+}
+
+/** Graceful first: on Windows child.kill() is TerminateProcess, which skips the server's drain
+ * (sockets, HTTP, Prisma/SQLite). It asks over IPC and force-kills only if that hangs. */
 async function stopServer() {
   const child = serverProcess;
-  if (child && child.exitCode === null) {
-    child.kill();
-    await new Promise((resolve) => {
-      const timeout = setTimeout(resolve, 3_000);
-      child.once("exit", () => {
-        clearTimeout(timeout);
-        resolve();
-      });
-    });
+  if (child && child.exitCode === null && child.signalCode === null) {
+    // The callback keeps a failed send from becoming an "error" event; kill() below covers it.
+    if (child.connected) child.send("shutdown", () => {});
+    if (!child.connected || !(await waitForExit(child, 3_000))) {
+      child.kill();
+      await waitForExit(child, 3_000);
+    }
   }
   serverLog?.end();
 }
@@ -605,6 +618,10 @@ function createAutoUpdater() {
     updater.autoDownload = true;
     updater.autoInstallOnAppQuit = true;
     updater.disableWebInstaller = true;
+    // electron-updater sends a random per-install id (%APPDATA%\Campfire\.updaterId) as a header
+    // on every feed and download request, even with the usage ping off; requestHeaders override
+    // it so update checks stay anonymous. Staged rollouts still work: they read the local file.
+    updater.requestHeaders = { "x-user-staging-id": "00000000-0000-0000-0000-000000000000" };
     // Unsigned builds: electron-updater verifies the downloaded installer's Authenticode signature
     // only when resources/app-update.yml names a publisherName, and electron-builder writes one only
     // for signed builds — so unsigned updates install, protected by HTTPS to GitHub plus latest.yml's
@@ -991,6 +1008,23 @@ function showMainWindow() {
   mainWindow.focus();
 }
 
+/** Off-origin links go to the browser. Same-origin popups (attachments opened in a new tab)
+ * stay in-app and get the same guard, so a link inside one, like /download's GitHub button,
+ * still leaves for the browser instead of browsing or downloading inside Electron. */
+function guardNavigation(contents) {
+  contents.setWindowOpenHandler(({ url }) => {
+    if (isTrustedUrl(url)) return { action: "allow" };
+    openExternal(url);
+    return { action: "deny" };
+  });
+  contents.on("will-navigate", (event, url) => {
+    if (isTrustedUrl(url)) return;
+    event.preventDefault();
+    openExternal(url);
+  });
+  contents.on("did-create-window", (child) => guardNavigation(child.webContents));
+}
+
 function createWindow() {
   const icon = iconPath();
   mainWindow = new BrowserWindow({
@@ -1010,16 +1044,7 @@ function createWindow() {
     },
   });
 
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (isTrustedUrl(url)) return { action: "allow" };
-    openExternal(url);
-    return { action: "deny" };
-  });
-  mainWindow.webContents.on("will-navigate", (event, url) => {
-    if (isTrustedUrl(url)) return;
-    event.preventDefault();
-    openExternal(url);
-  });
+  guardNavigation(mainWindow.webContents);
   mainWindow.webContents.on("did-fail-load", (_event, errorCode, errorDescription, _url, isMainFrame) => {
     // -3 (ERR_ABORTED) is a superseded navigation, not an outage.
     if (!isMainFrame || errorCode === -3 || currentMode() !== "cloud") return;

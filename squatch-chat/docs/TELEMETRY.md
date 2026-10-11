@@ -104,8 +104,16 @@ Packaged Windows builds also contact GitHub to look for new versions, whether
 or not the usage ping is on, so GitHub sees the IP address like any download.
 Installed copies fetch the release feed (`releases.atom`, `releases/latest`,
 and the release's `latest.yml`) about 15 seconds after launch and then every 6
-hours; portable copies call `api.github.com` once per launch. Nothing about
-the install is sent.
+hours; portable copies call `api.github.com` once per launch. Nothing that
+identifies the install is sent: the per-install id that `electron-updater` keeps in
+`%APPDATA%\Campfire\.updaterId` is replaced with a constant before it goes
+out.
+
+A self-hosted server's `/admin` page asks `api.github.com` for the newest
+release (cached for 10 minutes, only when an instance admin opens the page) so
+it can tell its operator when an update is out. GitHub sees the server's IP
+address and nothing else about it, and `CAMPFIRE_TELEMETRY=off` or
+`DO_NOT_TRACK=1` turns that lookup off too.
 
 ## How install IDs are made
 

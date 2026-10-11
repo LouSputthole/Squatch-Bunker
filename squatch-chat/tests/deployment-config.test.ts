@@ -33,6 +33,10 @@ describe("Campfire Online on Fly.io", () => {
     expect(fly).toContain("force_https = true");
     expect(fly).toContain('path = "/api/health"');
     expect(fly).toContain('destination = "/app/media"');
+    // Free Cloud allows 100 MB uploads; Fly ignores the threshold without both increment and limit.
+    expect(fly).toMatch(/^\s*auto_extend_size_threshold = \d+$/m);
+    expect(fly).toMatch(/^\s*auto_extend_size_increment = "\d+GB"$/m);
+    expect(fly).toMatch(/^\s*auto_extend_size_limit = "\d+GB"$/m);
     expect(fly).toContain('CAMPFIRE_UPLOAD_DIR = "/app/media"');
     expect(fly).toContain('CAMPFIRE_EDITION = "cloud"');
     expect(fly).toContain('STRICT_CORS = "true"');
@@ -247,9 +251,18 @@ describe("hosted deployment safety", () => {
       "GITHUB_CLIENT_SECRET",
       "GOOGLE_CLIENT_ID",
       "GOOGLE_CLIENT_SECRET",
+      // docs/TELEMETRY.md tells self-hosters to opt out in .env.
+      "CAMPFIRE_TELEMETRY",
+      "DO_NOT_TRACK",
     ]) {
       expect(compose).toContain(variable + ': "${' + variable);
     }
+  });
+
+  it("keeps CI's production servers from pinging Campfire Online", () => {
+    const releaseWorkflow = projectFile("../.github/workflows/release-gates.yml");
+    // Workflow-level, so every job's servers and the Compose stack inherit it.
+    expect(releaseWorkflow).toMatch(/^env:\n {2}CAMPFIRE_TELEMETRY: "off"$/m);
   });
 
   it("documents ephemeral multi-transport TURN and gates legacy credentials", () => {

@@ -51,10 +51,16 @@ primary_region = "iad"
 
 # Uploads, avatars, and private attachments (Campfire creates the
 # uploads/, avatars/, private-uploads/ subfolders). Fly snapshots it daily.
+# Free for now means every account (guests too) may send 100 MB files, so the
+# volume grows itself 1 GB at a time at 80% full, up to 20 GB. A full volume
+# fails every upload and avatar: check with `fly ssh console -C "df -h /app/media"`.
 [[mounts]]
   source = "campfire_media"
   destination = "/app/media"
   initial_size = "1gb"
+  auto_extend_size_threshold = 80
+  auto_extend_size_increment = "1GB"
+  auto_extend_size_limit = "20GB"
 
 # ponytail: exactly one machine. Rate limits, voice rooms, and Lantern/Offshoot
 # state are per process; a second machine needs shared state first.

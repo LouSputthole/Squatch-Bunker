@@ -72,6 +72,9 @@ services:
       TURN_CREDENTIAL: "${TURN_CREDENTIAL:-}"
       RESEND_API_KEY: "${RESEND_API_KEY:-}"
       CAMPFIRE_EMAIL_FROM: "${CAMPFIRE_EMAIL_FROM:-}"
+      # Usage-ping opt-out (docs/TELEMETRY.md).
+      CAMPFIRE_TELEMETRY: "${CAMPFIRE_TELEMETRY:-}"
+      DO_NOT_TRACK: "${DO_NOT_TRACK:-}"
       PORT: 3000
     volumes:
       - campfire-uploads:/app/media/uploads

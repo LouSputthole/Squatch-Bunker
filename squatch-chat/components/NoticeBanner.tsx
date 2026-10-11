@@ -4,6 +4,10 @@ import { useEffect, useState } from "react";
 import { parseTelemetryNotice, type TelemetryNotice } from "@/lib/telemetryProtocol";
 
 const DISMISSED_KEY = "campfire-notice-dismissed";
+// Chat stays open for days (a pinned tab, the Windows app in the tray) and nothing reloads it
+// after a deploy, so the notice is re-read hourly and when the page comes back into view.
+// ponytail: polling; a Socket.IO push would be instant once notices need to be.
+const RECHECK_MS = 60 * 60 * 1000;
 
 function dismissedId(): string | null {
   try {
@@ -23,16 +27,30 @@ export default function NoticeBanner({ stacked = false }: { stacked?: boolean })
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/notice", { cache: "no-store" })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        // Re-validated here so a bad payload can never render a non-https link.
-        const next = parseTelemetryNotice(data?.notice);
-        if (!cancelled && next && next.id !== dismissedId()) setNotice(next);
-      })
-      .catch(() => {});
+    let checkedAt = 0;
+    function load() {
+      checkedAt = Date.now();
+      fetch("/api/notice", { cache: "no-store" })
+        .then((res) => (res.ok ? res.json() : Promise.reject(new Error(String(res.status)))))
+        .then((data) => {
+          if (cancelled) return;
+          // Re-validated here so a bad payload can never render a non-https link.
+          const next = parseTelemetryNotice(data?.notice);
+          // A cleared notice disappears too; a failed check keeps what is shown.
+          setNotice(next && next.id !== dismissedId() ? next : null);
+        })
+        .catch(() => {});
+    }
+    function recheck() {
+      if (document.visibilityState === "visible" && Date.now() - checkedAt >= RECHECK_MS) load();
+    }
+    load();
+    const timer = setInterval(recheck, RECHECK_MS / 12);
+    document.addEventListener("visibilitychange", recheck);
     return () => {
       cancelled = true;
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", recheck);
     };
   }, []);
 

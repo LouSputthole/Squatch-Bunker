@@ -1,4 +1,6 @@
 import { notFound } from "next/navigation";
+import packageJson from "@/package.json";
+import { latestWindowsDownload, RELEASES_URL } from "@/app/download/release";
 import { getSession } from "@/lib/auth";
 import { isInstanceAdmin } from "@/lib/instanceAdmin";
 
@@ -104,6 +106,7 @@ export default async function AdminPage() {
   const { githubReleaseDownloads, isTelemetryCollector, telemetrySummary } = await import(
     "@/lib/telemetryCollector"
   );
+  const { telemetryOptedOut } = await import("@/lib/telemetry");
 
   const now = await getDashboardNow();
   const nowMs = now.getTime();
@@ -151,7 +154,7 @@ export default async function AdminPage() {
       where: { isGuest, messages: { some: { createdAt: { gte: since(days) } } } },
     });
   const collecting = isTelemetryCollector();
-  const [people, recentSignups, wild, downloads] = await Promise.all([
+  const [people, recentSignups, wild, downloads, latestRelease] = await Promise.all([
     Promise.all(
       [1, 7, 30].map(async (days) => {
         const [members, guests] = await Promise.all([
@@ -167,7 +170,15 @@ export default async function AdminPage() {
     }),
     collecting ? telemetrySummary(now) : null,
     collecting ? githubReleaseDownloads() : null,
+    // Self-hosters' only update signal (their ping's answer is ignored). Same cached GitHub
+    // lookup as /download, skipped when the operator opted out of phoning home; Campfire
+    // Online itself updates by redeploying.
+    collecting || telemetryOptedOut() ? null : latestWindowsDownload(),
   ]);
+  // ponytail: "differs", not "newer": the latest stable release vs whatever this server runs
+  // (a beta or an unreleased checkout can be ahead of it); the admin reads both numbers.
+  const releaseNotice =
+    latestRelease?.version && latestRelease.version !== packageJson.version ? latestRelease.version : null;
 
   const messagesPerDay = perDay(recentMessages.map((m) => m.createdAt), nowMs, 7);
   const signupsPerDay = perDay(recentSignups.map((u) => u.createdAt), nowMs, 14);
@@ -195,6 +206,24 @@ export default async function AdminPage() {
       <p className="text-sm text-[var(--muted)] mb-8">
         Logged in as <strong>{session.username}</strong>
       </p>
+
+      {releaseNotice && (
+        <p className="mb-8 rounded-lg border border-[var(--accent)]/50 bg-[var(--panel)] px-4 py-3 text-sm">
+          The latest Campfire release is <strong>v{releaseNotice}</strong>; this server runs v{packageJson.version}.{" "}
+          <a href={RELEASES_URL} target="_blank" rel="noopener noreferrer" className="text-[var(--accent)] underline">
+            Release notes
+          </a>
+          {" · "}
+          <a
+            href="https://github.com/LouSputthole/Squatch-Bunker/blob/main/squatch-chat/docs/DEPLOY.md#updating"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[var(--accent)] underline"
+          >
+            How to update
+          </a>
+        </p>
+      )}
 
       {/* Stat cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
@@ -316,6 +345,10 @@ export default async function AdminPage() {
               <h3 className="text-sm font-semibold text-[var(--muted)] mb-3 uppercase tracking-wide">
                 GitHub release downloads
               </h3>
+              <p className="text-xs text-[var(--muted)] mb-2">
+                Setup exe counts include auto-updates (each installed copy downloads every release); the
+                30-day row above is the real install count.
+              </p>
               {downloads ? (
                 <>
                   <div className="text-3xl font-bold text-[var(--accent)]">

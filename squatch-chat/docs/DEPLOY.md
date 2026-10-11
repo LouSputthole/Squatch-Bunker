@@ -456,6 +456,11 @@ blocks the beta.
 
 ## Updating
 
+To hear about new versions, use GitHub's **Watch → Custom → Releases** on
+`LouSputthole/Squatch-Bunker`. Your own `/admin` page also says when the newest
+release differs from the version this server runs (it asks GitHub, cached for
+10 minutes; `CAMPFIRE_TELEMETRY=off` or `DO_NOT_TRACK=1` turns that lookup off).
+
 Treat the application checkout, database, media, and `.env` as one release
 unit. Keep Campfire offline from the start of the backup until the upgraded
 service is healthy. In particular, do not run `npm ci` while the old

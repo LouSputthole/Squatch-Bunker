@@ -91,3 +91,13 @@ describe("GET /api/notice", () => {
     expect(await (await GET()).json()).toEqual({ notice: null });
   });
 });
+
+describe("NoticeBanner", () => {
+  it("re-reads the notice for chat sessions that stay open for days, and cleans up", () => {
+    const source = readFileSync(resolve(process.cwd(), "components/NoticeBanner.tsx"), "utf8");
+    expect(source).toContain('document.addEventListener("visibilitychange", recheck)');
+    expect(source).toContain('document.removeEventListener("visibilitychange", recheck)');
+    expect(source).toMatch(/const timer = setInterval\(recheck, /);
+    expect(source).toContain("clearInterval(timer)");
+  });
+});

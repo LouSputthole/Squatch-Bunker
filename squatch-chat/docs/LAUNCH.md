@@ -50,7 +50,7 @@ Prices checked 2026-10-11 (sources: [Fly.io](https://fly.io/docs/about/pricing/)
 | Piece | Choice | Per month |
 |---|---|---|
 | App server | Fly.io `shared-cpu-1x`, 1 GB RAM, always on, region `iad` | $6.70 |
-| Uploads | Fly volume, 1 GB ($0.15 per GB); daily snapshots, first 10 GB free | $0.15 |
+| Uploads | Fly volume, starts at 1 GB ($0.15 per GB) and grows itself up to 20 GB; daily snapshots, first 10 GB free | $0.15 to $3 |
 | Bandwidth | Fly, $0.02/GB out in North America/Europe (50 GB shown) | ~$1 |
 | HTTPS, IPv4, IPv6 | Fly shared IPv4, IPv6, certificate | $0 |
 | Database | Neon Launch: 0.25 CU awake all month (182.5 CU-hours at $0.106), 1 GB storage ($0.35), about 1 GB of 7-day restore history ($0.20) | ~$20 |
@@ -67,6 +67,18 @@ Prices checked 2026-10-11 (sources: [Fly.io](https://fly.io/docs/about/pricing/)
   load, volume size, bandwidth past 50 GB, and a 2 GB machine (about $12.70) if
   `fly logs` ever shows the server running out of memory. The app idles at
   about 300 MB.
+- **Uploads fill the volume fastest.** Free for now means every account,
+  guests included, can send files up to 100 MB, and each one is stored and
+  then downloaded by everyone who opens it (bandwidth). `fly.toml` grows the
+  volume 1 GB at a time when it is 80% full, up to 20 GB; at 20 GB every
+  upload and avatar change fails until you make room. Check it weekly:
+
+  ```bash
+  fly ssh console -C "df -h /app/media"
+  ```
+
+  To raise the ceiling, change `auto_extend_size_limit` in `fly.toml` and
+  run `fly deploy --ha=false`. Uploads are never deleted on their own.
 
 ### 1. Accounts (once)
 
@@ -92,7 +104,10 @@ Prices checked 2026-10-11 (sources: [Fly.io](https://fly.io/docs/about/pricing/)
    `primary_region` in `fly.toml`.
 2. Move the account to the **Launch** plan. In the branch's compute settings,
    set autoscaling to **min 0.25, max 1** CU and turn **scale to zero off**.
-3. Click **Connect**, turn **connection pooling off**, and copy the connection
+3. In **Settings → Postgres → History window**, move the slider to **7 days**
+   and click **Save**. Launch starts at 1 day, and this history is the only
+   database backup: it is how you undo a bad migration or deletion.
+4. Click **Connect**, turn **connection pooling off**, and copy the connection
    string: its host has no `-pooler`. Prisma migrations need this direct
    connection, and one machine needs only a few connections. It looks like
    `postgresql://neondb_owner:...@ep-....us-east-1.aws.neon.tech/neondb?sslmode=require`.
@@ -231,6 +246,10 @@ this is set, the Windows app only offers Host on this PC and nothing pings
 anywhere. Settle the domain before this step: installed apps keep the URL
 they were built with.
 
+From then on every production Campfire pings, including your own test and
+staging servers: set `CAMPFIRE_TELEMETRY=off` on those so they don't count as
+installs (CI's release gates already do).
+
 ### 11. Publish the Windows app
 
 Follow the desktop section of
@@ -248,7 +267,7 @@ and a release without `latest.yml` silently stops auto-update.
   laptop and a phone on mobile data. The full TURN proof is the acceptance
   gate in [DEPLOY.md](./DEPLOY.md#turn-live-acceptance-gate).
 - Free uptime alerts: point any uptime monitor at `https://<domain>/api/health`.
-- Backups: Neon keeps 7 days of point-in-time history on Launch, and Fly
+- Backups: Neon keeps the 7 days of point-in-time history set in step 2, and Fly
   snapshots the uploads volume daily for 5 days (`fly volumes list`, then
   `fly volumes snapshots list <volume-id>`).
 - Share `https://<domain>/download`.
@@ -263,7 +282,10 @@ On Campfire Online, open `/admin` (instance admins only). It shows:
   30 days, split into Windows app online, Windows app host-on-PC, and
   self-hosted servers; accounts on those servers; new installs per day; and
   versions in use;
-- **GitHub release downloads** for the published exes.
+- **GitHub release downloads** for the published exes. This is not a people
+  count: every installed copy downloads the setup exe again for each release
+  it auto-updates to, so setup counts grow with installs × releases. The
+  30-day install counts above are the number of people.
 
 What the pings contain, and how people opt out, is in
 [TELEMETRY.md](./TELEMETRY.md). Download counts are also one command away:
@@ -288,8 +310,12 @@ gh api repos/LouSputthole/Squatch-Bunker/releases --jq '.[] | {tag: .tag_name, d
   improvements from the web redeploy alone; the exe only needs updating for
   desktop changes.
 - **Self-hosters:** write clear release notes (what changed, any migration or
-  new setting). Servers that have not opted out ping their version, so
-  `/admin` shows how many still run old ones.
+  new setting). Their servers never show our notices, but each self-hosted
+  `/admin` shows its operator a "latest Campfire release is vX; this server
+  runs vY" line from the newest GitHub release (unless they turned the usage
+  ping off), and [DEPLOY.md: Updating](./DEPLOY.md#updating) tells them to
+  watch the repo's releases. Servers that have not opted out ping
+  their version, so your `/admin` shows how many still run old ones.
 
 ## Turning on paid later
 
@@ -336,7 +362,9 @@ with the next `fly deploy`.
   typo people should re-read).
 - **`text`**: at most 280 characters.
 - **`url`** and **`urlLabel`** (optional): an `https://` link and its button
-  text (default "Learn more"), opened in a new tab.
+  text (default "Learn more"), opened in a new tab. In the Windows app a link
+  to another site opens in the browser; a link to your own domain opens in a
+  small app window, and any link inside that window goes to the browser.
 - Check it with `curl https://<domain>/api/notice`. An invalid value shows
   nothing and logs one `CAMPFIRE_NOTICE is not a valid notice` line
   (`fly logs`).
@@ -345,9 +373,12 @@ with the next `fly deploy`.
 Who sees it:
 
 - **Browser users of Campfire Online:** a banner at the top of chat until they
-  dismiss it (remembered per browser).
+  dismiss it (remembered per browser). A chat page that stays open re-checks
+  hourly and whenever it comes back into view, so it appears within about an
+  hour without a reload; clearing the notice hides it the same way.
 - **Windows app in Campfire Online mode:** the same banner; that window is
-  Campfire Online.
+  Campfire Online, and it re-checks the same way, including when the window
+  is opened again from the tray.
 - **Windows app in Host on this PC mode:** no banner (the window is their own
   server); the launcher receives the notice in the answer to its ping (about
   20 seconds after launch, then daily) and shows it once per id as a small
@@ -358,5 +389,7 @@ Who sees it:
 
 For a new Windows release, publish the GitHub release first (the in-app
 update prompt picks it up on its own), then point the notice at
-`https://<domain>/download`. For Campfire Pro, point it at the Pro page once
-it exists.
+`https://<domain>/download`. Installed copies update themselves, so a
+release notice mainly reaches portable and browser users; say what is new
+rather than asking everyone to download. For Campfire Pro, point it at the
+Pro page once it exists.

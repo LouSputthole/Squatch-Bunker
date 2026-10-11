@@ -131,6 +131,10 @@ assert(
   "electron-builder publish owner/repo must match UPDATE_REPO in desktop/main.cjs",
 );
 assert(desktopLauncher.includes('require("electron-updater")'), "Desktop launcher must use electron-updater");
+assert(
+  desktopLauncher.includes('"x-user-staging-id": "00000000-0000-0000-0000-000000000000"'),
+  "Desktop launcher must replace electron-updater's per-install id header (docs/TELEMETRY.md promises anonymous update checks)",
+);
 
 const stagedServerRoot = join(projectRoot, "desktop", ".stage", "server");
 if (requireStage || existsSync(stagedServerRoot)) {
@@ -200,8 +204,22 @@ if (requireStage || existsSync(stagedServerRoot)) {
 const distRoot = join(projectRoot, "desktop", "dist");
 const unpackedResources = join(distRoot, "win-unpacked", "resources");
 const appAsar = join(unpackedResources, "app.asar");
+let packagedCloudUrl = null;
 if (requirePackage || existsSync(appAsar)) {
   assert(existsSync(appAsar), "Built app is missing (desktop/dist/win-unpacked/resources/app.asar); run desktop:installer");
+  const packagedLauncherConfig = join(unpackedResources, "server", "desktop-launcher.json");
+  if (existsSync(packagedLauncherConfig)) {
+    packagedCloudUrl = JSON.parse(readFileSync(packagedLauncherConfig, "utf8")).cloudUrl;
+  }
+  // The release gate: installed copies auto-update to whatever is published, so a smoke build's
+  // http://127.0.0.1 URL would strand every one of them. Without the flag a local smoke build still verifies.
+  if (requirePackage) {
+    assert(typeof packagedCloudUrl === "string", "Built app lacks resources/server/desktop-launcher.json; rebuild after desktop:stage");
+    assert(
+      packagedCloudUrl === "" || packagedCloudUrl.startsWith("https://"),
+      `Built app has a non-HTTPS Campfire Online URL (${packagedCloudUrl}; smoke build?); rebuild with the real domain, or none`,
+    );
+  }
   const { listPackage } = createRequire(import.meta.url)("@electron/asar");
   const packagedModules = new Set(
     listPackage(appAsar, { isPack: false })
@@ -243,3 +261,6 @@ if (requirePackage || existsSync(appAsar)) {
 }
 
 console.log("[Campfire] Desktop packaging configuration verified.");
+if (packagedCloudUrl !== null) {
+  console.log(`[Campfire] Built app's Campfire Online URL: ${packagedCloudUrl || "(none: Host on this PC only)"}`);
+}

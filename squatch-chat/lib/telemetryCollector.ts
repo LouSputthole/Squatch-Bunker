@@ -94,8 +94,9 @@ export interface ReleaseDownloads {
   releases: { name: string; downloads: number }[];
 }
 
-// People downloading Campfire. Installed copies also fetch latest.yml (every 6 h)
-// and .blockmap files (differential updates); those are update checks, not downloads.
+// The exes, not latest.yml (polled every 6 h) or .blockmap files. Still not a people count:
+// electron-updater fetches the setup exe once per installed copy per release, so setup counts
+// grow with installs x releases (/admin says so). Installs come from the pings.
 const DOWNLOAD_ASSET = /\.(exe|zip)$/i;
 
 /** GitHub release downloads of the exes, cached for an hour; null when GitHub can't be reached. */
