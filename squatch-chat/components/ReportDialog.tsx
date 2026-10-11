@@ -12,7 +12,13 @@ interface ReportDialogProps {
   onClose: () => void;
 }
 
-/** Reason prompt that files a report with the instance operator (POST /api/reports). */
+/**
+ * Reason prompt that files a report (POST /api/reports). A message report
+ * goes to that camp's moderators (lib/reports.ts), who see the reporter's
+ * username, and is listed on /admin for 30 days; a user report goes to
+ * whoever runs this Campfire server (/admin) only. The
+ * Terms (section 8) and Privacy Policy (section 5) say the same; keep in sync.
+ */
 export default function ReportDialog({ targetUserId, targetName, messageId, onClose }: ReportDialogProps) {
   async function submit(reason: string) {
     try {
@@ -37,8 +43,8 @@ export default function ReportDialog({ targetUserId, targetName, messageId, onCl
       title={messageId ? "Report message" : `Report ${targetName ?? "user"}`}
       message={
         messageId
-          ? `Tell the server operator what's wrong with this message${targetName ? ` from ${targetName}` : ""}.`
-          : "Tell the server operator what's going on. Reports are private."
+          ? `Tell this camp's moderators what's wrong with this message${targetName ? ` from ${targetName}` : ""}. They will see the message, your reason, and your username, and so can the people who run this Campfire server.`
+          : "Tell the people who run this Campfire server what's going on. They will see your username; the person you report won't be told who reported them."
       }
       mode="textarea"
       label="Reason"

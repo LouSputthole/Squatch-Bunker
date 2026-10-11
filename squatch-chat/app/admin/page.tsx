@@ -100,7 +100,7 @@ export default async function AdminPage() {
   if (!session || !isInstanceAdmin(session.userId)) notFound();
 
   const { prisma } = await import("@/lib/db");
-  const { listUnscopedOpenReports } = await import("@/lib/reports");
+  const { listRecentMessageReports, listUnscopedOpenReports } = await import("@/lib/reports");
   const { githubReleaseDownloads, isTelemetryCollector, telemetrySummary } = await import(
     "@/lib/telemetryCollector"
   );
@@ -118,6 +118,7 @@ export default async function AdminPage() {
     topChannels,
     openReports,
     unscopedReports,
+    messageReports,
   ] =
     await Promise.all([
       prisma.user.count(),
@@ -141,6 +142,9 @@ export default async function AdminPage() {
       // Reports with no provable server context never reach a server's
       // Ranger Desk, so the operator is their only reader.
       listUnscopedOpenReports(),
+      // Camp moderators handle these, but the operator must still see
+      // illegal content, including reports a camp dismissed.
+      listRecentMessageReports(now),
     ]);
 
   // People = distinct message authors; guests split out. Install pings and
@@ -352,7 +356,7 @@ export default async function AdminPage() {
         </h3>
         <p className="text-xs text-[var(--muted)] mb-3">
           User-level reports and reports whose message was deleted. Message reports are handled by each
-          server&apos;s moderators in the Moderation Panel.
+          server&apos;s moderators in the Moderation Panel; the next list shows them to you too.
         </p>
         {unscopedReports.length === 0 ? (
           <p className="text-sm text-[var(--muted)]">Nothing waiting.</p>
@@ -369,6 +373,46 @@ export default async function AdminPage() {
                 </div>
                 <p className="mt-1 whitespace-pre-wrap break-words">{report.reason}</p>
                 <p className="mt-0.5 text-[10px] text-[var(--muted)]">id {report.id}</p>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {/* Message reports camp moderators handle, kept visible here for illegal content. */}
+      <section className="mt-8 bg-[var(--panel)] rounded-lg p-4">
+        <h3 className="text-sm font-semibold text-[var(--muted)] mb-1 uppercase tracking-wide">
+          Message reports in camps (last 30 days)
+        </h3>
+        <p className="text-xs text-[var(--muted)] mb-3">
+          Every report on a message that still exists, whatever the camp&apos;s moderators decided. Check these for
+          anything illegal or involving a child&apos;s safety.
+        </p>
+        {messageReports.length === 0 ? (
+          <p className="text-sm text-[var(--muted)]">None in the last 30 days.</p>
+        ) : (
+          <ul className="divide-y divide-[var(--accent-2)]/20">
+            {messageReports.map((report) => (
+              <li key={report.id} className="py-2 text-sm">
+                <div className="flex flex-wrap items-baseline gap-2 text-xs">
+                  <strong>{report.reporter.username}</strong>
+                  <span className="text-[var(--muted)]">reported</span>
+                  <strong className="text-[var(--danger)]">{report.targetUser.username}</strong>
+                  <span className="text-[var(--muted)]">
+                    in {report.message.serverName} #{report.message.channelName}
+                  </span>
+                  <span className={report.status === "open" ? "text-[var(--danger)]" : "text-[var(--muted)]"}>
+                    {report.status}
+                  </span>
+                  <span className="ml-auto text-[var(--muted)]">{report.createdAt.toISOString().slice(0, 16).replace("T", " ")} UTC</span>
+                </div>
+                <p className="mt-1 whitespace-pre-wrap break-words">{report.reason}</p>
+                <p className="mt-1 whitespace-pre-wrap break-words text-xs text-[var(--muted)]">
+                  &ldquo;{report.message.snippet}&rdquo;
+                </p>
+                <p className="mt-0.5 text-[10px] text-[var(--muted)]">
+                  id {report.id} · message {report.message.id}
+                </p>
               </li>
             ))}
           </ul>

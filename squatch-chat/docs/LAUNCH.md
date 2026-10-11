@@ -98,12 +98,50 @@ Campfire Online (see [Turning on paid later](#turning-on-paid-later)).
    self-host beta.
 5. **Publish the rules, and be ready for trouble.** A public service that
    collects emails and install pings needs, before anyone is invited:
-   - Terms of Service, a Privacy Policy that covers accounts, uploads, and
-     the install ping ([TELEMETRY.md](./TELEMETRY.md) is the source for that
-     part), and an acceptable-use policy, published on pages you control and
-     linked from `/download` and `/register` (the app has no such pages yet);
+   - the Terms of Service (with its acceptable-use rules) at `/terms` and the
+     Privacy Policy at `/privacy`. Both are drafts: have a lawyer review
+     them. They only render on `CAMPFIRE_EDITION=cloud`, and `/register`, the
+     guest form and GitHub/Google buttons on `/login`, and `/download` link
+     them there. Fill in every `[placeholder]` in
+     [`lib/legal.ts`](../lib/legal.ts), the one place for your legal name,
+     contact, abuse and DMCA addresses, mailing address, governing law,
+     effective dates, and hosting providers; until you do, both pages show a
+     draft notice and the server logs which values are missing. The document
+     text lives in `app/terms/terms.ts` and `app/privacy/privacy.ts`; the
+     owner notes at the top of each list what to keep in sync;
+   - a DMCA designated agent registered with the US Copyright Office
+     (copyright.gov/dmca-directory), matching `DMCA_AGENT` and `DMCA_EMAIL`,
+     or the copyright safe harbor doesn't apply;
+   - a CyberTipline account with NCMEC, since the Terms promise to report
+     child sexual exploitation there;
    - a named person and address for abuse reports, and a habit of checking
-     `/admin`'s report list;
+     `/admin`'s two report lists (user-level reports, and every message report
+     from the last 30 days, including ones a camp's moderators dismissed);
+   - a way to keep what the Terms promise in sections 7, 9, and 14 (remove
+     content anywhere, ban accounts, end repeat infringers). The app has no
+     instance-wide moderation tools yet, so until it does, this is the
+     runbook, using the database console and the `/app/media` volume:
+     - **Remove illegal or infringing content.** `/admin` shows report,
+       message, and account ids. Delete the `"Message"` row, any Camp Journal
+       copies (`"JournalEntry"` rows with that `"sourceMessageId"`), and the
+       file: an `attachmentUrl` of `/uploads/<name>` is
+       `/app/media/uploads/<name>`, and a `privateUploadId` is the
+       `"PrivateUpload"` row whose `storageKey` names the file under
+       `/app/media/private-uploads/` (delete that row too). For child sexual
+       abuse material, report it to the NCMEC CyberTipline and keep a copy of
+       the material and the account's details in secure storage before
+       deleting: US law (18 U.S.C. 2258A) requires preserving them for a year
+       after a report.
+     - **Ban an account.** There is no ban switch. Adding 1 to
+       `"tokenVersion"` signs the account out everywhere and setting
+       `"passwordHash"` to `'banned'` stops password sign-in, but **Forgot
+       password** and GitHub/Google sign-in still let the owner back in, and
+       nothing stops the same person registering again. Build a real ban (a
+       disabled flag checked at sign-in and on every session, and blocked
+       email hashes checked at sign-up and GitHub/Google sign-up) before
+       relying on the Terms' ban and repeat-infringer promises.
+     - **DMCA.** Log every notice and counter-notice with the account it
+       names, so you can find repeat infringers (Terms section 9);
    - backups you have restored once: Neon point-in-time recovery on, and Fly
      volume snapshots on for `/app/media`.
 
@@ -161,7 +199,10 @@ settings, nothing can be bought, so every feature is unlocked. When you are
 ready, set the four Stripe settings (`STRIPE_SECRET_KEY`,
 `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_MONTHLY`, `STRIPE_PRICE_YEARLY`) on
 Campfire Online and restart. That is the switch: premium tiers turn on there,
-and self-hosted Community servers stay fully unlocked. See
+and self-hosted Community servers stay fully unlocked. Rewrite section 13 of
+the Terms (`app/terms/terms.ts`: price, renewal, cancellation, refunds) first:
+it says nothing on Campfire Online can be bought, and the server logs a
+warning while billing is on. See
 [EDITIONS.md](./EDITIONS.md) and the managed go-live gates in
 [RELEASE_CHECKLIST.md](./RELEASE_CHECKLIST.md#9-managed-hosted-go-live-additions)
 before charging anyone.

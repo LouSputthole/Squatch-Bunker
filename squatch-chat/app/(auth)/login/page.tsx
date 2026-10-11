@@ -5,12 +5,12 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import { safeRedirectTarget } from "@/lib/safeRedirect";
+import LegalConsent, { useLegalPagesEnabled } from "@/components/LegalConsent";
 
 // Only offer sign-in paths this server is actually configured for (see /api/config).
 interface AuthOptions {
   oauthProviders: string[];
   passwordResetEnabled: boolean;
-  edition: string | null;
 }
 
 function afterLogin(): string {
@@ -50,7 +50,6 @@ export default function LoginPage() {
         setAuthOptions({
           oauthProviders: Array.isArray(data.oauthProviders) ? data.oauthProviders : [],
           passwordResetEnabled: data.passwordResetEnabled === true,
-          edition: typeof data.edition === "string" ? data.edition : null,
         });
       })
       .catch(() => {});
@@ -61,9 +60,12 @@ export default function LoginPage() {
   // The desktop window can't finish OAuth: the provider page would load inside
   // it, and a system-browser sign-in sets its cookie in the browser, not the app.
   const oauth = inBrowser ? authOptions?.oauthProviders ?? [] : [];
+  // Our Terms and Privacy Policy cover Campfire Online only, never a self-hosted
+  // server. Known from the first render (app/(auth)/layout.tsx), not /api/config.
+  const cloud = useLegalPagesEnabled();
   // The app joins Campfire Online or hosts its own camp; it can't join a
   // self-hosted or LAN Campfire, so only Campfire Online advertises it.
-  const showDesktopLink = inBrowser && authOptions?.edition === "cloud";
+  const showDesktopLink = inBrowser && cloud;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -210,6 +212,12 @@ export default function LoginPage() {
               </div>
 
               <div className="flex flex-col gap-2">
+                {/* A first GitHub/Google sign-in creates the account. */}
+                {cloud && (
+                  <LegalConsent
+                    action={`continuing with ${oauth.map((p) => (p === "github" ? "GitHub" : "Google")).join(" or ")}`}
+                  />
+                )}
                 {oauth.includes("github") && (
                   <>
                   {/* OAuth initiation must be a full document navigation so provider redirects and cookies bypass the client router. */}
@@ -313,6 +321,7 @@ export default function LoginPage() {
                 />
               </div>
 
+              {cloud && <LegalConsent action="joining as a guest" />}
               <button
                 type="submit"
                 disabled={loading || !guestName.trim()}
@@ -333,7 +342,7 @@ export default function LoginPage() {
         )}
       </main>
       <footer
-        aria-label="License and source"
+        aria-label={cloud ? "License, source, and legal" : "License and source"}
         className="px-4 pb-6 text-center text-xs text-[var(--muted)]"
       >
         {showDesktopLink && (
@@ -358,6 +367,24 @@ export default function LoginPage() {
           >
             View corresponding source
           </a>
+          {cloud && (
+            <>
+              {" "}|{" "}
+              <Link
+                href="/terms"
+                className="underline underline-offset-2 hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+              >
+                Terms
+              </Link>{" "}
+              |{" "}
+              <Link
+                href="/privacy"
+                className="underline underline-offset-2 hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+              >
+                Privacy
+              </Link>
+            </>
+          )}
         </p>
       </footer>
     </div>

@@ -56,8 +56,9 @@ export async function cleanupDeletedMessageUploads(messages: DeletableMessage[])
   ]);
 }
 
+/** Files the app stored itself: uploads (/uploads/) and profile pictures (/avatars/<userId>.<ext>). */
 export function localUploadPath(url: string): string | null {
-  if (!url.startsWith("/uploads/")) return null;
+  if (!url.startsWith("/uploads/") && !url.startsWith("/avatars/")) return null;
   return resolveUserMediaPath(url);
 }
 

@@ -222,3 +222,47 @@ export async function listUnscopedOpenReports(limit = 50) {
     .slice(0, limit)
     .map((r) => ({ ...r, messageDeleted: !!r.messageId }));
 }
+
+/**
+ * Instance-operator view of the message reports camp moderators handle: every
+ * one filed in the last 30 days whose message still exists, whatever its
+ * status, so illegal content reaches the operator even when a camp's own
+ * moderators dismiss the report (Terms section 8: "we can see it too").
+ */
+export async function listRecentMessageReports(now = new Date(), limit = 100) {
+  const reports = await prisma.report.findMany({
+    where: { messageId: { not: null }, createdAt: { gte: new Date(now.getTime() - RECENT_HANDLED_MS) } },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    take: 500,
+    select: {
+      id: true,
+      reason: true,
+      status: true,
+      messageId: true,
+      createdAt: true,
+      reporter: { select: { username: true } },
+      targetUser: { select: { username: true } },
+    },
+  });
+  const messageIds = [...new Set(reports.map((r) => r.messageId!))];
+  const messages = messageIds.length > 0
+    ? await prisma.message.findMany({
+      where: { id: { in: messageIds } },
+      select: { id: true, content: true, channel: { select: { name: true, server: { select: { name: true } } } } },
+    })
+    : [];
+  const messageById = new Map(messages.map((message) => [message.id, message]));
+  return reports.flatMap(({ messageId, ...report }) => {
+    const message = messageById.get(messageId!);
+    if (!message) return [];
+    return [{
+      ...report,
+      message: {
+        id: message.id,
+        snippet: snippetOf(message.content),
+        channelName: message.channel.name,
+        serverName: message.channel.server.name,
+      },
+    }];
+  }).slice(0, limit);
+}

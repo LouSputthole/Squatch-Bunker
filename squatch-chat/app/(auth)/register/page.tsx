@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { safeRedirectTarget } from "@/lib/safeRedirect";
 import Link from "next/link";
+import LegalConsent, { useLegalPagesEnabled } from "@/components/LegalConsent";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -14,6 +15,8 @@ export default function RegisterPage() {
   const [betaAccessCode, setBetaAccessCode] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  // Only Campfire Online has our Terms; self-hosted servers have their own rules.
+  const cloud = useLegalPagesEnabled();
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -125,6 +128,7 @@ export default function RegisterPage() {
             />
           </div>
 
+          {cloud && <LegalConsent action="creating an account" />}
           <button
             type="submit"
             disabled={loading}

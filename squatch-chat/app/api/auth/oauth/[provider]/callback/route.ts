@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { createToken, setTokenCookie } from "@/lib/auth";
+import { OAUTH_PASSWORD_PREFIX } from "@/lib/accountCredentials";
 import { betaAccessRequired } from "@/lib/betaAccess";
 import { safeRedirectTarget } from "@/lib/safeRedirect";
 
@@ -154,7 +155,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ prov
           data: {
             email,
             username,
-            passwordHash: `oauth_${crypto.randomUUID()}`,
+            passwordHash: `${OAUTH_PASSWORD_PREFIX}${crypto.randomUUID()}`,
             avatar,
           },
         });

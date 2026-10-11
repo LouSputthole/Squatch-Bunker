@@ -20,6 +20,7 @@ import {
   sweepExpiredMessages,
 } from "./lib/messageRetention";
 import { assertEditionConfig } from "./lib/edition";
+import { legalConfigurationWarnings } from "./lib/legal";
 import { assertBetaAccessConfig } from "./lib/betaAccess";
 import { assertTurnConfiguration } from "./lib/turnCredentials";
 import { startTelemetryReporter } from "./lib/telemetry";
@@ -91,6 +92,9 @@ async function main() {
   }
   const edition = assertEditionConfig();
   for (const warning of edition.warnings) {
+    console.warn(`[Campfire] Configuration warning: ${warning}`);
+  }
+  for (const warning of legalConfigurationWarnings()) {
     console.warn(`[Campfire] Configuration warning: ${warning}`);
   }
   const app = next({ dev, hostname: BIND_HOST, port: PORT });

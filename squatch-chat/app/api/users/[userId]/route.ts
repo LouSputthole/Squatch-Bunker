@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { localUploadPath, removeUnreferencedUpload } from "@/lib/messageRetention";
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ userId: string }> }) {
   const session = await getSession();
@@ -41,11 +42,23 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ us
   const updates: { bio?: string | null; banner?: string | null; statusMessage?: string | null } = {};
 
   if ("bio" in body) updates.bio = (body.bio || "").slice(0, 500) || null;
-  if ("banner" in body) updates.banner = body.banner || null;
+  if ("banner" in body) updates.banner = typeof body.banner === "string" && body.banner ? body.banner : null;
   if ("statusMessage" in body) updates.statusMessage = (body.statusMessage || "").slice(0, 128) || null;
 
   if (Object.keys(updates).length === 0) {
     return NextResponse.json({ error: "Nothing to update" }, { status: 400 });
+  }
+
+  const previous = await prisma.user.findUnique({ where: { id: userId }, select: { banner: true } });
+  // A new banner must be a file uploaded here (/api/upload), never another
+  // site's image that would see every viewer's IP address (Privacy Policy
+  // section 6 lists no such case). An unchanged banner may be resent as is.
+  if (
+    updates.banner
+    && updates.banner !== previous?.banner
+    && !(updates.banner.startsWith("/uploads/") && localUploadPath(updates.banner))
+  ) {
+    return NextResponse.json({ error: "Upload the banner image instead of linking it" }, { status: 400 });
   }
 
   const user = await prisma.user.update({
@@ -61,6 +74,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ us
       createdAt: true,
     },
   });
+  // A replaced banner's file goes once nothing else uses it.
+  if (previous?.banner && previous.banner !== user.banner) await removeUnreferencedUpload(previous.banner);
 
   return NextResponse.json({ user });
 }

@@ -1,6 +1,10 @@
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
-import { removeUnreferencedUpload } from "@/lib/messageRetention";
+import {
+  cleanupDeletedMessageUploads,
+  type DeletableMessage,
+  removeUnreferencedUpload,
+} from "@/lib/messageRetention";
 import { notifyRealtimeAuthorizationChange } from "@/lib/realtimeControl";
 
 /**
@@ -14,13 +18,17 @@ import { notifyRealtimeAuthorizationChange } from "@/lib/realtimeControl";
  *   holding anyone's messages, no owned server, polls, gatherings, journal
  *   entries, or private uploads, no open report filed by or against them) is
  *   removed outright with their personal rows and join notices.
- * - Retired: a guest whose words are part of other people's history keeps the
- *   User row so those messages still render with an author, but loses every
- *   tie that makes them look present: memberships (except in servers they own,
- *   which still need an owner row), friendships, RSVPs, bookmarks, inbox rows,
- *   preferences, and unsent scheduled messages; tokenVersion is bumped so no
- *   token can ever revive them. `isGuest && guestExpiresAt <= now` is the
- *   marker. Once retention removes their content, a later sweep deletes them.
+ * - Retired: a guest whose words are part of other people's history (or who
+ *   owns a camp) keeps the User row and name so that content still renders
+ *   with an author, but loses memberships (except in servers they own, which
+ *   still need an owner row), unsent scheduled messages, and everything
+ *   scrubPersonalData removes; tokenVersion is bumped so no token can ever
+ *   revive them. `isGuest && guestExpiresAt <= now` is the marker. Once
+ *   retention removes their content, a later sweep deletes them.
+ *   Terms section 4 and Privacy Policy section 7 describe this; keep in sync.
+ *
+ * Self-deleted accounts (lib/accountDeletion.ts) are turned into the same kind
+ * of expired placeholder, so this sweep finishes deleting them too.
  */
 
 export interface GuestSweepResult {
@@ -28,7 +36,7 @@ export interface GuestSweepResult {
   retiredGuests: number;
 }
 
-const expiredGuest = (now: Date): Prisma.UserWhereInput => ({
+export const expiredGuest = (now: Date): Prisma.UserWhereInput => ({
   isGuest: true,
   guestExpiresAt: { lte: now },
 });
@@ -69,6 +77,8 @@ async function deleteGuest(userId: string, now: Date): Promise<{ avatar: string 
     await tx.conversation.deleteMany({ where: { OR: [{ user1Id: userId }, { user2Id: userId }] } });
     await tx.scheduledMessage.deleteMany({ where: { authorId: userId } });
     await tx.notificationPreference.deleteMany({ where: { userId } });
+    // Notices they triggered in other people's inboxes spell out their name.
+    await tx.notification.deleteMany({ where: { actorId: userId } });
     await tx.userNote.deleteMany({ where: { OR: [{ authorId: userId }, { targetUserId: userId }] } });
     await tx.oAuthAccount.deleteMany({ where: { userId } });
     await tx.serverMember.deleteMany({ where: { userId } });
@@ -77,18 +87,101 @@ async function deleteGuest(userId: string, now: Date): Promise<{ avatar: string 
   });
 }
 
-async function retireGuest(userId: string): Promise<void> {
-  await prisma.$transaction([
-    prisma.serverMember.deleteMany({ where: { userId, server: { ownerId: { not: userId } } } }),
-    prisma.friendship.deleteMany({ where: { OR: [{ requesterId: userId }, { addresseeId: userId }] } }),
-    prisma.gatheringRsvp.deleteMany({ where: { userId } }),
-    prisma.bookmark.deleteMany({ where: { userId } }),
-    prisma.notification.deleteMany({ where: { userId } }),
-    prisma.notificationPreference.deleteMany({ where: { userId } }),
-    prisma.scheduledMessage.deleteMany({ where: { authorId: userId, sent: false } }),
-    prisma.user.update({ where: { id: userId }, data: { tokenVersion: { increment: 1 } } }),
-  ]);
+/** Files to remove once the transaction that scrubbed them has committed. */
+export interface ScrubbedFiles {
+  media: string[];
+  files: DeletableMessage[];
 }
+
+/**
+ * Remove what a deleted account or retired guest no longer needs while their
+ * name stays as the author of content other people rely on: avatar, banner,
+ * bio, and status message; reactions, DM reactions, poll votes, RSVPs,
+ * bookmarks, Camp Journal entries, private notes by or about them, blocks they
+ * made, friendships and requests, their inbox and notification settings,
+ * notices they triggered in other inboxes, and reports they filed that are
+ * already handled (open ones stay until a moderator closes them). Bumps
+ * tokenVersion. Call removeScrubbedFiles after commit.
+ */
+export async function scrubPersonalData(tx: Prisma.TransactionClient, userId: string): Promise<ScrubbedFiles> {
+  const user = await tx.user.findUnique({ where: { id: userId }, select: { avatar: true, banner: true } });
+  const journal = await tx.journalEntry.findMany({
+    where: { authorId: userId },
+    select: { id: true, attachmentUrl: true, privateUploadId: true },
+  });
+  await tx.journalEntry.deleteMany({ where: { authorId: userId } });
+  await tx.reaction.deleteMany({ where: { userId } });
+  await tx.directMessageReaction.deleteMany({ where: { userId } });
+  await tx.pollVote.deleteMany({ where: { userId } });
+  await tx.gatheringRsvp.deleteMany({ where: { userId } });
+  await tx.bookmark.deleteMany({ where: { userId } });
+  await tx.friendship.deleteMany({ where: { OR: [{ requesterId: userId }, { addresseeId: userId }] } });
+  await tx.userBlock.deleteMany({ where: { blockerId: userId } });
+  await tx.userNote.deleteMany({ where: { OR: [{ authorId: userId }, { targetUserId: userId }] } });
+  await tx.notification.deleteMany({ where: { OR: [{ userId }, { actorId: userId }] } });
+  await tx.notificationPreference.deleteMany({ where: { userId } });
+  await tx.report.deleteMany({ where: { reporterId: userId, status: { not: "open" } } });
+  await tx.user.update({
+    where: { id: userId },
+    data: { avatar: null, banner: null, bio: null, statusMessage: null, tokenVersion: { increment: 1 } },
+  });
+  return {
+    media: [user?.avatar, user?.banner].filter((url): url is string => !!url),
+    files: journal,
+  };
+}
+
+export async function removeScrubbedFiles(scrubbed: ScrubbedFiles): Promise<void> {
+  await Promise.all(scrubbed.media.map(removeUnreferencedUpload));
+  await cleanupDeletedMessageUploads(scrubbed.files);
+}
+
+/**
+ * Delete one expired guest (or a deleted account's placeholder, see
+ * lib/accountDeletion.ts) now if they left no trace. Returns false, changing
+ * nothing, while something other people rely on remains.
+ */
+export async function deleteExpiredGuest(userId: string, now = new Date()): Promise<boolean> {
+  const removed = await deleteGuest(userId, now);
+  if (!removed) return false;
+  await notifyRealtimeAuthorizationChange({ scope: "session", userId });
+  await Promise.all(
+    [removed.avatar, removed.banner].filter((url): url is string => !!url).map(removeUnreferencedUpload),
+  );
+  return true;
+}
+
+async function retireGuest(userId: string): Promise<ScrubbedFiles> {
+  return prisma.$transaction(async (tx) => {
+    await tx.serverMember.deleteMany({ where: { userId, server: { ownerId: { not: userId } } } });
+    await tx.scheduledMessage.deleteMany({ where: { authorId: userId, sent: false } });
+    return scrubPersonalData(tx, userId);
+  });
+}
+
+/** An expired guest still holding something retireGuest removes. */
+const notYetRetired: Prisma.UserWhereInput[] = [
+  { memberships: { some: { role: { not: "owner" } } } },
+  { scheduledMessages: { some: { sent: false } } },
+  { avatar: { not: null } },
+  { banner: { not: null } },
+  { bio: { not: null } },
+  { statusMessage: { not: null } },
+  { reactions: { some: {} } },
+  { dmReactions: { some: {} } },
+  { pollVotes: { some: {} } },
+  { gatheringRsvps: { some: {} } },
+  { bookmarks: { some: {} } },
+  { journalEntries: { some: {} } },
+  { sentRequests: { some: {} } },
+  { recvRequests: { some: {} } },
+  { blocksCreated: { some: {} } },
+  { authoredNotes: { some: {} } },
+  { targetedNotes: { some: {} } },
+  { notifications: { some: {} } },
+  { notificationPreferences: { some: {} } },
+  { reportsFiled: { some: { status: { not: "open" } } } },
+];
 
 export async function sweepExpiredGuests(now = new Date(), limit = 100): Promise<GuestSweepResult> {
   const take = Math.max(1, Math.min(limit, 500));
@@ -102,41 +195,27 @@ export async function sweepExpiredGuests(now = new Date(), limit = 100): Promise
   });
   for (const { id } of deletable) {
     try {
-      const removed = await deleteGuest(id, now);
-      if (!removed) continue;
-      result.deletedGuests += 1;
-      await notifyRealtimeAuthorizationChange({ scope: "session", userId: id });
-      await Promise.all(
-        [removed.avatar, removed.banner].filter((url): url is string => !!url).map(removeUnreferencedUpload),
-      );
+      if (await deleteExpiredGuest(id, now)) result.deletedGuests += 1;
     } catch (error) {
       console.error("[Campfire] Failed to delete expired guest:", id, error);
     }
   }
 
-  // Only guests that still look present are selected, so retired guests drop
-  // out of this query and can't starve newer ones. The owner's own membership
-  // row is the only one with role "owner" (no ownership transfer exists).
+  // Only guests still holding something to remove are selected, so retired
+  // guests drop out of this query and can't starve newer ones. The owner's own
+  // membership row is the only one with role "owner" (no ownership transfer exists).
   const retirable = await prisma.user.findMany({
-    where: {
-      ...expiredGuest(now),
-      OR: [
-        { memberships: { some: { role: { not: "owner" } } } },
-        { sentRequests: { some: {} } },
-        { recvRequests: { some: {} } },
-        { gatheringRsvps: { some: {} } },
-        { scheduledMessages: { some: { sent: false } } },
-      ],
-    },
+    where: { ...expiredGuest(now), OR: notYetRetired },
     orderBy: { guestExpiresAt: "asc" },
     take,
     select: { id: true },
   });
   for (const { id } of retirable) {
     try {
-      await retireGuest(id);
+      const scrubbed = await retireGuest(id);
       result.retiredGuests += 1;
       await notifyRealtimeAuthorizationChange({ scope: "session", userId: id });
+      await removeScrubbedFiles(scrubbed);
     } catch (error) {
       console.error("[Campfire] Failed to retire expired guest:", id, error);
     }

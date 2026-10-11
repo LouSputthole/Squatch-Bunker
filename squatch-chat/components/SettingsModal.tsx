@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import Avatar from "@/components/Avatar";
 import { BlockedUsersSettings } from "@/components/BlockedUsersSettings";
+import { DeleteAccountSettings } from "@/components/DeleteAccountSettings";
 import { useEscape } from "@/hooks/useEscape";
 import { useTheme, THEMES, THEME_LABELS } from "@/hooks/useTheme";
 import { toast, toastResponseError } from "@/lib/toast";
@@ -682,6 +683,7 @@ function AccountTab({
   const fileRef = useRef<HTMLInputElement>(null);
   // null until /api/auth/me answers; guests rename by saving their account.
   const [isGuest, setIsGuest] = useState<boolean | null>(null);
+  const [hasPassword, setHasPassword] = useState(false);
   const [savedName, setSavedName] = useState<string | null>(null);
   const [nameDraft, setNameDraft] = useState("");
   const [nameSaving, setNameSaving] = useState(false);
@@ -699,6 +701,7 @@ function AccountTab({
           setStatusMsg((typed) => (typed === "" ? current : typed));
         }
         if (typeof data?.user?.isGuest === "boolean") setIsGuest(data.user.isGuest);
+        setHasPassword(data?.user?.hasPassword === true);
       })
       .catch(() => {});
     return () => {
@@ -970,6 +973,13 @@ function AccountTab({
               Log out
             </button>
           </div>
+        </>
+      )}
+
+      {isGuest !== null && shownName && (
+        <>
+          <hr className="border-[var(--accent-2)]/20" />
+          <DeleteAccountSettings username={shownName} hasPassword={hasPassword} />
         </>
       )}
     </div>

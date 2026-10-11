@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 const COOKIE_NAME = process.env.COOKIE_NAME || "squatch-token";
-const PUBLIC_PATHS = ["/login", "/register", "/forgot-password", "/reset-password", "/api/auth/login", "/api/auth/register", "/api/auth/guest", "/join", "/explore", "/setup", "/download"];
+const PUBLIC_PATHS = ["/login", "/register", "/forgot-password", "/reset-password", "/api/auth/login", "/api/auth/register", "/api/auth/guest", "/join", "/explore", "/setup", "/download", "/terms", "/privacy"];
 
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
