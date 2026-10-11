@@ -22,6 +22,7 @@ import {
 import { assertEditionConfig } from "./lib/edition";
 import { assertBetaAccessConfig } from "./lib/betaAccess";
 import { assertTurnConfiguration } from "./lib/turnCredentials";
+import { startTelemetryReporter } from "./lib/telemetry";
 import {
   resolveUserMediaPath,
   userMediaCacheControl,
@@ -226,6 +227,7 @@ async function main() {
     console.log("  ║  Share the Network URL with others!      ║");
     console.log("  ╚══════════════════════════════════════════╝");
     console.log("");
+    startTelemetryReporter();
   });
 }
 

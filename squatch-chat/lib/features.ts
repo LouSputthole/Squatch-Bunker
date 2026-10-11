@@ -1,9 +1,9 @@
 // Campfire Feature Flag System
 // Self-hosted: all features unlocked
-// Managed service: free vs premium tiers
+// Managed service: free vs premium tiers, once Stripe billing is configured
 
 import { prisma } from "@/lib/db";
-import { isCommunityEdition } from "@/lib/edition";
+import { billingConfiguration, isCommunityEdition } from "@/lib/edition";
 import { FEATURES, type Tier } from "@/lib/featureCatalog";
 export { FEATURES, TIER_INFO, type Tier } from "@/lib/featureCatalog";
 
@@ -27,7 +27,10 @@ export function getFeatures(tier: Tier): string[] {
 
 /** Determine the effective tier for a user */
 export function getTier(user?: { tier?: string; tierExpiresAt?: Date | string | null } | null): Tier {
-  if (isCommunityEdition()) return "self-hosted";
+  // Free for now: paid tiers switch on only when Stripe billing is configured.
+  // Community never bills, and Cloud without Stripe has nothing to sell, so
+  // nothing is locked (billing is only ever enabled in Cloud).
+  if (!billingConfiguration().enabled) return "self-hosted";
   if (!user) return "free";
 
   if (user.tier === "premium") {

@@ -3,7 +3,9 @@
 const fs = require("node:fs");
 const path = require("node:path");
 
-const DESKTOP_SCHEMA_VERSION = 5;
+// 6: Ember Inbox (Notification, User quiet hours) and TelemetryInstall, which
+// version 5 databases (including every upgraded v0.0.3 install) never received.
+const DESKTOP_SCHEMA_VERSION = 6;
 
 const TABLES = [
   [
@@ -122,6 +124,33 @@ const TABLES = [
     CONSTRAINT "GatheringRsvp_gatheringId_fkey" FOREIGN KEY ("gatheringId") REFERENCES "Gathering" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
     CONSTRAINT "GatheringRsvp_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
   )`,
+  `CREATE TABLE IF NOT EXISTS "Notification" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "userId" TEXT NOT NULL,
+    "type" TEXT NOT NULL,
+    "title" TEXT NOT NULL,
+    "body" TEXT NOT NULL,
+    "serverId" TEXT,
+    "channelId" TEXT,
+    "conversationId" TEXT,
+    "messageId" TEXT,
+    "actorId" TEXT,
+    "readAt" DATETIME,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "Notification_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+  )`,
+  `CREATE TABLE IF NOT EXISTS "TelemetryInstall" (
+    "installId" TEXT NOT NULL PRIMARY KEY,
+    "kind" TEXT NOT NULL,
+    "mode" TEXT,
+    "version" TEXT NOT NULL,
+    "edition" TEXT,
+    "platform" TEXT,
+    "users" INTEGER,
+    "activeUsers" INTEGER,
+    "firstSeenAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "lastSeenAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
 ];
 
 const INDEXES = [
@@ -147,6 +176,10 @@ const INDEXES = [
   'CREATE UNIQUE INDEX IF NOT EXISTS "User_stripeCustomerId_key" ON "User"("stripeCustomerId")',
   'CREATE UNIQUE INDEX IF NOT EXISTS "User_stripeSubscriptionId_key" ON "User"("stripeSubscriptionId")',
   'CREATE INDEX IF NOT EXISTS "User_billingCheckoutPendingAt_idx" ON "User"("billingCheckoutPendingAt")',
+  'CREATE INDEX IF NOT EXISTS "Notification_userId_readAt_idx" ON "Notification"("userId", "readAt")',
+  'CREATE INDEX IF NOT EXISTS "Notification_userId_createdAt_idx" ON "Notification"("userId", "createdAt")',
+  'CREATE INDEX IF NOT EXISTS "TelemetryInstall_lastSeenAt_idx" ON "TelemetryInstall"("lastSeenAt")',
+  'CREATE INDEX IF NOT EXISTS "TelemetryInstall_firstSeenAt_idx" ON "TelemetryInstall"("firstSeenAt")',
 ];
 
 function quoteIdentifier(identifier) {
@@ -240,7 +273,7 @@ function assertIntegrity(database) {
 
 function assertCurrentSchema(database) {
   const requiredColumns = {
-    User: ["billingCheckoutPendingAt", "billingEventAt"],
+    User: ["billingCheckoutPendingAt", "billingEventAt", "quietHoursStart", "quietHoursEnd"],
     Server: [
       "inviteExpiresAt",
       "inviteMaxUses",
@@ -272,6 +305,8 @@ function assertCurrentSchema(database) {
     PollVote: ["id", "pollId", "optionId", "userId"],
     Gathering: ["id", "serverId", "creatorId", "startsAt"],
     GatheringRsvp: ["id", "gatheringId", "userId", "status"],
+    Notification: ["id", "userId", "type", "readAt", "createdAt"],
+    TelemetryInstall: ["installId", "kind", "lastSeenAt"],
   };
   for (const [table, columns] of Object.entries(requiredColumns)) {
     const present = tableColumns(database, table);
@@ -362,6 +397,8 @@ function upgradeDesktopDatabase({
       addColumn(database, "Channel", "retentionDays", "INTEGER");
       addColumn(database, "User", "billingCheckoutPendingAt", "DATETIME");
       addColumn(database, "User", "billingEventAt", "DATETIME");
+      addColumn(database, "User", "quietHoursStart", "INTEGER");
+      addColumn(database, "User", "quietHoursEnd", "INTEGER");
 
       for (const sql of TABLES) database.exec(sql);
       addColumn(

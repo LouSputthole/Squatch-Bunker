@@ -583,3 +583,22 @@ model GatheringRsvp {
   @@unique([gatheringId, userId])
   @@index([userId, status])
 }
+
+// Anonymous install pings (lib/telemetryProtocol.ts). Only written on the
+// instance running the collector (CAMPFIRE_TELEMETRY_COLLECTOR=1); one row per
+// install, never an IP or anything user-identifying.
+model TelemetryInstall {
+  installId   String   @id
+  kind        String // "desktop" | "server"
+  mode        String? // desktop: "cloud" | "host"
+  version     String
+  edition     String? // server: "community" | "cloud"
+  platform    String?
+  users       Int?
+  activeUsers Int?
+  firstSeenAt DateTime @default(now())
+  lastSeenAt  DateTime @default(now())
+
+  @@index([lastSeenAt])
+  @@index([firstSeenAt])
+}

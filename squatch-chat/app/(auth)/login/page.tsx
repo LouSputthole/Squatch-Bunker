@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
@@ -16,6 +16,18 @@ function afterLogin(): string {
   return safeRedirectTarget(window.location.search, window.location.origin);
 }
 
+// The user agent never changes, so there is nothing to subscribe to.
+const noSubscription = () => () => {};
+
+/** Hidden on the server and in the Electron app; browsers reveal it after hydration. */
+function useShowDesktopLink(): boolean {
+  return useSyncExternalStore(
+    noSubscription,
+    () => !navigator.userAgent.includes("Electron"),
+    () => false,
+  );
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
@@ -26,6 +38,7 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [showGuest, setShowGuest] = useState(false);
   const [authOptions, setAuthOptions] = useState<AuthOptions | null>(null);
+  const showDesktopLink = useShowDesktopLink();
 
   useEffect(() => {
     let cancelled = false;
@@ -316,6 +329,13 @@ export default function LoginPage() {
         aria-label="License and source"
         className="px-4 pb-6 text-center text-xs text-[var(--muted)]"
       >
+        {showDesktopLink && (
+          <p className="mb-2">
+            <Link href="/download" className="text-[var(--accent)] hover:underline">
+              Get the desktop app
+            </Link>
+          </p>
+        )}
         <p>
           Campfire is licensed under{" "}
           <a

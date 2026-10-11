@@ -53,6 +53,7 @@ for (const sourcePath of [
   "desktop/main.cjs",
   "desktop/database.cjs",
   "desktop/legacy-state.cjs",
+  "desktop/launcher-core.cjs",
   "desktop/package-lock.json",
   "packaging/stage-desktop.mjs",
   "packaging/verify-desktop.mjs",
@@ -62,7 +63,7 @@ for (const sourcePath of [
   assert(existsSync(join(projectRoot, sourcePath)), `Missing ${sourcePath}`);
 }
 
-for (const sourcePath of ["desktop/main.cjs", "desktop/database.cjs", "desktop/legacy-state.cjs", "packaging/stage-desktop.mjs", "packaging/verify-desktop.mjs"]) {
+for (const sourcePath of ["desktop/main.cjs", "desktop/database.cjs", "desktop/legacy-state.cjs", "desktop/launcher-core.cjs", "packaging/stage-desktop.mjs", "packaging/verify-desktop.mjs"]) {
   const result = spawnSync(process.execPath, ["--check", join(projectRoot, sourcePath)], {
     cwd: projectRoot,
     stdio: "inherit",
@@ -97,6 +98,15 @@ assert(
   builder.files?.includes("legacy-state.cjs"),
   "Desktop legacy-state importer must be packaged with the Electron main process",
 );
+assert(
+  builder.files?.includes("launcher-core.cjs"),
+  "Desktop launcher-core helpers must be packaged with the Electron main process",
+);
+assert(
+  desktopLauncher.includes('CAMPFIRE_TELEMETRY: "off"'),
+  "The bundled server must not ping on its own; the launcher already counts this install",
+);
+assert(typeof desktopPackage.campfireCloudUrl === "string", 'desktop/package.json needs a "campfireCloudUrl" string');
 const stagedServerRoot = join(projectRoot, "desktop", ".stage", "server");
 if (requireStage || existsSync(stagedServerRoot)) {
   const bootstrapPath = join(stagedServerRoot, "campfire-server.mjs");
@@ -135,6 +145,10 @@ if (requireStage || existsSync(stagedServerRoot)) {
   assert(existsSync(webpackRuntimePath), "Staged Next compiled webpack runtime is missing");
   assert(existsSync(babelRuntimePath), "Staged Next compiled Babel runtime is missing");
   assert(existsSync(sqliteNativePath), "Staged Electron-native better-sqlite3 binary is missing");
+  const launcherConfigPath = join(stagedServerRoot, "desktop-launcher.json");
+  assert(existsSync(launcherConfigPath), "Staged desktop-launcher.json (Campfire Online URL) is missing");
+  const launcherConfig = JSON.parse(readFileSync(launcherConfigPath, "utf8"));
+  assert(typeof launcherConfig.cloudUrl === "string", "Staged desktop-launcher.json needs a cloudUrl string");
   for (const buildOnlyPath of [
     join(stagedServerRoot, "node_modules", "better-sqlite3", "binding.gyp"),
     join(stagedServerRoot, "node_modules", "better-sqlite3", "deps"),

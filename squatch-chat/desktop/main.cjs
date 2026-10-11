@@ -13,7 +13,7 @@ const {
   shell,
 } = require("electron");
 const { spawn } = require("node:child_process");
-const { randomBytes } = require("node:crypto");
+const { randomBytes, randomUUID } = require("node:crypto");
 const fs = require("node:fs");
 const http = require("node:http");
 const https = require("node:https");
@@ -22,13 +22,25 @@ const os = require("node:os");
 const path = require("node:path");
 const { upgradeDesktopDatabase } = require("./database.cjs");
 const { importLegacyDesktopState } = require("./legacy-state.cjs");
+const {
+  buildDesktopPing,
+  defaultMode,
+  parseCloudOrigin,
+  telemetryEnabled,
+  telemetryTarget,
+} = require("./launcher-core.cjs");
 
 const APP_NAME = "Campfire";
 const STARTUP_TIMEOUT_MS = 45_000;
 // Fixed port while sharing on the LAN so the link friends saved keeps working.
 const LAN_PORT = 3939;
 const UPDATE_REPO = "LouSputthole/Squatch-Bunker";
+const TELEMETRY_FIRST_PING_MS = 20_000;
+const TELEMETRY_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
+// Campfire Online; null means a host-only build (no mode switch, no ping).
+let cloudOrigin = null;
+let cloudPromptOpen = false;
 let appOrigin = null;
 let mainWindow = null;
 let tray = null;
@@ -77,7 +89,30 @@ function logDesktop(message) {
   console.log(message);
 }
 
-// ─── Desktop preferences (tray behaviour, LAN sharing, skipped update) ───
+/** Campfire Online origin: CAMPFIRE_CLOUD_URL (dev override), else the URL
+ * packaging/stage-desktop.mjs baked into the staged server resources. */
+function loadCloudOrigin() {
+  let raw = process.env.CAMPFIRE_CLOUD_URL;
+  if (!raw) {
+    try {
+      raw = JSON.parse(
+        fs.readFileSync(path.join(getServerRoot(), "desktop-launcher.json"), "utf8"),
+      ).cloudUrl;
+    } catch {
+      raw = ""; // unstaged dev run: host only
+    }
+  }
+  const origin = parseCloudOrigin(raw);
+  if (raw && !origin) logDesktop(`[desktop] ignoring invalid Campfire Online URL: ${raw}`);
+  return origin;
+}
+
+/** "cloud" = window on Campfire Online; "host" = bundled server on this PC (the only mode without a cloud URL). */
+function currentMode() {
+  return cloudOrigin && settings.mode === "cloud" ? "cloud" : "host";
+}
+
+// ─── Desktop preferences (tray behaviour, LAN sharing, mode, skipped update) ───
 
 function settingsPath() {
   return path.join(app.getPath("userData"), "desktop-settings.json");
@@ -283,6 +318,8 @@ async function startServer() {
     CAMPFIRE_PARENT_PID: String(process.pid),
     JWT_SECRET: launch.desktopConfig.jwtSecret,
     __NEXT_PRIVATE_STANDALONE_CONFIG: launch.standaloneConfig,
+    // The launcher's own ping already counts this install; don't double-count it as a server.
+    CAMPFIRE_TELEMETRY: "off",
   };
 
   const child = spawn(process.execPath, [launch.serverEntry], {
@@ -365,7 +402,7 @@ async function applyLanSetting(next) {
   } finally {
     restarting = false;
     refreshTrayMenu();
-    if (mainWindow && appOrigin) void mainWindow.loadURL(appOrigin);
+    loadApp();
   }
 }
 
@@ -389,6 +426,124 @@ function toggleLanSharing() {
     });
     if (url && response === 0) clipboard.writeText(url);
   });
+}
+
+// ─── Mode: Campfire Online vs. host on this PC ───
+
+async function useCloud() {
+  await stopServer();
+  // Forget the stopped server so a late exit isn't reported as a crash.
+  serverProcess = null;
+  serverPort = null;
+  appOrigin = cloudOrigin;
+}
+
+/** Switch modes. Saved only once the switch works; if hosting can't start,
+ * the app stays on Campfire Online (same contract as applyLanSetting). */
+async function switchMode(next) {
+  if (restarting || currentMode() === next) return;
+  restarting = true;
+  refreshTrayMenu();
+  try {
+    if (next === "host") {
+      launch = launch || (await prepareLaunch());
+      await startServer();
+    } else {
+      await useCloud();
+    }
+    settings.mode = next;
+    saveSettings();
+  } catch (error) {
+    // Only entering host mode can fail; tear down any half-started server.
+    logDesktop(`[desktop] switching to ${next} mode failed: ${error.message}`);
+    await useCloud();
+    void dialog.showMessageBox(mainWindow ?? undefined, {
+      type: "warning",
+      title: APP_NAME,
+      message: "Couldn't start Campfire on this PC.",
+      detail: `${error.message}\n\nCampfire is still using Campfire Online.`,
+      buttons: ["OK"],
+      noLink: true,
+    });
+  } finally {
+    restarting = false;
+    refreshTrayMenu();
+    loadApp();
+  }
+}
+
+/** Main-frame load of Campfire Online failed (offline, outage). No parent window: it may still be hidden. */
+async function promptCloudUnreachable(reason) {
+  if (cloudPromptOpen) return;
+  cloudPromptOpen = true;
+  try {
+    const { response } = await dialog.showMessageBox({
+      type: "warning",
+      title: APP_NAME,
+      message: "Can't reach Campfire Online",
+      detail: `${reason}\n\nCheck your internet connection, or run Campfire on this PC instead.`,
+      buttons: ["Retry", "Host on this PC instead", "Quit"],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+    });
+    if (response === 0) loadApp();
+    else if (response === 1) await switchMode("host");
+    else app.quit();
+  } finally {
+    cloudPromptOpen = false;
+  }
+}
+
+// ─── Anonymous usage ping (contract: lib/telemetryProtocol.ts, docs/TELEMETRY.md) ───
+
+function sendTelemetryPing() {
+  const target = telemetryTarget(process.env, cloudOrigin);
+  if (!target || !telemetryEnabled({ setting: settings.telemetry, env: process.env, isPackaged: app.isPackaged })) {
+    return;
+  }
+  if (typeof settings.installId !== "string") {
+    settings.installId = randomUUID();
+    saveSettings();
+  }
+  const body = JSON.stringify(
+    buildDesktopPing({
+      installId: settings.installId,
+      mode: currentMode(),
+      version: app.getVersion(),
+      platform: process.platform,
+      arch: process.arch,
+    }),
+  );
+  const url = new URL(target);
+  const request = (url.protocol === "https:" ? https : http).request(
+    url,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Content-Length": Buffer.byteLength(body),
+        "User-Agent": APP_NAME,
+      },
+      timeout: 10_000,
+    },
+    (response) => {
+      response.resume();
+      if (response.statusCode >= 300) logDesktop(`[desktop] usage ping: collector responded ${response.statusCode}`);
+    },
+  );
+  request.on("timeout", () => request.destroy(new Error("timed out")));
+  request.on("error", (error) => logDesktop(`[desktop] usage ping failed: ${error.message}`));
+  request.end(body);
+}
+
+/** Opt-outs are re-checked on every send, so the tray toggle applies without a restart. */
+function scheduleTelemetry() {
+  if (!telemetryTarget(process.env, cloudOrigin)) return;
+  setTimeout(() => {
+    sendTelemetryPing();
+    setInterval(sendTelemetryPing, TELEMETRY_INTERVAL_MS).unref();
+  }, TELEMETRY_FIRST_PING_MS).unref();
 }
 
 // ─── Updates ───
@@ -511,18 +666,42 @@ function createTray() {
 
 function refreshTrayMenu() {
   if (!tray) return;
+  const hosting = currentMode() === "host";
   const items = [
     { label: "Open Campfire", click: showMainWindow },
     { type: "separator" },
-    {
+  ];
+  if (cloudOrigin) {
+    items.push(
+      {
+        label: "Campfire Online",
+        type: "radio",
+        checked: !hosting,
+        enabled: !restarting,
+        click: () => void switchMode("cloud"),
+      },
+      {
+        label: "Host on this PC",
+        type: "radio",
+        checked: hosting,
+        enabled: !restarting,
+        click: () => void switchMode("host"),
+      },
+      hosting
+        ? { type: "separator" }
+        : { label: "Open in browser", click: () => openExternal(cloudOrigin) },
+    );
+  }
+  if (hosting) {
+    items.push({
       label: "Share on this network",
       type: "checkbox",
       checked: settings.lanSharing === true,
       enabled: !restarting,
       click: toggleLanSharing,
-    },
-  ];
-  if (settings.lanSharing === true) {
+    });
+  }
+  if (hosting && settings.lanSharing === true) {
     const url = lanUrl();
     items.push({
       label: url ? `Copy LAN link  (${url})` : "LAN link unavailable (no network)",
@@ -536,6 +715,20 @@ function refreshTrayMenu() {
   items.push(
     { type: "separator" },
     { label: "Check for updates…", click: () => void checkForUpdates(true) },
+  );
+  if (telemetryTarget(process.env, cloudOrigin)) {
+    items.push({
+      label: "Send anonymous usage ping",
+      type: "checkbox",
+      checked: settings.telemetry !== false,
+      click: (item) => {
+        settings.telemetry = item.checked;
+        saveSettings();
+        refreshTrayMenu();
+      },
+    });
+  }
+  items.push(
     {
       label: "Close button quits",
       type: "checkbox",
@@ -658,6 +851,11 @@ function createWindow() {
     event.preventDefault();
     openExternal(url);
   });
+  mainWindow.webContents.on("did-fail-load", (_event, errorCode, errorDescription, _url, isMainFrame) => {
+    // -3 (ERR_ABORTED) is a superseded navigation, not an outage.
+    if (!isMainFrame || errorCode === -3 || currentMode() !== "cloud") return;
+    void promptCloudUnreachable(errorDescription);
+  });
   mainWindow.once("ready-to-show", () => mainWindow?.show());
   // Close hides to the tray (calls keep running) unless the user opted out or there is no tray.
   mainWindow.on("close", (event) => {
@@ -677,19 +875,39 @@ function createWindow() {
     mainWindow = null;
   });
 
-  void mainWindow.loadURL(appOrigin);
+  loadApp();
+}
+
+function loadApp() {
+  // A failed load already reaches did-fail-load; the rejected promise adds nothing.
+  if (mainWindow && appOrigin) mainWindow.loadURL(appOrigin).catch(() => {});
 }
 
 app.whenReady().then(async () => {
   try {
     Menu.setApplicationMenu(null);
     settings = loadSettings();
-    launch = await prepareLaunch();
-    await startServer();
+    cloudOrigin = loadCloudOrigin();
+    if (cloudOrigin && settings.mode !== "cloud" && settings.mode !== "host") {
+      // First run with a cloud build: existing 0.0.x/beta users keep their local communities.
+      settings.mode = defaultMode({
+        cloudOrigin,
+        userDataPath: app.getPath("userData"),
+        portableDirectory: process.env.PORTABLE_EXECUTABLE_DIR || null,
+      });
+      saveSettings();
+    }
+    if (currentMode() === "cloud") {
+      appOrigin = cloudOrigin; // no local server, database or migrations
+    } else {
+      launch = await prepareLaunch();
+      await startServer();
+    }
     configurePermissions();
     createWindow();
     createTray();
     if (app.isPackaged) setTimeout(() => void checkForUpdates(false), 15_000).unref?.();
+    scheduleTelemetry();
   } catch (error) {
     const message = error instanceof Error ? error.stack || error.message : String(error);
     dialog.showErrorBox("Campfire could not start", message);

@@ -4,6 +4,16 @@ Campfire is an open-source, self-hostable voice and chat community app: Discord-
 
 > **Current status: `0.1.0-beta.1` release-candidate stabilization.** This version is intended for invited, small-community self-hosted beta testing only after its candidate-specific release gates pass; it is not yet a published release or a production SLA. Read the [beta release note](./docs/releases/0.1.0-beta.1.md), [gap analysis](./docs/GAP_ANALYSIS.md), and [release checklist](./docs/RELEASE_CHECKLIST.md) before exposing it publicly.
 
+## Use Campfire
+
+All free, three ways in:
+
+- **In your browser:** Campfire Online, the shared hosted Campfire (public address announced at launch). Sign up or join as a guest; nothing to install.
+- **Windows app:** grab the setup or portable `.exe` from [GitHub Releases](https://github.com/LouSputthole/Squatch-Bunker/releases) or any Campfire's `/download` page. It joins Campfire Online by default; switch to **Host on this PC** from the tray menu to run a camp for your own network. Builds are not code-signed yet, so SmartScreen may ask you to click **More info**, then **Run anyway**.
+- **Host your own:** the [quick start](#quick-start-local-or-trusted-lan-self-host) below (`npm run host`) or [Docker](#docker).
+
+Production servers and the Windows app send a small anonymous usage ping (version and install counts, nothing personal); [TELEMETRY.md](./docs/TELEMETRY.md) shows exactly what is sent and how to turn it off. The owner's launch runbook is [LAUNCH.md](./docs/LAUNCH.md).
+
 ## What Campfire includes
 
 The existing foundation includes:
@@ -172,6 +182,8 @@ See [SECURITY.md](./docs/SECURITY.md) for the threat model and operator hardenin
 - [Release checklist](./docs/RELEASE_CHECKLIST.md) — evidence required before shipping
 - [Deployment guide](./docs/DEPLOY.md) — HTTPS/TURN VPS recipe
 - [Security posture](./docs/SECURITY.md) — encryption, operator trust, and hardening
+- [Launch runbook](./docs/LAUNCH.md) — going live with Campfire Online, counting users, and shipping updates
+- [Anonymous usage ping](./docs/TELEMETRY.md) — exactly what is sent and how to opt out
 - [Roadmap](./ROADMAP.md) — prioritized path from alpha to a durable product
 
 ## License

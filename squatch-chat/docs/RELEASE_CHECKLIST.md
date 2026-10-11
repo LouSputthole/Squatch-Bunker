@@ -131,6 +131,9 @@ acceptance, desktop staging/verification, and unsigned desktop builds. None of t
 - [ ] Portable and installer artifacts are code-signed; credentials come from the release environment and never enter the repository or artifact payload.
 - [ ] SHA-256 checksums, exact filenames, sizes, supported Windows versions, and signature verification instructions are published.
 - [ ] Smoke tests run against the actual portable and installer artifacts, not only the staged directory.
+- [ ] A cloud build's staging log shows `[Campfire] Campfire Online: <origin>` with the intended origin (`campfireCloudUrl` in `desktop/package.json`, or `CAMPFIRE_CLOUD_URL` when running `desktop:stage` or `desktop:dist`).
+- [ ] On a cloud build, a fresh profile opens Campfire Online; a profile that already has `%APPDATA%\Campfire\data\campfire.db` (or v0.0.3 state) opens in **Host on this PC** with its communities intact; switching modes from the tray works both ways.
+- [ ] Upgrading over a real v0.0.3 install and a beta install keeps existing data, writes a `campfire.db.pre-v<schema>` backup, and the upgraded camp can sign in, post, and open the Ember Inbox.
 
 Historical `0.0.3` local artifact fingerprints (not beta sign-off; both Authenticode `NotSigned`):
 

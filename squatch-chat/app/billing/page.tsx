@@ -106,6 +106,13 @@ export default function BillingPage() {
               .
             </p>
           </section>
+        ) : policy && !policy.billingEnabled ? (
+          <section className="mt-10 rounded-2xl border border-[var(--accent-2)]/40 bg-[var(--accent-2)]/10 p-6">
+            <h2 className="text-xl font-semibold">Free for now</h2>
+            <p className="mt-2 text-sm text-[var(--muted)]">
+              Every shipped Campfire feature is unlocked for everyone. There is nothing to buy yet.
+            </p>
+          </section>
         ) : policy ? (
           <div className="mt-10 grid gap-5 md:grid-cols-2">
             <section className="rounded-2xl border border-[var(--accent-2)]/25 bg-[var(--panel)] p-6">
@@ -127,7 +134,7 @@ export default function BillingPage() {
                 <button disabled={loadingAction !== null} onClick={() => void openPortal()} className="mt-6 w-full rounded-lg bg-[var(--accent)] px-4 py-2.5 font-semibold text-[var(--bg)] hover:opacity-90 disabled:opacity-50">
                   {loadingAction === "portal" ? "Opening..." : "Manage billing"}
                 </button>
-              ) : policy.billingEnabled ? (
+              ) : (
                 <div className="mt-6 grid grid-cols-2 gap-2">
                   <button disabled={loadingAction !== null} onClick={() => void checkout("monthly")} className="rounded-lg bg-[var(--accent)] px-3 py-2.5 text-sm font-semibold text-[var(--bg)] hover:opacity-90 disabled:opacity-50">
                     {loadingAction === "monthly" ? "Opening..." : "Choose monthly"}
@@ -136,8 +143,6 @@ export default function BillingPage() {
                     {loadingAction === "yearly" ? "Opening..." : "Choose yearly"}
                   </button>
                 </div>
-              ) : (
-                <p className="mt-6 rounded-lg bg-[var(--danger)]/10 p-3 text-xs text-[var(--danger)]">The operator has not finished configuring billing, so checkout is disabled.</p>
               )}
             </section>
           </div>

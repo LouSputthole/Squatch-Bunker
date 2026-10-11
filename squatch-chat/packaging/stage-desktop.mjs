@@ -20,6 +20,7 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const Database = require("better-sqlite3");
 const { DESKTOP_SCHEMA_VERSION } = require("../desktop/database.cjs");
+const { parseCloudOrigin } = require("../desktop/launcher-core.cjs");
 
 const packagingDirectory = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(packagingDirectory, "..");
@@ -135,6 +136,15 @@ async function main() {
     throw new Error(
       `Desktop version ${desktopPackage.version} must match application version ${rootPackage.version}`,
     );
+  }
+
+  // Campfire Online origin the .exe connects to by default: CAMPFIRE_CLOUD_URL at
+  // stage time, else desktop/package.json "campfireCloudUrl". Blank = host-only build.
+  // Checked before the slow Next build so a typo fails fast.
+  const cloudUrl = process.env.CAMPFIRE_CLOUD_URL || desktopPackage.campfireCloudUrl || "";
+  const cloudOrigin = parseCloudOrigin(cloudUrl);
+  if (cloudUrl && !cloudOrigin) {
+    throw new Error(`Campfire Online URL must be https:// (http:// only for localhost): ${cloudUrl}`);
   }
 
   if (!skipNextBuild) {
@@ -257,6 +267,13 @@ async function main() {
     ].join("\n"),
   );
 
+  // Read by desktop/main.cjs (loadCloudOrigin); ships with the server resources.
+  writeFileSync(
+    join(stageRoot, "desktop-launcher.json"),
+    `${JSON.stringify({ cloudUrl: cloudOrigin ?? "" }, null, 2)}\n`,
+  );
+  console.log(`[Campfire] Campfire Online: ${cloudOrigin ?? "none (host-only build)"}`);
+
   createDatabaseTemplate();
 
   const installedBetterSqlite3 = join(projectRoot, "node_modules", "better-sqlite3");
@@ -334,6 +351,7 @@ async function main() {
     join(stageRoot, "campfire-server.mjs"),
     join(stageRoot, "campfire-server.bundle.mjs"),
     join(stageRoot, "campfire-template.db"),
+    join(stageRoot, "desktop-launcher.json"),
     join(stageRoot, ".next", "BUILD_ID"),
     join(stageRoot, ".next", "required-server-files.json"),
     join(stageRoot, "node_modules", "next", "package.json"),

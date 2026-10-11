@@ -13,6 +13,7 @@
     "main.cjs",
     "database.cjs",
     "legacy-state.cjs",
+    "launcher-core.cjs",
     "package.json",
     "!node_modules{,/**/*}"
   ],
