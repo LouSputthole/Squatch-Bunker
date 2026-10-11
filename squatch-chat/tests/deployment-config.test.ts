@@ -256,6 +256,8 @@ describe("hosted deployment safety", () => {
       "DO_NOT_TRACK",
       "CAMPFIRE_CLOUD_URL",
       "CAMPFIRE_TELEMETRY_URL",
+      // This instance's broadcast banner: .env.example documents it for self-hosters.
+      "CAMPFIRE_NOTICE",
     ]) {
       expect(compose).toContain(variable + ': "${' + variable);
     }

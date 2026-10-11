@@ -717,15 +717,29 @@ async function promptRestartToUpdate() {
       cancelId: 1,
       noLink: true,
     });
-    if (response === 0) restartToUpdate();
+    if (response === 0) void restartToUpdate();
   } finally {
     updatePromptOpen = false;
   }
 }
 
-/** Silent install, then relaunch; before-quit still stops the local server first. */
-function restartToUpdate() {
-  autoUpdater?.quitAndInstall(true, true);
+/** Silent install, then relaunch. The local server drains first: quitAndInstall() starts the
+ * installer before it calls app.quit(), and the installer force-kills every Campfire.exe within
+ * about 2 s, the bundled server included (it runs on process.execPath), so before-quit's own
+ * stopServer() would be cut off mid-drain. */
+async function restartToUpdate() {
+  if (!autoUpdater || quitting) return;
+  // From here the server's exit is expected, and before-quit skips its own stopServer().
+  quitting = true;
+  try {
+    await stopServer();
+  } catch (error) {
+    logDesktop(`[desktop] stopping the server before updating failed: ${error.message}`);
+  }
+  autoUpdater.quitAndInstall(true, true);
+  // quitAndInstall quits by itself once the installer starts. If it refused, quit anyway (the
+  // server is already gone); the install-on-quit handler then retries.
+  setImmediate(() => app.quit());
 }
 
 function checkForUpdatesInBackground() {
@@ -905,7 +919,7 @@ function refreshTrayMenu() {
   const hosting = currentMode() === "host";
   const items = [{ label: "Open Campfire", click: showMainWindow }];
   if (readyUpdateVersion) {
-    items.push({ label: `Restart to update to v${readyUpdateVersion}`, click: restartToUpdate });
+    items.push({ label: `Restart to update to v${readyUpdateVersion}`, click: () => void restartToUpdate() });
   }
   items.push({ type: "separator" });
   if (cloudOrigin) {

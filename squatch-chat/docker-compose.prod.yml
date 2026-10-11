@@ -77,6 +77,8 @@ services:
       DO_NOT_TRACK: "${DO_NOT_TRACK:-}"
       CAMPFIRE_CLOUD_URL: "${CAMPFIRE_CLOUD_URL:-}"
       CAMPFIRE_TELEMETRY_URL: "${CAMPFIRE_TELEMETRY_URL:-}"
+      # This instance's broadcast banner (.env.example); single-quote the JSON in .env.
+      CAMPFIRE_NOTICE: "${CAMPFIRE_NOTICE:-}"
       PORT: 3000
     volumes:
       - campfire-uploads:/app/media/uploads
