@@ -94,12 +94,15 @@ describe("serverInstallId", () => {
 });
 
 describe("buildServerPing", () => {
-  it("counts registered accounts and recent message authors, nothing else", async () => {
+  it("counts registered accounts and their recent posters, never guests", async () => {
     const before = await buildServerPing(PROD);
     const suffix = randomUUID().slice(0, 8);
-    const [member, guest] = await Promise.all([
+    const [member, lapsed, guest] = await Promise.all([
       prisma.user.create({
         data: { email: `ping-member-${suffix}@t.local`, username: `ping_member_${suffix}`, passwordHash: "x" },
+      }),
+      prisma.user.create({
+        data: { email: `ping-lapsed-${suffix}@t.local`, username: `ping_lapsed_${suffix}`, passwordHash: "x" },
       }),
       prisma.user.create({
         data: { email: `ping-guest-${suffix}@t.local`, username: `ping_guest_${suffix}`, passwordHash: "x", isGuest: true },
@@ -109,8 +112,9 @@ describe("buildServerPing", () => {
     const channel = await prisma.channel.create({ data: { serverId: server.id, name: `ping-${suffix}`, type: "text" } });
     await prisma.message.createMany({
       data: [
-        { channelId: channel.id, authorId: guest.id, content: "recent" },
-        { channelId: channel.id, authorId: member.id, content: "old", createdAt: new Date(Date.now() - 30 * DAY_MS) },
+        { channelId: channel.id, authorId: member.id, content: "recent" },
+        { channelId: channel.id, authorId: guest.id, content: "recent guest" },
+        { channelId: channel.id, authorId: lapsed.id, content: "old", createdAt: new Date(Date.now() - 30 * DAY_MS) },
       ],
     });
 
@@ -124,7 +128,7 @@ describe("buildServerPing", () => {
       installId: serverInstallId(PROD),
       platform: `${process.platform}-${process.arch}`,
     });
-    expect(ping.users).toBe((before.users ?? 0) + 1);
+    expect(ping.users).toBe((before.users ?? 0) + 2);
     expect(ping.activeUsers).toBe((before.activeUsers ?? 0) + 1);
   });
 });

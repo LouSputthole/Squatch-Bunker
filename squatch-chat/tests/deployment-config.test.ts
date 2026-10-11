@@ -115,6 +115,11 @@ describe("hosted deployment safety", () => {
       "GITHUB_CLIENT_SECRET",
       "GOOGLE_CLIENT_ID",
       "GOOGLE_CLIENT_SECRET",
+      // The usage-ping opt-outs and target (docs/TELEMETRY.md).
+      "CAMPFIRE_TELEMETRY",
+      "DO_NOT_TRACK",
+      "CAMPFIRE_CLOUD_URL",
+      "CAMPFIRE_TELEMETRY_URL",
     ]) {
       expect(compose).toContain(variable + ': "${' + variable);
     }

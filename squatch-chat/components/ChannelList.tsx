@@ -497,7 +497,12 @@ export default function ChannelList({
       const data = await res.json();
       const stamp = new Date().toISOString().slice(0, 10);
       downloadText(`${channel.name}-${stamp}.json`, "application/json", JSON.stringify(data, null, 2));
-      toast(`Exported #${channel.name}`, "success");
+      toast(
+        data.truncated
+          ? `Exported the newest ${data.messages.length.toLocaleString()} messages of #${channel.name}`
+          : `Exported #${channel.name}`,
+        "success",
+      );
     } catch {
       toast("Failed to export channel", "error");
     }

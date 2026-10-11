@@ -30,12 +30,33 @@ function parseCloudOrigin(raw) {
 }
 
 /**
+ * Whether a desktop database holds a camp or a registered account. Every
+ * earlier build created one from the empty template on first launch, so the
+ * file alone proves nothing. Any open or query error counts as data.
+ */
+function holdsLocalCommunities(Database, databasePath) {
+  let database;
+  try {
+    database = new Database(databasePath, { readonly: true, fileMustExist: true });
+    return Boolean(
+      database.prepare('SELECT 1 FROM "Server" LIMIT 1').get() ||
+        database.prepare('SELECT 1 FROM "User" WHERE "isGuest" = 0 LIMIT 1').get(),
+    );
+  } catch {
+    return true;
+  } finally {
+    database?.close();
+  }
+}
+
+/**
  * First-run mode: the online client, unless this PC already holds local
  * communities (a beta database or v0.0.3 state still waiting to be imported).
- * @param {{ cloudOrigin: string | null, userDataPath: string, portableDirectory?: string | null }} options
+ * Without `Database` (better-sqlite3) any database file counts.
+ * @param {{ cloudOrigin: string | null, userDataPath: string, portableDirectory?: string | null, Database?: any }} options
  * @returns {"cloud" | "host"}
  */
-function defaultMode({ cloudOrigin, userDataPath, portableDirectory = null }) {
+function defaultMode({ cloudOrigin, userDataPath, portableDirectory = null, Database = null }) {
   if (!cloudOrigin) return "host";
   // Same places importLegacyDesktopState looks (desktop/legacy-state.cjs).
   const legacyRoot = portableDirectory ? path.join(portableDirectory, "data") : userDataPath;
@@ -43,7 +64,12 @@ function defaultMode({ cloudOrigin, userDataPath, portableDirectory = null }) {
     path.join(userDataPath, "data", "campfire.db"),
     path.join(legacyRoot, "campfire.db"),
   ];
-  return localDatabases.some((databasePath) => fs.existsSync(databasePath)) ? "host" : "cloud";
+  return localDatabases.some(
+    (databasePath) =>
+      fs.existsSync(databasePath) && (!Database || holdsLocalCommunities(Database, databasePath)),
+  )
+    ? "host"
+    : "cloud";
 }
 
 /**

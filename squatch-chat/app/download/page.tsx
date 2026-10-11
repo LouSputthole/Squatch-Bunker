@@ -65,6 +65,13 @@ export default async function DownloadPage() {
             Download for Windows
           </a>
           <p className="mt-2 text-xs text-[var(--muted)]">{details}</p>
+          <p className="mt-1 text-xs text-[var(--muted)]">
+            The app sends a small{" "}
+            <a href={`${REPO_URL}/blob/main/squatch-chat/docs/TELEMETRY.md`} className={linkClass}>
+              anonymous usage ping
+            </a>{" "}
+            once a day (version and mode, nothing personal). Turn it off from its tray icon.
+          </p>
           {windows.portable && (
             <p className="mt-1 text-xs text-[var(--muted)]">
               No installer?{" "}

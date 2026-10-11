@@ -9,10 +9,10 @@ Campfire is an open-source, self-hostable voice and chat community app: Discord-
 All free, three ways in:
 
 - **In your browser:** Campfire Online, the shared hosted Campfire (public address announced at launch). Sign up or join as a guest; nothing to install.
-- **Windows app:** grab the setup or portable `.exe` from [GitHub Releases](https://github.com/LouSputthole/Squatch-Bunker/releases) or any Campfire's `/download` page. It joins Campfire Online by default; switch to **Host on this PC** from the tray menu to run a camp for your own network. Builds are not code-signed yet, so SmartScreen may ask you to click **More info**, then **Run anyway**.
+- **Windows app:** grab the setup or portable `.exe` from [GitHub Releases](https://github.com/LouSputthole/Squatch-Bunker/releases) or Campfire Online's `/download` page. From the first release after Campfire Online launches, it joins Campfire Online by default; switch to **Host on this PC** from the tray menu to run a camp for your own network. Earlier builds (such as v0.0.3) only host on your PC. Builds are not code-signed yet, so SmartScreen may ask you to click **More info**, then **Run anyway**.
 - **Host your own:** the [quick start](#quick-start-local-or-trusted-lan-self-host) below (`npm run host`) or [Docker](#docker).
 
-Production servers and the Windows app send a small anonymous usage ping (version and install counts, nothing personal); [TELEMETRY.md](./docs/TELEMETRY.md) shows exactly what is sent and how to turn it off. The owner's launch runbook is [LAUNCH.md](./docs/LAUNCH.md).
+From that same release, production servers and the Windows app send a small anonymous usage ping (version and install counts, nothing personal); [TELEMETRY.md](./docs/TELEMETRY.md) shows exactly what is sent and how to turn it off. The owner's launch runbook is [LAUNCH.md](./docs/LAUNCH.md).
 
 ## What Campfire includes
 

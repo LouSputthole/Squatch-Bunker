@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { clientIp } from "@/lib/clientIp";
+import { clientIp, clientNetwork } from "@/lib/clientIp";
 import { checkWeightedLimit } from "@/lib/rateLimit";
 import { isTelemetryCollector, recordTelemetryPing } from "@/lib/telemetryCollector";
 import { parseTelemetryPing, TELEMETRY_MAX_BODY_BYTES } from "@/lib/telemetryProtocol";
@@ -8,6 +8,10 @@ export const dynamic = "force-dynamic";
 
 const NO_STORE_HEADERS = { "cache-control": "no-store" };
 const PINGS_PER_HOUR = 20;
+// ponytail: one process-wide budget (one machine). It bounds table growth when
+// fake installIds arrive from many networks; a real install turned away is
+// recorded by its next daily ping. Raise it if a launch day needs more.
+const NEW_INSTALLS_PER_HOUR = 1000;
 const HOUR_MS = 60 * 60 * 1000;
 
 function fail(status: number, error: string) {
@@ -43,8 +47,18 @@ async function boundedText(request: Request): Promise<string | null> {
  */
 export async function POST(request: Request) {
   if (!isTelemetryCollector()) return fail(404, "Not found");
+  // Real senders always say JSON. Browsers must preflight a cross-origin JSON
+  // POST (and get no CORS grant), so other sites can't make visitors ping.
+  if (!request.headers.get("content-type")?.toLowerCase().startsWith("application/json")) {
+    return fail(415, "Ping must be JSON");
+  }
 
-  const limit = checkWeightedLimit(`telemetry:${clientIp(request)}`, 1, PINGS_PER_HOUR, HOUR_MS);
+  const limit = checkWeightedLimit(
+    `telemetry:${clientNetwork(clientIp(request))}`,
+    1,
+    PINGS_PER_HOUR,
+    HOUR_MS,
+  );
   if (!limit.allowed) {
     return NextResponse.json(
       { error: "Too many pings" },
@@ -70,7 +84,10 @@ export async function POST(request: Request) {
     const ping = parseTelemetryPing(raw);
     if (!ping) return fail(400, "Invalid ping");
 
-    await recordTelemetryPing(ping);
+    const recorded = await recordTelemetryPing(ping, new Date(), () =>
+      checkWeightedLimit("telemetry:new-installs", 1, NEW_INSTALLS_PER_HOUR, HOUR_MS).allowed,
+    );
+    if (!recorded) return fail(503, "Collector busy");
     return new NextResponse(null, { status: 204, headers: NO_STORE_HEADERS });
   } catch {
     return fail(500, "Ping not recorded");

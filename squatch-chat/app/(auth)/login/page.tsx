@@ -10,6 +10,7 @@ import { safeRedirectTarget } from "@/lib/safeRedirect";
 interface AuthOptions {
   oauthProviders: string[];
   passwordResetEnabled: boolean;
+  edition: string | null;
 }
 
 function afterLogin(): string {
@@ -19,8 +20,8 @@ function afterLogin(): string {
 // The user agent never changes, so there is nothing to subscribe to.
 const noSubscription = () => () => {};
 
-/** Hidden on the server and in the Electron app; browsers reveal it after hydration. */
-function useShowDesktopLink(): boolean {
+/** False on the server and in the Electron app; true in browsers after hydration. */
+function useInBrowser(): boolean {
   return useSyncExternalStore(
     noSubscription,
     () => !navigator.userAgent.includes("Electron"),
@@ -38,7 +39,7 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [showGuest, setShowGuest] = useState(false);
   const [authOptions, setAuthOptions] = useState<AuthOptions | null>(null);
-  const showDesktopLink = useShowDesktopLink();
+  const inBrowser = useInBrowser();
 
   useEffect(() => {
     let cancelled = false;
@@ -49,6 +50,7 @@ export default function LoginPage() {
         setAuthOptions({
           oauthProviders: Array.isArray(data.oauthProviders) ? data.oauthProviders : [],
           passwordResetEnabled: data.passwordResetEnabled === true,
+          edition: typeof data.edition === "string" ? data.edition : null,
         });
       })
       .catch(() => {});
@@ -56,7 +58,12 @@ export default function LoginPage() {
       cancelled = true;
     };
   }, []);
-  const oauth = authOptions?.oauthProviders ?? [];
+  // The desktop window can't finish OAuth: the provider page would load inside
+  // it, and a system-browser sign-in sets its cookie in the browser, not the app.
+  const oauth = inBrowser ? authOptions?.oauthProviders ?? [] : [];
+  // The app joins Campfire Online or hosts its own camp; it can't join a
+  // self-hosted or LAN Campfire, so only Campfire Online advertises it.
+  const showDesktopLink = inBrowser && authOptions?.edition === "cloud";
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();

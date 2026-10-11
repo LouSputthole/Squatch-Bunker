@@ -248,6 +248,13 @@ export default async function AdminPage() {
           <p className="text-xs text-[var(--muted)] mb-4">
             Installs that sent an anonymous ping in each window. Opted-out installs never appear.
           </p>
+          {!process.env.CAMPFIRE_TRUST_PROXY_HOPS?.trim() && (
+            <p role="alert" className="text-sm text-[var(--danger)] mb-4">
+              CAMPFIRE_TRUST_PROXY_HOPS is not set. Behind a reverse proxy (Fly, nginx, Caddy) every ping
+              seems to come from the proxy, so they share one 20-an-hour budget and most are dropped: these
+              numbers are far too low. See docs/LAUNCH.md.
+            </p>
+          )}
           <div className="bg-[var(--panel)] rounded-lg p-4 mb-4 overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="text-left text-[var(--muted)]">

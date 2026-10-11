@@ -4,8 +4,11 @@ import { prisma } from "@/lib/db";
 import {
   githubReleaseDownloads,
   isTelemetryCollector,
+  pruneStaleInstalls,
+  recordTelemetryPing,
   telemetrySummary,
 } from "@/lib/telemetryCollector";
+import { parseTelemetryPing } from "@/lib/telemetryProtocol";
 
 // POST /api/telemetry/ping against the test DB, plus the /admin aggregates.
 // Each test pings from its own documentation-range IP so the in-memory
@@ -157,6 +160,51 @@ describe("POST /api/telemetry/ping", () => {
     // A different address still gets through.
     expect((await ping(desktopPing("unlimited-install-abcd"), "198.51.100.7")).status).toBe(204);
   });
+
+  it("rate-limits a whole IPv6 /64 as one sender", async () => {
+    for (let i = 0; i < 20; i++) {
+      expect((await ping({}, `2001:db8:6:6::${(i + 1).toString(16)}`)).status).toBe(400);
+    }
+    expect((await ping(desktopPing("ipv6-rotated-install-1"), "2001:db8:6:6:ffff::99")).status).toBe(429);
+    expect((await ping(desktopPing("ipv6-other-net-install"), "2001:db8:6:7::1")).status).toBe(204);
+  });
+
+  it("refuses non-JSON bodies, so other sites can't make browsers ping", async () => {
+    const res = await ping(desktopPing("text-plain-install-01"), "198.51.100.8", { "content-type": "text/plain" });
+    expect(res.status).toBe(415);
+    expect(await prisma.telemetryInstall.count({ where: { installId: "text-plain-install-01" } })).toBe(0);
+  });
+});
+
+describe("recordTelemetryPing", () => {
+  it("refreshes known installs but creates new ones only within the budget", async () => {
+    const parsed = (installId: string) => parseTelemetryPing(desktopPing(installId))!;
+    expect(await recordTelemetryPing(parsed("budget-known-install1"))).toBe(true);
+
+    const noBudget = () => false;
+    expect(await recordTelemetryPing({ ...parsed("budget-known-install1"), version: "2.0.0" }, new Date(), noBudget)).toBe(true);
+    expect(await recordTelemetryPing(parsed("budget-new-install-01"), new Date(), noBudget)).toBe(false);
+
+    expect((await prisma.telemetryInstall.findUniqueOrThrow({ where: { installId: "budget-known-install1" } })).version).toBe("2.0.0");
+    expect(await prisma.telemetryInstall.count({ where: { installId: "budget-new-install-01" } })).toBe(0);
+  });
+});
+
+describe("pruneStaleInstalls", () => {
+  it("deletes installs silent for 90 days and keeps the rest", async () => {
+    const now = new Date();
+    const daysAgo = (days: number) => new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+    await prisma.telemetryInstall.createMany({
+      data: [
+        { installId: "prune-stale-install-01", kind: "desktop", mode: "cloud", version: "1.0.0", firstSeenAt: daysAgo(200), lastSeenAt: daysAgo(91) },
+        { installId: "prune-fresh-install-01", kind: "desktop", mode: "cloud", version: "1.0.0", firstSeenAt: daysAgo(200), lastSeenAt: daysAgo(89) },
+      ],
+    });
+
+    expect(await pruneStaleInstalls(now)).toBeGreaterThanOrEqual(1);
+    expect(await prisma.telemetryInstall.count({ where: { installId: "prune-stale-install-01" } })).toBe(0);
+    expect(await prisma.telemetryInstall.count({ where: { installId: "prune-fresh-install-01" } })).toBe(1);
+  });
 });
 
 describe("telemetrySummary", () => {
@@ -172,6 +220,8 @@ describe("telemetrySummary", () => {
         { installId: "sum-desktop-host-01", kind: "desktop", mode: "host", version: "0.9.0", firstSeenAt: ago(60 * day), lastSeenAt: ago(10 * day) },
         { installId: "sum-server-recent-1", kind: "server", version: "1.0.0", edition: "community", users: 10, activeUsers: 4, firstSeenAt: ago(5), lastSeenAt: ago(2) },
         { installId: "sum-server-stale-01", kind: "server", version: "0.8.0", edition: "community", users: 5, activeUsers: 1, firstSeenAt: ago(100 * day), lastSeenAt: ago(40 * day) },
+        // A forged ping claiming millions of accounts: an install, but not people.
+        { installId: "sum-server-forged-1", kind: "server", version: "0.9.0", edition: "community", users: 9_000_000, activeUsers: 9_000_000, firstSeenAt: ago(20 * day), lastSeenAt: ago(20 * day) },
       ],
     });
 
@@ -179,7 +229,7 @@ describe("telemetrySummary", () => {
     expect(summary.active).toEqual([
       { days: 1, desktopCloud: 1, desktopHost: 0, server: 1, total: 2 },
       { days: 7, desktopCloud: 2, desktopHost: 0, server: 1, total: 3 },
-      { days: 30, desktopCloud: 2, desktopHost: 1, server: 1, total: 4 },
+      { days: 30, desktopCloud: 2, desktopHost: 1, server: 2, total: 5 },
     ]);
     expect(summary.selfHostedUsers).toBe(10);
     expect(summary.selfHostedActiveUsers).toBe(4);

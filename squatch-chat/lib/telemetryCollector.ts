@@ -5,6 +5,10 @@ import type { TelemetryPing } from "@/lib/telemetryProtocol";
 // app/api/telemetry/ping and the "Campfire in the wild" numbers on /admin.
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const STALE_AFTER_DAYS = 90;
+// ponytail: anyone can send a ping, so one fake server could claim millions of
+// accounts. Account sums skip servers claiming more than this (they still count as installs).
+const PLAUSIBLE_SERVER_USERS = 100_000;
 // ponytail: one page, so the total covers the newest 100 releases only.
 const RELEASES_URL = "https://api.github.com/repos/LouSputthole/Squatch-Bunker/releases?per_page=100";
 
@@ -13,8 +17,15 @@ export function isTelemetryCollector(env: Record<string, string | undefined> = p
   return /^(1|true)$/i.test(env.CAMPFIRE_TELEMETRY_COLLECTOR?.trim() ?? "");
 }
 
-/** One row per install: the first ping creates it, every later ping refreshes it. */
-export async function recordTelemetryPing(ping: TelemetryPing, now = new Date()) {
+/**
+ * One row per install: the first ping creates it, every later ping refreshes it.
+ * A new install is created only if `allowNewInstall()` agrees; returns false when it doesn't.
+ */
+export async function recordTelemetryPing(
+  ping: TelemetryPing,
+  now = new Date(),
+  allowNewInstall: () => boolean = () => true,
+): Promise<boolean> {
   const fields = {
     kind: ping.kind,
     mode: ping.mode,
@@ -25,11 +36,27 @@ export async function recordTelemetryPing(ping: TelemetryPing, now = new Date())
     activeUsers: ping.activeUsers,
     lastSeenAt: now,
   };
+  const refreshed = await prisma.telemetryInstall.updateMany({
+    where: { installId: ping.installId },
+    data: fields,
+  });
+  if (refreshed.count > 0) return true;
+  if (!allowNewInstall()) return false;
+  // Upsert: a concurrent first ping from the same install may have just created it.
   await prisma.telemetryInstall.upsert({
     where: { installId: ping.installId },
     create: { installId: ping.installId, firstSeenAt: now, ...fields },
     update: fields,
   });
+  return true;
+}
+
+/** Installs silent for 90 days are gone; this also clears fake rows nobody refreshes. */
+export async function pruneStaleInstalls(now = new Date()): Promise<number> {
+  const { count } = await prisma.telemetryInstall.deleteMany({
+    where: { lastSeenAt: { lt: new Date(now.getTime() - STALE_AFTER_DAYS * DAY_MS) } },
+  });
+  return count;
 }
 
 export interface ActiveInstalls {
@@ -62,7 +89,12 @@ export async function telemetrySummary(now = new Date()) {
       }),
     ),
     prisma.telemetryInstall.aggregate({
-      where: { kind: "server", lastSeenAt: { gte: since(30) } },
+      where: {
+        kind: "server",
+        lastSeenAt: { gte: since(30) },
+        users: { lte: PLAUSIBLE_SERVER_USERS },
+        activeUsers: { lte: PLAUSIBLE_SERVER_USERS },
+      },
       _sum: { users: true, activeUsers: true },
     }),
     prisma.telemetryInstall.groupBy({

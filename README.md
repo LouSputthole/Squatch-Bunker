@@ -25,14 +25,16 @@ All free, three ways in:
 - **In your browser** — Campfire Online, the shared hosted Campfire (public
   address announced at launch). Nothing to install.
 - **Windows app** — the setup or portable `.exe` from
-  [Releases](https://github.com/LouSputthole/Squatch-Bunker/releases). It
-  joins Campfire Online by default; switch to **Host on this PC** from the
-  tray menu to run a camp for your own network. Builds are unsigned for now, so SmartScreen may
-  ask you to click **More info → Run anyway**.
+  [Releases](https://github.com/LouSputthole/Squatch-Bunker/releases).
+  From the first release after Campfire Online launches, it joins Campfire
+  Online by default; switch to **Host on this PC** from the tray menu to run
+  a camp for your own network. Earlier builds (such as v0.0.3) only host on
+  your PC. Builds are unsigned for now, so SmartScreen may ask you to click
+  **More info → Run anyway**.
 - **Host your own** — see the [quick start](#quick-start-self-host) below.
 
-Production servers and the Windows app send a small anonymous usage ping
-(version and install counts, nothing personal) —
+From that same release, production servers and the Windows app send a small
+anonymous usage ping (version and install counts, nothing personal) —
 [TELEMETRY.md](./squatch-chat/docs/TELEMETRY.md) shows exactly what is sent
 and how to turn it off.
 

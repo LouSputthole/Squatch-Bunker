@@ -13,15 +13,18 @@ this page and that file change together.
 
 | Sender | When | `kind` |
 |---|---|---|
-| Windows app (the desktop launcher) | About 20 seconds after launch, then once a day while it runs | `desktop` |
-| A self-hosted server (`npm run host`, Docker) in production | About a minute after start, then once a day | `server` |
+| Windows app (the desktop launcher) | About 20 seconds after launch, then once a day while it runs. The first launch shows a one-time notice from the tray icon and waits 5 minutes before the first ping, so it can be turned off first. | `desktop` |
+| A self-hosted server running with `NODE_ENV=production` (Docker, or systemd as in DEPLOY.md) | About a minute after start, then once a day | `server` |
 | Campfire Online itself (the collector) | Never. It counts its own users directly. | none |
 
 - The server bundled inside the Windows app does not ping on its own; the
-  launcher's ping (with `mode: "host"`) already counts it.
+  launcher's ping (with `mode: "host"`) already counts it. The people who
+  join a "Host on this PC" camp over the LAN are not counted anywhere.
 - Development runs (a server whose `NODE_ENV` is not `production`, or an
   unpackaged `electron desktop`) stay silent unless `CAMPFIRE_TELEMETRY_URL`
-  is set, which is how you test a collector locally.
+  is set, which is how you test a collector locally. The README quick start
+  (`npm run host` without `NODE_ENV=production`) is such a run, so the
+  self-hosted counts are a floor.
 - A self-hosted server prints one line at startup when the ping is on, naming
   this page and the opt-out.
 - A failed ping logs one short line and is not retried until the next day.
@@ -52,7 +55,7 @@ If none is known, nothing is sent. An origin must be `https://` (or
 | `edition` | `"community"` | Server only: `"community"` or `"cloud"`. `null` for desktop. |
 | `platform` | `"win32-x64"` | Operating system and CPU architecture. |
 | `users` | `42` | Server only: number of registered (non-guest) accounts. `null` for desktop. |
-| `activeUsers` | `9` | Server only: number of accounts that posted at least one message in the last 7 days. `null` for desktop. |
+| `activeUsers` | `9` | Server only: number of registered (non-guest) accounts that posted at least one message in the last 7 days. `null` for desktop. |
 
 A desktop ping looks like this:
 
@@ -79,10 +82,11 @@ ping with any invalid field is rejected without storing anything.
 Only Campfire Online stores pings, as one row per install ID (the
 `TelemetryInstall` table): install ID, kind, mode, version, edition, platform,
 user counts, and first-seen / last-seen times. A newer ping updates that row,
-so there is no ping history. The collector uses the caller's IP address only
-as an in-memory rate-limit key (20 pings an hour) and never writes it to the
-database. Like any web request, the hosting provider's network logs can still
-see the connecting address.
+so there is no ping history, and a row not refreshed for 90 days is deleted.
+The collector uses the caller's IP address only as an in-memory rate-limit
+key (20 pings an hour per IPv4 address or IPv6 /64 network) and never writes
+it to the database. Like any web request, the hosting provider's network logs
+can still see the connecting address.
 
 ## How to opt out
 
@@ -90,6 +94,8 @@ see the connecting address.
   **Send anonymous usage ping**.
 - **Self-hosted server:** set `CAMPFIRE_TELEMETRY=off` (`0`, `false` and `no`
   also work, in any case) in `.env` or the service environment and restart.
+  With `docker-compose.prod.yml`, put it in the `.env` next to the compose
+  file; Compose passes it into the container.
 - **Anywhere:** `DO_NOT_TRACK=1` (or `true`) disables it too. The Windows app
   honours both variables as well.
 

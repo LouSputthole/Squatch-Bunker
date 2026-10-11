@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -13,6 +14,7 @@ import {
 } from "@/desktop/launcher-core.cjs";
 import { TELEMETRY_PING_PATH, parseTelemetryPing } from "@/lib/telemetryProtocol";
 
+const Database = createRequire(import.meta.url)("better-sqlite3");
 const CLOUD = "https://campfire.example";
 const temporaryDirectories: string[] = [];
 
@@ -87,6 +89,38 @@ describe("defaultMode", () => {
     expect(defaultMode({ cloudOrigin: CLOUD, userDataPath, portableDirectory })).toBe("cloud");
     touch(join(portableDirectory, "data", "campfire.db"));
     expect(defaultMode({ cloudOrigin: CLOUD, userDataPath, portableDirectory })).toBe("host");
+  });
+
+  describe("with the database driver, by what the database holds", () => {
+    function database(rows: string[] = []) {
+      const userDataPath = temporaryDirectory();
+      const databasePath = join(userDataPath, "data", "campfire.db");
+      mkdirSync(dirname(databasePath), { recursive: true });
+      const db = new Database(databasePath);
+      db.exec('CREATE TABLE "User" ("id" TEXT PRIMARY KEY, "isGuest" BOOLEAN NOT NULL DEFAULT false)');
+      db.exec('CREATE TABLE "Server" ("id" TEXT PRIMARY KEY)');
+      for (const sql of rows) db.exec(sql);
+      db.close();
+      return userDataPath;
+    }
+    const mode = (userDataPath: string) => defaultMode({ cloudOrigin: CLOUD, userDataPath, Database });
+
+    it("sends earlier builds' untouched template databases to the cloud", () => {
+      expect(mode(database())).toBe("cloud");
+      expect(mode(database(["INSERT INTO \"User\" VALUES ('g', true)"]))).toBe("cloud");
+    });
+
+    it("keeps a registered account or a camp on host", () => {
+      expect(mode(database(["INSERT INTO \"User\" VALUES ('u', false)"]))).toBe("host");
+      expect(mode(database(["INSERT INTO \"Server\" VALUES ('s')"]))).toBe("host");
+    });
+
+    it("stays on host when the database can't be read", () => {
+      const userDataPath = temporaryDirectory();
+      mkdirSync(join(userDataPath, "data"), { recursive: true });
+      writeFileSync(join(userDataPath, "data", "campfire.db"), "not a database");
+      expect(mode(userDataPath)).toBe("host");
+    });
   });
 });
 

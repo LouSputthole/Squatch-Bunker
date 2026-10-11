@@ -39,5 +39,7 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  // The install-ping collector needs nothing here, and skipping the proxy keeps
+  // Next from buffering its unauthenticated bodies (up to 10 MB) before the route's 2 KB cap.
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|api/telemetry).*)"],
 };

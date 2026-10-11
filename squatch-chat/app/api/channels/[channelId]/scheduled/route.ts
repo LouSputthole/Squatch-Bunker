@@ -4,6 +4,9 @@ import { prisma } from "@/lib/db";
 import { resolveChannelAccess } from "@/lib/channelAccess";
 import { assertFeature } from "@/lib/features";
 import { MAX_MESSAGE_LENGTH } from "@/lib/inputLimits";
+import { checkRateLimit } from "@/lib/rateLimit";
+
+const MAX_PENDING_PER_AUTHOR = 25;
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ channelId: string }> }) {
   const session = await getSession();
@@ -25,6 +28,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ chan
 export async function POST(req: NextRequest, { params }: { params: Promise<{ channelId: string }> }) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // Delivery skips the message limiter, so scheduling spends the same budget as posting.
+  if (!checkRateLimit(`msg:${session.userId}`).allowed) {
+    return NextResponse.json({ error: "Too many requests. Please slow down." }, { status: 429 });
+  }
   const { channelId } = await params;
 
   // Scheduling is deferred publication, so it requires the same effective
@@ -60,6 +67,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ cha
   }
   if (sendAtDate <= new Date()) {
     return NextResponse.json({ error: "sendAt must be in the future" }, { status: 400 });
+  }
+  // ponytail: a flat per-author cap (not per channel) so one account can't queue
+  // a flood that delivery would post past slow mode; a race may overshoot by a few.
+  const pending = await prisma.scheduledMessage.count({ where: { authorId: session.userId, sent: false } });
+  if (pending >= MAX_PENDING_PER_AUTHOR) {
+    return NextResponse.json(
+      { error: `You can have at most ${MAX_PENDING_PER_AUTHOR} scheduled messages waiting` },
+      { status: 429 },
+    );
   }
 
   const msg = await prisma.scheduledMessage.create({

@@ -74,7 +74,7 @@ export async function buildServerPing(env: Environment = process.env): Promise<T
   const since = new Date(Date.now() - ACTIVE_WINDOW_MS);
   const [users, activeUsers] = await Promise.all([
     prisma.user.count({ where: { isGuest: false } }),
-    prisma.user.count({ where: { messages: { some: { createdAt: { gte: since } } } } }),
+    prisma.user.count({ where: { isGuest: false, messages: { some: { createdAt: { gte: since } } } } }),
   ]);
   return {
     v: TELEMETRY_PROTOCOL_VERSION,

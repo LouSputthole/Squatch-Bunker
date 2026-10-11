@@ -24,7 +24,7 @@ export interface TelemetryPing {
   platform: string | null;
   /** Server only: registered (non-guest) accounts. */
   users: number | null;
-  /** Server only: distinct message authors in the last 7 days. */
+  /** Server only: registered (non-guest) accounts that posted in the last 7 days. */
   activeUsers: number | null;
 }
 

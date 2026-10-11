@@ -36,6 +36,8 @@ const STARTUP_TIMEOUT_MS = 45_000;
 const LAN_PORT = 3939;
 const UPDATE_REPO = "LouSputthole/Squatch-Bunker";
 const TELEMETRY_FIRST_PING_MS = 20_000;
+// First launch only: time to read the notice and opt out before anything is sent.
+const TELEMETRY_NOTICE_GRACE_MS = 5 * 60 * 1000;
 const TELEMETRY_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 // Campfire Online; null means a host-only build (no mode switch, no ping).
@@ -333,20 +335,22 @@ async function startServer() {
   child.stdout.pipe(log, { end: false });
   child.stderr.pipe(log, { end: false });
   child.once("error", (error) => log.write(`[desktop] ${error.stack || error}\n`));
+  // Until it is ready, a failed start is startServer's caller's to report.
+  let ready = false;
   child.once("exit", (code, signal) => {
     log.write(`[desktop] server exited code=${code} signal=${signal}\n`);
-    if (!quitting && !restarting && child === serverProcess) {
-      void dialog.showErrorBox(
+    if (ready && !quitting && !restarting && child === serverProcess) {
+      void offerCloudInstead(
         "Campfire server stopped",
         `The local server exited unexpectedly. See ${launch.logPath} for details.`,
       );
-      app.quit();
     }
   });
 
   serverPort = port;
   appOrigin = `http://127.0.0.1:${port}`;
   await waitForServer(appOrigin);
+  ready = true;
 }
 
 async function stopServer() {
@@ -386,8 +390,7 @@ async function applyLanSetting(next) {
       await stopServer();
       await startServer();
     } catch (recoveryError) {
-      dialog.showErrorBox("Campfire could not restart", recoveryError.message);
-      app.quit();
+      await offerCloudInstead("Campfire could not restart", recoveryError.message);
       return false;
     }
     void dialog.showMessageBox(mainWindow ?? undefined, {
@@ -472,6 +475,37 @@ async function switchMode(next) {
   }
 }
 
+/** Hosting failed to start or the local server died. Offer Campfire Online (when
+ * this build has it) rather than quitting, so a broken local camp can never
+ * lock the app on every launch. Returns true once the app is on Campfire Online. */
+async function offerCloudInstead(message, detail) {
+  if (!cloudOrigin) {
+    dialog.showErrorBox(message, detail);
+    app.quit();
+    return false;
+  }
+  const { response } = await dialog.showMessageBox({
+    type: "error",
+    title: APP_NAME,
+    message,
+    detail: `${detail}\n\nYou can use Campfire Online for now; your local camp stays on this PC. Switch back with "Host on this PC" in the tray menu.`,
+    buttons: ["Use Campfire Online", "Quit"],
+    defaultId: 0,
+    cancelId: 1,
+    noLink: true,
+  });
+  if (response !== 0) {
+    app.quit();
+    return false;
+  }
+  await useCloud();
+  settings.mode = "cloud";
+  saveSettings();
+  refreshTrayMenu();
+  loadApp();
+  return true;
+}
+
 /** Main-frame load of Campfire Online failed (offline, outage). No parent window: it may still be hidden. */
 async function promptCloudUnreachable(reason) {
   if (cloudPromptOpen) return;
@@ -540,10 +574,27 @@ function sendTelemetryPing() {
 /** Opt-outs are re-checked on every send, so the tray toggle applies without a restart. */
 function scheduleTelemetry() {
   if (!telemetryTarget(process.env, cloudOrigin)) return;
+  let firstPingMs = TELEMETRY_FIRST_PING_MS;
+  // Say so once, with the way out, and give the user time to use it before the first ping.
+  if (
+    tray &&
+    !settings.telemetryNoticeShown &&
+    telemetryEnabled({ setting: settings.telemetry, env: process.env, isPackaged: app.isPackaged })
+  ) {
+    settings.telemetryNoticeShown = true;
+    saveSettings();
+    tray.displayBalloon?.({
+      title: APP_NAME,
+      content:
+        "Campfire sends a small anonymous usage ping once a day (app version and mode, nothing personal). " +
+        "Turn it off from this tray icon's menu.",
+    });
+    firstPingMs = TELEMETRY_NOTICE_GRACE_MS;
+  }
   setTimeout(() => {
     sendTelemetryPing();
     setInterval(sendTelemetryPing, TELEMETRY_INTERVAL_MS).unref();
-  }, TELEMETRY_FIRST_PING_MS).unref();
+  }, firstPingMs).unref();
 }
 
 // ─── Updates ───
@@ -812,6 +863,24 @@ function openExternal(rawUrl) {
   }
 }
 
+// Every window (the main one and any same-origin child it opens) stays on the
+// trusted origin. Anything else opens in the system browser, server redirects
+// included: an OAuth hop to github.com must not strand the chrome-less window.
+app.on("web-contents-created", (_event, contents) => {
+  contents.setWindowOpenHandler(({ url }) => {
+    if (isTrustedUrl(url)) return { action: "allow" };
+    openExternal(url);
+    return { action: "deny" };
+  });
+  const stayOnTrustedOrigin = (event) => {
+    if (!event.isMainFrame || isTrustedUrl(event.url)) return;
+    event.preventDefault();
+    openExternal(event.url);
+  };
+  contents.on("will-navigate", stayOnTrustedOrigin);
+  contents.on("will-redirect", stayOnTrustedOrigin);
+});
+
 function showMainWindow() {
   if (!mainWindow) {
     if (appOrigin) createWindow();
@@ -841,16 +910,6 @@ function createWindow() {
     },
   });
 
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (isTrustedUrl(url)) return { action: "allow" };
-    openExternal(url);
-    return { action: "deny" };
-  });
-  mainWindow.webContents.on("will-navigate", (event, url) => {
-    if (isTrustedUrl(url)) return;
-    event.preventDefault();
-    openExternal(url);
-  });
   mainWindow.webContents.on("did-fail-load", (_event, errorCode, errorDescription, _url, isMainFrame) => {
     // -3 (ERR_ABORTED) is a superseded navigation, not an outage.
     if (!isMainFrame || errorCode === -3 || currentMode() !== "cloud") return;
@@ -890,18 +949,31 @@ app.whenReady().then(async () => {
     cloudOrigin = loadCloudOrigin();
     if (cloudOrigin && settings.mode !== "cloud" && settings.mode !== "host") {
       // First run with a cloud build: existing 0.0.x/beta users keep their local communities.
+      let Database = null;
+      try {
+        Database = require(path.join(getServerRoot(), "node_modules", "better-sqlite3"));
+      } catch {
+        // Unstaged dev run: any local database file then counts as local communities.
+      }
       settings.mode = defaultMode({
         cloudOrigin,
         userDataPath: app.getPath("userData"),
         portableDirectory: process.env.PORTABLE_EXECUTABLE_DIR || null,
+        Database,
       });
       saveSettings();
     }
     if (currentMode() === "cloud") {
       appOrigin = cloudOrigin; // no local server, database or migrations
     } else {
-      launch = await prepareLaunch();
-      await startServer();
+      try {
+        launch = await prepareLaunch();
+        await startServer();
+      } catch (error) {
+        const detail = error instanceof Error ? error.stack || error.message : String(error);
+        logDesktop(`[desktop] hosting on this PC failed to start: ${detail}`);
+        if (!(await offerCloudInstead("Campfire could not start", detail))) return;
+      }
     }
     configurePermissions();
     createWindow();

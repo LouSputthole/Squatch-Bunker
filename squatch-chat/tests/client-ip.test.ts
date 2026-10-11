@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   clientIp,
+  clientNetwork,
   DIRECT_CLIENT_IP_HEADER,
 } from "@/lib/clientIp";
 
@@ -68,5 +69,27 @@ describe("clientIp", () => {
     expect(clientIp(request({
       "x-forwarded-for": "203.0.113.7",
     }))).toBe("unknown");
+  });
+});
+
+describe("clientNetwork", () => {
+  it("keeps IPv4 addresses and non-addresses as they are", () => {
+    expect(clientNetwork("203.0.113.7")).toBe("203.0.113.7");
+    expect(clientNetwork("unknown")).toBe("unknown");
+  });
+
+  it("groups an IPv6 /64 into one key, however the address is written", () => {
+    const network = "2001:db8:1:2::/64";
+    expect(clientNetwork("2001:db8:1:2:3:4:5:6")).toBe(network);
+    expect(clientNetwork("2001:db8:1:2:ffff::1")).toBe(network);
+    expect(clientNetwork("2001:0db8:0001:0002::")).toBe(network);
+    expect(clientNetwork("2001:db8:1:3::1")).not.toBe(network);
+  });
+
+  it("expands :: before taking the prefix, so zero groups can't be rotated through", () => {
+    expect(clientNetwork("2001:db8::1:2:3:4")).toBe("2001:db8:0:0::/64");
+    expect(clientNetwork("2001:db8::5")).toBe("2001:db8:0:0::/64");
+    expect(clientNetwork("::")).toBe("0:0:0:0::/64");
+    expect(clientNetwork("64:ff9b::192.0.2.1")).toBe("64:ff9b:0:0::/64");
   });
 });

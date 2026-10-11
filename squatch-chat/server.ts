@@ -23,6 +23,7 @@ import { assertEditionConfig } from "./lib/edition";
 import { assertBetaAccessConfig } from "./lib/betaAccess";
 import { assertTurnConfiguration } from "./lib/turnCredentials";
 import { startTelemetryReporter } from "./lib/telemetry";
+import { isTelemetryCollector, pruneStaleInstalls } from "./lib/telemetryCollector";
 import {
   resolveUserMediaPath,
   userMediaCacheControl,
@@ -150,6 +151,7 @@ async function main() {
     const [retention, abandoned] = await Promise.all([
       sweepExpiredMessages(),
       sweepAbandonedPrivateUploads(),
+      isTelemetryCollector() ? pruneStaleInstalls() : 0,
     ]);
     // After retention, so guests whose last messages just expired can go.
     const guests = await sweepExpiredGuests();

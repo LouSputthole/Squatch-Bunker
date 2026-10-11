@@ -34,9 +34,15 @@ Campfire Online (see [Turning on paid later](#turning-on-paid-later)).
      on every start, so migrations happen on deploy. (Running from source
      instead? Run `npm run db:migrate` yourself before `npm run host`.)
    - Create a Fly volume and mount it at `/app/media` for uploads, avatars,
-     and private attachments. Upload a picture right after the first deploy:
-     the image runs as the `node` user, and a fresh volume can be owned by
-     root.
+     and private attachments. A fresh volume is owned by root, but the image
+     runs as the `node` user, so every upload fails until you hand it over.
+     Once, right after the first deploy (Fly SSH runs as root):
+
+     ```bash
+     fly ssh console -C "chown -R node:node /app/media"
+     ```
+
+     Then upload a picture to confirm.
    - Set these as Fly secrets / environment
      (names match [`.env.example`](../.env.example)):
 
@@ -64,7 +70,8 @@ Campfire Online (see [Turning on paid later](#turning-on-paid-later)).
      Fly's proxy, every request arrives from Fly unless
      `CAMPFIRE_TRUST_PROXY_HOPS` is set, so all visitors share one bucket:
      logins get rate-limited at busy times, and the install-ping collector
-     (20 pings an hour per address) drops nearly every ping. Fly adds the real client address as
+     (20 pings an hour per address) drops nearly every ping; `/admin` shows a
+     warning while it is unset. Fly adds the real client address as
      the last `X-Forwarded-For` entry, which is what
      `CAMPFIRE_TRUST_PROXY_HOPS=1` reads. Check that against the proxy rules
      in [DEPLOY.md](./DEPLOY.md#1-campfire-itself) before launch; a wrong
@@ -86,8 +93,24 @@ Campfire Online (see [Turning on paid later](#turning-on-paid-later)).
    `npm run desktop:dist`, smoke-test both exes, then create a GitHub release
    with both files attached. Publish it as a normal release, **not** a
    pre-release or draft: `/download` and the in-app update check only see the
-   repo's "latest" release.
-5. **Share `https://<domain>/download`.**
+   repo's "latest" release. Update the status banner at the top of
+   [`squatch-chat/README.md`](../README.md), which still describes an invited
+   self-host beta.
+5. **Publish the rules, and be ready for trouble.** A public service that
+   collects emails and install pings needs, before anyone is invited:
+   - Terms of Service, a Privacy Policy that covers accounts, uploads, and
+     the install ping ([TELEMETRY.md](./TELEMETRY.md) is the source for that
+     part), and an acceptable-use policy, published on pages you control and
+     linked from `/download` and `/register` (the app has no such pages yet);
+   - a named person and address for abuse reports, and a habit of checking
+     `/admin`'s report list;
+   - backups you have restored once: Neon point-in-time recovery on, and Fly
+     volume snapshots on for `/app/media`.
+
+   The Stripe items in
+   [RELEASE_CHECKLIST.md section 9](./RELEASE_CHECKLIST.md#9-managed-hosted-go-live-additions)
+   can wait for the paid switch; these can't.
+6. **Share `https://<domain>/download`.**
 
 ## How many people
 
@@ -100,6 +123,12 @@ On Campfire Online, open `/admin` (instance admins only). It shows:
   self-hosted servers; accounts on those servers; new installs per day; and
   versions in use;
 - **GitHub release downloads** for the published exes.
+
+Read the wild numbers as a floor. Opted-out installs never appear. A
+self-hosted server only pings in production (`NODE_ENV=production`, as with
+Docker or the systemd setup in DEPLOY.md), so a README quick start
+(`npm run host`) is never counted. A **Host on this PC** camp counts as one
+desktop install: the friends who join it over the LAN are counted nowhere.
 
 What the pings contain, and how people opt out, is in
 [TELEMETRY.md](./TELEMETRY.md). Download counts are also one command away:
@@ -122,8 +151,8 @@ gh api repos/LouSputthole/Squatch-Bunker/releases --jq '.[] | {tag: .tag_name, d
   improvements from the web redeploy alone; the exe only needs updating for
   desktop changes.
 - **Self-hosters:** write clear release notes (what changed, any migration or
-  new setting). Servers that have not opted out ping their version, so
-  `/admin` shows how many still run old ones.
+  new setting). Production servers that have not opted out ping their
+  version, so `/admin` shows how many of those still run old ones.
 
 ## Turning on paid later
 
@@ -135,15 +164,26 @@ Campfire Online and restart. That is the switch: premium tiers turn on there,
 and self-hosted Community servers stay fully unlocked. See
 [EDITIONS.md](./EDITIONS.md) and the managed go-live gates in
 [RELEASE_CHECKLIST.md](./RELEASE_CHECKLIST.md#9-managed-hosted-go-live-additions)
-before charging anyone. A paid offer for self-hosters is a later decision.
+before charging anyone.
+
+That switch covers Campfire Online only. A paid **client-hosted** version
+(a Campfire a customer runs, or that we run for one customer) does not exist
+in code yet: billing can only be on in the cloud edition, self-hosted
+Community servers can never charge, and [HOSTED.md](./HOSTED.md) rules out
+one instance per customer today. Offering it needs a decision first: managed
+per-client instances (reversing HOSTED.md), or a paid license or support plan
+for self-hosters.
 
 ## Known gaps
 
 - **Unsigned exe.** Windows SmartScreen shows "Windows protected your PC";
   users click **More info**, then **Run anyway**. Code signing is the fix.
-- **GitHub/Google sign-in inside the Windows app** opens the system browser,
-  so the sign-in lands in the browser, not the app. Email/password and guest
-  sign-in work in the app itself.
+- **No GitHub/Google sign-in inside the Windows app.** The app hides those
+  buttons: the provider page can't run in the app window, and a sign-in
+  finished in the system browser signs in the browser, not the app.
+  Email/password and guest sign-in work in the app. Someone who signed up
+  with GitHub/Google uses **Forgot password?** once to set a password, then
+  signs in to the app with it.
 - **Voice over the internet needs TURN.** Without it, calls between people on
   many home, office, and mobile networks fail to connect.
 - **Voice rooms are peer-to-peer**, comfortable up to about 6 people per room
