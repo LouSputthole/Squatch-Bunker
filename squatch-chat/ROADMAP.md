@@ -11,7 +11,7 @@ Campfire’s direction is **Discord-shaped community infrastructure with a warme
 - **Not done (machine/infra):** the `0.1.0-beta.1` desktop build. Run `npm run desktop:stage && npm run desktop:verify -- --require-stage && npm run desktop:dist`, smoke-test the portable and installer builds (persistence, LAN toggle, no orphaned server process), record SHA-256 checksums, and attach them to a **draft** GitHub release only. Publishing a release arms the auto-updater for installed 0.0.x users, and the beta tag stays unpublished until the evidence gates in [the release notes](./docs/releases/0.1.0-beta.1.md#evidence-gates-before-tagging) are met.
 - **Needs people/infra:** a two-person real-microphone voice playtest (including Fireside Stage), public HTTPS + TURN staging, code signing, and a browser matrix.
 - **Housekeeping:** six merged branches still need deleting, because the repository does not delete head branches on merge: `agent/public-staging-verifier`, `codex/campfire-five-features-20260712`, `feat/hosted-postgres`, `release/0.1.0-beta.1`, `feat/polish-pass-1008`, and `feat/completion-wave-1008`. A scratch Neon project (`flat-leaf-31484496`) also needs deleting.
-- **Next build-out:** the rest of Ranger Desk (assignment, evidence, escalation, appeals), then Trail Boards and Gathering Seasons. See [Next five build-outs](#next-five-build-outs).
+- **Next build-out:** Trail Boards, then Gathering Seasons. The rest of Ranger Desk (assignment, evidence, escalation, appeals) is complete in the worktree as of 2026-10-12 and ships with a schema migration. See [Next five build-outs](#next-five-build-outs).
 
 Status notation:
 
@@ -68,6 +68,15 @@ Status notation:
 - **Community features:** Ranger Desk first slice (moderator report inbox), gathering reminders in the Ember Inbox, expired-guest sweep, username changes (sessions read the current username from the database), DM attachments with unread/read state, custom emoji in chat and reactions (own uploads only), custom-role channel permission overrides, and server templates.
 - **Experience:** Campfire palette is the default and applies on every page; a mobile tab bar, channel drawer, and visible composer; Discord-style message grouping; toasts and focus rings.
 - **Desktop launcher:** tray menu, "Share on this network" LAN toggle (port 3939, plain HTTP with `COOKIE_SECURE=0`), prerelease-aware update checker, and a parent-PID watchdog, all on the current Electron pipeline.
+
+### Ranger Desk (2026-10-12)
+
+- **Cases, not rows:** a report belongs to the community it was filed in (`Report.serverId`, fixed at filing) and a message report snapshots the message as evidence, so a case survives the message or its channel being deleted. Legacy reports are backfilled from the message where it still exists (PostgreSQL migration `20261012000000_ranger_desk`; SQLite sync and the desktop upgrader run the same statements; desktop schema v6).
+- **Assignment:** a reviewer takes a case or hands it to another reviewer who could see it themselves; the queue filters to "Mine".
+- **Resolution acts:** resolving records *and performs* no action, message removal (with its thread), a warning (note required), a kick, or a ban, under the member routes' permission and hierarchy rules, with the same audit rows. The reported member gets a moderation notice in the Ember Inbox for anything but "no action"; the reporter is told the outcome without details.
+- **Escalation:** a desk hands a case to the instance operator with a note; `/admin` lists escalated and community-less reports and the operator can dismiss, resolve, or remove the message. The desk can still close an escalated case.
+- **Appeals:** the reported member appeals once within 14 days from their notices panel; a reviewer other than the resolver (or the owner) accepts or rejects it, and accepting a ban lifts it. Every step is a case event (`ReportEvent`) shown as the case history, and an audit-log row that names no reporter or target.
+- **Boundaries:** evidence is a snapshot, not a legal hold; escalation is a hand-off to the operator, not an external trust-and-safety process; appeals are decided by the same camp's moderators.
 
 These lists describe implementation scope, not a public release. The authoritative boundaries are in [docs/GAP_ANALYSIS.md](./docs/GAP_ANALYSIS.md).
 
@@ -149,7 +158,7 @@ Exit: Campfire can publish measured room-size and availability claims rather tha
 Priority: **After release reliability**
 
 - 2FA, SSO, session/device management, recovery-event notifications, and administrative recovery controls.
-- Report queues, abuse evidence, rate-limit administration, suspension/appeal, and moderator case history.
+- Rate-limit administration and account suspension (report queues, abuse evidence, appeals, and moderator case history shipped with Ranger Desk).
 - Fine-grained notification settings, cross-device push, mobile background behavior, and do-not-disturb schedules.
 - Stage/listener rooms, request-to-speak moderation, forum-style channels, and richer event workflows.
 - Server discovery governance, onboarding questions, membership screening, rule acceptance, and anti-raid controls.
@@ -162,13 +171,13 @@ Exit: Campfire covers the high-value Discord workflows its target communities ac
 
 These are the ranked follow-on features after the current ten-feature wave:
 
-1. **Ranger Desk** — a moderation case inbox with evidence, assignment, action history, escalation, and appeals. **First slice complete (2026-10-08):** moderators with MANAGE_MESSAGES/KICK/BAN see open message reports for channels they can view in their own server and resolve or dismiss them (audited); reports about the viewer and user-level reports never reach server moderators, and the instance admin page lists unscoped reports. Assignment, evidence capture, escalation, and appeals remain.
+1. **Ranger Desk** — **complete in worktree (2026-10-12):** a moderation case desk per community. Moderators with MANAGE_MESSAGES/KICK/BAN see the reports filed in their camp (message reports only for channels they can view; never reports about themselves), with the message evidence snapshotted at filing. They assign cases, resolve them by actually removing the message, warning, kicking, or banning (permission- and hierarchy-checked, audited), dismiss them, or escalate to the instance operator, whose `/admin` desk closes escalated and community-less reports. The reported member is notified and can appeal once within 14 days; another reviewer (or the owner) decides, and accepting a ban lifts it. Every step is in the case history. First slice (queue, resolve/dismiss) landed 2026-10-08.
 2. **Fireside Stage** — **complete in worktree (2026-07-26):** the `fireside-stage` voice-room mode opens with the first arrival hosting; listeners raise hands into a FIFO queue, the host or a MOVE_MEMBERS moderator promotes/demotes, capacity is eight speakers, and host transfer/cleanup runs on leave, kick, move, and disconnect. Stage state shares the Lantern trust boundary: process-local, advisory, client-side audience muting — not media-enforced.
 3. **Trail Boards** — forum-style channels with tags, searchable posts, resolved/archived states, and durable topic ownership.
 4. **Ember Inbox** — **complete in worktree (2026-07-26):** durable per-user notifications (mentions, replies, DMs collapsed per conversation, friend requests) with unread state, mark-read/clear APIs, per-space all/mentions/none policy enforcement, quiet hours (client-evaluated, DB-synced), realtime `notification:new` push, and an inbox UI replacing the ephemeral bell. Digest/email delivery remains future work.
 5. **Gathering Seasons** — recurring Gatherings with external calendar links, host controls, capacity, waitlists, and reminder policy.
 
-Items 2 and 4 describe implementation scope, not a public release — they still pass through the release gates like everything else. The rest of Ranger Desk is next: safety tooling is the remaining prerequisite for larger public communities.
+Items 1, 2, and 4 describe implementation scope, not a public release — they still pass through the release gates like everything else. Trail Boards is next.
 
 ## Milestone 6 — deepen Campfire’s own flare
 

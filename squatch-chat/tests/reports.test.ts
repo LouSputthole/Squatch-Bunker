@@ -109,11 +109,22 @@ describe("POST /api/reports", () => {
       userId: scopedReporter.id,
       username: "rep_visible",
     });
-    expect((await post({
+    const filed = await post({
       targetUserId: target.id,
       messageId: visibleMessage.id,
       reason: "visible message contains reportable abuse",
-    })).status).toBe(201);
+    });
+    expect(filed.status).toBe(201);
+    // The desk gets the community and an evidence snapshot, fixed at filing.
+    const { report } = await filed.json();
+    const row = await prisma.report.findUnique({ where: { id: report.id }, include: { events: true } });
+    expect(row).toMatchObject({
+      serverId: server.id,
+      evidenceContent: "visible abuse evidence",
+      evidenceChannelName: "visible",
+      status: "open",
+    });
+    expect(row?.events.map((event) => event.type)).toEqual(["filed"]);
 
     authMock.getSession.mockResolvedValueOnce({
       userId: scopedReporter.id,
@@ -138,6 +149,30 @@ describe("POST /api/reports", () => {
       targetUserId: target.id,
       reason: "attempting a report without shared context",
     })).status).toBe(404);
+  });
+
+  it("files a user-level report in a named camp only when both people are members there", async () => {
+    const scoped = await prisma.user.create({
+      data: { email: "rep-scoped@t.local", username: "rep_scoped", passwordHash: "x" },
+    });
+    await prisma.serverMember.create({ data: { serverId: server.id, userId: scoped.id, role: "member" } });
+    const elsewhere = await prisma.server.create({ data: { name: "Elsewhere", ownerId: scoped.id } });
+    authMock.getSession.mockResolvedValue({ userId: scoped.id, username: "rep_scoped" });
+
+    // The target is not in "Elsewhere": the report can't be routed to its moderators.
+    expect((await post({
+      targetUserId: target.id,
+      serverId: elsewhere.id,
+      reason: "trying to route a report to the wrong camp",
+    })).status).toBe(404);
+
+    const res = await post({ targetUserId: target.id, serverId: server.id, reason: "harassing people in DMs" });
+    expect(res.status).toBe(201);
+    const { report } = await res.json();
+    expect(await prisma.report.findUnique({ where: { id: report.id }, select: { serverId: true, messageId: true } }))
+      .toEqual({ serverId: server.id, messageId: null });
+
+    authMock.getSession.mockResolvedValue({ userId: reporter.id, username: "rep_a" });
   });
 
   it("rate-limits a reporter to 5 submissions per hour", async () => {

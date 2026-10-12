@@ -438,14 +438,14 @@ describe("desktop database upgrades", () => {
     });
 
     expect(result.upgraded).toBe(true);
-    expect(result.backupPath).toMatch(/\.pre-v5\./);
+    expect(result.backupPath).toContain(`.pre-v${DESKTOP_SCHEMA_VERSION}.`);
     expect(result.backupPath && existsSync(result.backupPath)).toBe(true);
 
     const database = new Database(databasePath, { readonly: true });
-    expect(database.pragma("user_version", { simple: true })).toBe(5);
+    expect(database.pragma("user_version", { simple: true })).toBe(DESKTOP_SCHEMA_VERSION);
     expect(database.prepare('SELECT COUNT(*) AS count FROM "User"').get())
       .toEqual({ count: 2 });
-    for (const table of ["WebhookEvent", "Report"]) {
+    for (const table of ["WebhookEvent", "Report", "ReportEvent", "ReportAppeal"]) {
       expect(
         database
           .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?")
@@ -455,6 +455,11 @@ describe("desktop database upgrades", () => {
     for (const index of [
       "Report_targetUserId_status_idx",
       "Report_reporterId_idx",
+      "Report_serverId_status_createdAt_idx",
+      "Report_assigneeId_idx",
+      "ReportEvent_reportId_createdAt_idx",
+      "ReportAppeal_reportId_key",
+      "ReportAppeal_appellantId_status_idx",
     ]) {
       expect(
         database
@@ -469,6 +474,8 @@ describe("desktop database upgrades", () => {
       expect.arrayContaining([
         expect.objectContaining({ from: "reporterId", table: "User", on_delete: "CASCADE" }),
         expect.objectContaining({ from: "targetUserId", table: "User", on_delete: "CASCADE" }),
+        expect.objectContaining({ from: "serverId", table: "Server", on_delete: "SET NULL" }),
+        expect.objectContaining({ from: "assigneeId", table: "User", on_delete: "SET NULL" }),
       ]),
     );
     database.close();
@@ -479,6 +486,64 @@ describe("desktop database upgrades", () => {
       upgradeDesktopDatabase({ databasePath, Database, log: () => undefined }),
     ).toEqual({ upgraded: false, backupPath: null });
     expect(readdirSync(join(directory, "backups"))).toHaveLength(backupsAfterUpgrade);
+  });
+
+  it("backfills pre-desk reports with their community, evidence, and filed event", () => {
+    const root = mkdtempSync(join(tmpdir(), "campfire-v5-reports-"));
+    temporaryDirectories.push(root);
+    const databasePath = createV003DesktopState(root);
+    // A beta.1 (schema v5) Report table: no community, no evidence, no case events.
+    const v5 = new Database(databasePath);
+    v5.exec(`
+      CREATE TABLE "Report" (
+        "id" TEXT NOT NULL PRIMARY KEY,
+        "reporterId" TEXT NOT NULL,
+        "targetUserId" TEXT NOT NULL,
+        "messageId" TEXT,
+        "reason" TEXT NOT NULL,
+        "status" TEXT NOT NULL DEFAULT 'open',
+        "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT "Report_reporterId_fkey" FOREIGN KEY ("reporterId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+        CONSTRAINT "Report_targetUserId_fkey" FOREIGN KEY ("targetUserId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+      );
+      INSERT INTO "Report" ("id", "reporterId", "targetUserId", "messageId", "reason", "createdAt")
+      VALUES
+        ('legacy-report', 'legacy-member', 'legacy-owner', 'legacy-message', 'rude in general', '2026-09-01 10:00:00'),
+        ('orphan-report', 'legacy-member', 'legacy-owner', 'gone-message', 'message already gone', '2026-09-02 10:00:00');
+    `);
+    v5.close();
+
+    expect(upgradeDesktopDatabase({ databasePath, Database, log: () => undefined }).upgraded).toBe(true);
+
+    const database = new Database(databasePath, { readonly: true });
+    expect(database.pragma("user_version", { simple: true })).toBe(DESKTOP_SCHEMA_VERSION);
+    expect(
+      database
+        .prepare('SELECT "serverId", "evidenceContent", "evidenceChannelId", "evidenceChannelName", "status" FROM "Report" WHERE "id" = ?')
+        .get("legacy-report"),
+    ).toEqual({
+      serverId: "legacy-server",
+      evidenceContent: "still here",
+      evidenceChannelId: "legacy-channel",
+      evidenceChannelName: "general",
+      status: "open",
+    });
+    // No message to read from: stays with the instance operator, as before.
+    expect(
+      database.prepare('SELECT "serverId", "evidenceContent" FROM "Report" WHERE "id" = ?').get("orphan-report"),
+    ).toEqual({ serverId: null, evidenceContent: null });
+    expect(
+      database
+        .prepare('SELECT "id", "actorId", "type", "createdAt" FROM "ReportEvent" ORDER BY "createdAt"')
+        .all(),
+    ).toEqual([
+      { id: "legacy-filed-legacy-report", actorId: "legacy-member", type: "filed", createdAt: "2026-09-01 10:00:00" },
+      { id: "legacy-filed-orphan-report", actorId: "legacy-member", type: "filed", createdAt: "2026-09-02 10:00:00" },
+    ]);
+    database.close();
+
+    expect(upgradeDesktopDatabase({ databasePath, Database, log: () => undefined }))
+      .toEqual({ upgraded: false, backupPath: null });
   });
 
   it("refuses duplicate Stripe identifiers before changing the schema", () => {

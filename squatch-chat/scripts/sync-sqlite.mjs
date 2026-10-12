@@ -126,6 +126,57 @@ function sqliteTableExists(database, table) {
   );
 }
 
+// Ranger Desk: message reports filed before the desk learn their community and
+// evidence from the message where it still exists, and every report gets its
+// "filed" case event. Mirrors the PostgreSQL migration 20261012000000_ranger_desk.
+const REPORT_BACKFILL = [
+  `UPDATE "Report" SET
+    "serverId" = (SELECT "Channel"."serverId" FROM "Message" JOIN "Channel" ON "Channel"."id" = "Message"."channelId" WHERE "Message"."id" = "Report"."messageId"),
+    "evidenceContent" = (SELECT "Message"."content" FROM "Message" WHERE "Message"."id" = "Report"."messageId"),
+    "evidenceAttachmentName" = (SELECT "Message"."attachmentName" FROM "Message" WHERE "Message"."id" = "Report"."messageId"),
+    "evidenceAttachmentUrl" = (SELECT "Message"."attachmentUrl" FROM "Message" WHERE "Message"."id" = "Report"."messageId"),
+    "evidenceChannelId" = (SELECT "Message"."channelId" FROM "Message" WHERE "Message"."id" = "Report"."messageId"),
+    "evidenceChannelName" = (SELECT "Channel"."name" FROM "Message" JOIN "Channel" ON "Channel"."id" = "Message"."channelId" WHERE "Message"."id" = "Report"."messageId"),
+    "evidenceMessageAt" = (SELECT "Message"."createdAt" FROM "Message" WHERE "Message"."id" = "Report"."messageId")
+  WHERE "serverId" IS NULL
+    AND "messageId" IS NOT NULL
+    AND EXISTS (SELECT 1 FROM "Message" WHERE "Message"."id" = "Report"."messageId")`,
+  `INSERT INTO "ReportEvent" ("id", "reportId", "actorId", "type", "createdAt")
+  SELECT 'legacy-filed-' || "Report"."id", "Report"."id", "Report"."reporterId", 'filed', "Report"."createdAt"
+  FROM "Report"
+  WHERE NOT EXISTS (SELECT 1 FROM "ReportEvent" WHERE "ReportEvent"."reportId" = "Report"."id")`,
+];
+
+function reportDeskReady(database) {
+  return (
+    sqliteTableExists(database, "Report") &&
+    sqliteTableExists(database, "ReportEvent") &&
+    tableColumns(database).get("Report")?.has("serverId") === true
+  );
+}
+
+function legacyReportCount(database) {
+  if (!reportDeskReady(database)) return 0;
+  return database
+    .prepare(
+      `SELECT COUNT(*) AS count FROM "Report"
+       WHERE ("serverId" IS NULL AND "messageId" IS NOT NULL
+         AND EXISTS (SELECT 1 FROM "Message" WHERE "Message"."id" = "Report"."messageId"))
+         OR NOT EXISTS (SELECT 1 FROM "ReportEvent" WHERE "ReportEvent"."reportId" = "Report"."id")`,
+    )
+    .get().count;
+}
+
+export function migrateLegacyReports(database) {
+  if (!reportDeskReady(database)) return { backfilledReports: 0 };
+  const migrate = database.transaction(() => {
+    const updated = database.prepare(REPORT_BACKFILL[0]).run();
+    database.prepare(REPORT_BACKFILL[1]).run();
+    return { backfilledReports: updated.changes };
+  });
+  return migrate();
+}
+
 export function migrateLegacySqliteData(database) {
   if (
     !sqliteTableExists(database, "Friendship") ||
@@ -411,7 +462,7 @@ export function syncSqlite() {
         );
       }
       existingColumns = tableColumns(database);
-      pendingLegacyBlocks = legacyBlockCount(database);
+      pendingLegacyBlocks = legacyBlockCount(database) + legacyReportCount(database);
     } finally {
       database.close();
     }
@@ -461,6 +512,12 @@ export function syncSqlite() {
     let upgradedColumns;
     try {
       assertDatabaseIntegrity(database);
+      const reportMigration = migrateLegacyReports(database);
+      if (reportMigration.backfilledReports > 0) {
+        console.log(
+          `[Campfire] Backfilled community and evidence on ${reportMigration.backfilledReports} legacy report(s).`,
+        );
+      }
       const dataMigration = migrateLegacySqliteData(database);
       if (dataMigration.removedLegacyRows > 0) {
         console.log(

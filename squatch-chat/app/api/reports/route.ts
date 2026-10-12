@@ -2,17 +2,21 @@ import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { checkWeightedLimit } from "@/lib/rateLimit";
-
 import { resolveChannelAccess } from "@/lib/channelAccess";
+import { evidenceFromMessage, usersShareServer } from "@/lib/reports";
+
 const MAX_REASON = 1000;
 const MIN_REASON = 10;
 const REPORTS_PER_HOUR = 5;
 
 /**
- * POST /api/reports — flag a user (optionally a specific message). Server
- * moderators review reports in their community's context through the Ranger
- * Desk (GET/PATCH /api/servers/:serverId/reports, scoping in lib/reports.ts);
- * reporters never get a read API.
+ * POST /api/reports — flag a user (optionally a specific message). A message
+ * report is filed in the message's community and snapshots the message as
+ * evidence; a user-level report is filed in `serverId` when both people are
+ * members there, otherwise it has no community and only the instance operator
+ * sees it. Moderators review reports through the Ranger Desk
+ * (/api/servers/:serverId/reports, scoping in lib/reports.ts); reporters never
+ * get a read API.
  */
 export async function POST(req: Request) {
   const session = await getSession();
@@ -25,7 +29,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Too many reports. Try again later." }, { status: 429 });
   }
 
-  let body: { targetUserId?: unknown; messageId?: unknown; reason?: unknown };
+  let body: { targetUserId?: unknown; messageId?: unknown; serverId?: unknown; reason?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -34,6 +38,7 @@ export async function POST(req: Request) {
 
   const targetUserId = typeof body.targetUserId === "string" ? body.targetUserId : "";
   const messageId = typeof body.messageId === "string" ? body.messageId : null;
+  const requestedServerId = typeof body.serverId === "string" && body.serverId ? body.serverId : null;
   const reason = typeof body.reason === "string" ? body.reason.trim() : "";
 
   if (!targetUserId) {
@@ -49,10 +54,19 @@ export async function POST(req: Request) {
     );
   }
 
+  let evidence: ReturnType<typeof evidenceFromMessage> | { serverId: string | null } = { serverId: null };
   if (messageId) {
     const message = await prisma.message.findUnique({
       where: { id: messageId },
-      select: { authorId: true, channelId: true },
+      select: {
+        authorId: true,
+        content: true,
+        attachmentName: true,
+        attachmentUrl: true,
+        channelId: true,
+        createdAt: true,
+        channel: { select: { name: true, serverId: true } },
+      },
     });
     if (!message || message.authorId !== targetUserId) {
       return NextResponse.json({ error: "Message not found for that user" }, { status: 404 });
@@ -61,6 +75,14 @@ export async function POST(req: Request) {
     if (!access?.canView) {
       return NextResponse.json({ error: "Message not found for that user" }, { status: 404 });
     }
+    evidence = evidenceFromMessage(message);
+  } else if (requestedServerId) {
+    // Filed in a named community: both people must be in it, so a report can't
+    // be routed to moderators of a camp the target never joined.
+    if (!(await usersShareServer(requestedServerId, session.userId, targetUserId))) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
+    evidence = { serverId: requestedServerId };
   } else {
     // User-level reports must stay inside a community shared by both people.
     // This also avoids turning the endpoint into a global user-ID oracle.
@@ -89,18 +111,24 @@ export async function POST(req: Request) {
   }
 
   // One open report per reporter+target(+message) — repeat submissions are
-  // noise for the operator, not signal.
+  // noise for the desk, not signal.
   const existing = await prisma.report.findFirst({
-    where: { reporterId: session.userId, targetUserId, messageId, status: "open" },
+    where: { reporterId: session.userId, targetUserId, messageId, status: { in: ["open", "escalated"] } },
     select: { id: true },
   });
   if (existing) {
     return NextResponse.json({ error: "You already have an open report for this" }, { status: 409 });
   }
 
-  const report = await prisma.report.create({
-    data: { reporterId: session.userId, targetUserId, messageId, reason },
-    select: { id: true, createdAt: true },
+  const report = await prisma.$transaction(async (tx) => {
+    const created = await tx.report.create({
+      data: { reporterId: session.userId, targetUserId, messageId, reason, ...evidence },
+      select: { id: true, createdAt: true },
+    });
+    await tx.reportEvent.create({
+      data: { reportId: created.id, actorId: session.userId, type: "filed" },
+    });
+    return created;
   });
 
   return NextResponse.json({ report }, { status: 201 });

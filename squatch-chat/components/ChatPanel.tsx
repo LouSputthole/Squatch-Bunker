@@ -774,8 +774,15 @@ function ChatPanelContent({
     socket.on(`message:reacted:${channelId}`, handleReactionUpdate);
     socket.on(`poll:updated:${channelId}`, handlePollUpdate);
     socket.on("typing:update", handleTyping);
+    // Same-tab deletions from the Ranger Desk never come back over the socket.
+    function handleLocalDeleted(event: Event) {
+      const detail = (event as CustomEvent<{ channelId?: string; messageIds?: string[] }>).detail;
+      if (detail?.channelId === channelId) handleMessageDeleted({ messageIds: detail.messageIds });
+    }
+    window.addEventListener("campfire:messages-deleted", handleLocalDeleted);
 
     return () => {
+      window.removeEventListener("campfire:messages-deleted", handleLocalDeleted);
       socket.off(`message:channel:${channelId}`, handleChannelMessage);
       socket.off(`message:edited:${channelId}`, handleMessageEdited);
       socket.off(`message:deleted:${channelId}`, handleMessageDeleted);

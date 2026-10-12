@@ -13,6 +13,8 @@ import { toast, toastResponseError } from "@/lib/toast";
 interface UserProfileModalProps {
   userId: string;
   currentUserId: string;
+  /** Camp on screen; routes a user-level report to its moderators. */
+  serverId?: string | null;
   onClose: () => void;
   onMessageUser?: (userId: string) => void;
   onAddFriend?: (userId: string) => void;
@@ -49,6 +51,7 @@ export default function UserProfileModal(props: UserProfileModalProps) {
 function UserProfileContent({
   userId,
   currentUserId,
+  serverId,
   onClose,
   onMessageUser,
   onAddFriend,
@@ -574,6 +577,7 @@ function UserProfileContent({
         <ReportDialog
           targetUserId={userId}
           targetName={displayName(user.username)}
+          serverId={serverId ?? undefined}
           onClose={() => setReportOpen(false)}
         />
       )}

@@ -7,6 +7,7 @@ import {
   analyseSqliteDiff,
   checkpointedDatabaseContentFingerprint,
   databaseContentFingerprint,
+  migrateLegacyReports,
   migrateLegacySqliteData,
   prismaEnvironment,
   syncSqlite,
@@ -216,6 +217,55 @@ describe("safe SQLite sync", () => {
       migratedBlocks: 0,
       removedLegacyRows: 0,
     });
+    database.close();
+  });
+
+  it("backfills pre-desk reports from their message once the desk columns exist", () => {
+    const database = new Database(":memory:");
+    expect(migrateLegacyReports(database)).toEqual({ backfilledReports: 0 }); // no Report table yet
+    database.exec(
+      [
+        'CREATE TABLE "Channel" ("id" TEXT NOT NULL PRIMARY KEY, "serverId" TEXT NOT NULL, "name" TEXT NOT NULL);',
+        'CREATE TABLE "Message" (',
+        '  "id" TEXT NOT NULL PRIMARY KEY, "channelId" TEXT NOT NULL, "content" TEXT NOT NULL,',
+        '  "attachmentName" TEXT, "attachmentUrl" TEXT, "createdAt" DATETIME NOT NULL',
+        ');',
+        'CREATE TABLE "Report" (',
+        '  "id" TEXT NOT NULL PRIMARY KEY, "reporterId" TEXT NOT NULL, "targetUserId" TEXT NOT NULL,',
+        '  "messageId" TEXT, "serverId" TEXT, "reason" TEXT NOT NULL, "status" TEXT NOT NULL DEFAULT \'open\',',
+        '  "createdAt" DATETIME NOT NULL, "evidenceContent" TEXT, "evidenceAttachmentName" TEXT,',
+        '  "evidenceAttachmentUrl" TEXT, "evidenceChannelId" TEXT, "evidenceChannelName" TEXT, "evidenceMessageAt" DATETIME',
+        ');',
+        'CREATE TABLE "ReportEvent" (',
+        '  "id" TEXT NOT NULL PRIMARY KEY, "reportId" TEXT NOT NULL, "actorId" TEXT, "type" TEXT NOT NULL,',
+        '  "detail" TEXT, "createdAt" DATETIME NOT NULL',
+        ');',
+        'INSERT INTO "Channel" VALUES (\'chan\', \'camp\', \'general\');',
+        'INSERT INTO "Message" VALUES (\'msg\', \'chan\', \'the evidence\', \'pic.png\', \'/uploads/pic.png\', \'2026-09-01T00:00:00Z\');',
+        'INSERT INTO "Report" ("id", "reporterId", "targetUserId", "messageId", "reason", "createdAt")',
+        "VALUES ('legacy', 'reporter', 'target', 'msg', 'rude', '2026-09-02T00:00:00Z'),",
+        "       ('orphan', 'reporter', 'target', 'gone', 'gone', '2026-09-03T00:00:00Z');",
+      ].join("\n"),
+    );
+
+    expect(migrateLegacyReports(database)).toEqual({ backfilledReports: 1 });
+    expect(
+      database
+        .prepare('SELECT "serverId", "evidenceContent", "evidenceAttachmentName", "evidenceChannelName", "evidenceMessageAt" FROM "Report" WHERE "id" = ?')
+        .get("legacy"),
+    ).toEqual({
+      serverId: "camp",
+      evidenceContent: "the evidence",
+      evidenceAttachmentName: "pic.png",
+      evidenceChannelName: "general",
+      evidenceMessageAt: "2026-09-01T00:00:00Z",
+    });
+    expect(database.prepare('SELECT "serverId" FROM "Report" WHERE "id" = ?').get("orphan")).toEqual({ serverId: null });
+    expect(database.prepare('SELECT "id", "type", "actorId" FROM "ReportEvent" ORDER BY "createdAt"').all()).toEqual([
+      { id: "legacy-filed-legacy", type: "filed", actorId: "reporter" },
+      { id: "legacy-filed-orphan", type: "filed", actorId: "reporter" },
+    ]);
+    expect(migrateLegacyReports(database)).toEqual({ backfilledReports: 0 });
     database.close();
   });
 

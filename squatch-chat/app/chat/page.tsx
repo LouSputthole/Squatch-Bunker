@@ -24,6 +24,7 @@ import OnboardingWizard from "@/components/OnboardingWizard";
 import ServerSettingsModal from "@/components/ServerSettingsModal";
 import CustomEmojiManager from "@/components/CustomEmojiManager";
 import ModerationPanel from "@/components/ModerationPanel";
+import ModerationNoticesPanel from "@/components/ModerationNoticesPanel";
 import { ScheduleMessageModal } from "@/components/ScheduleMessageModal";
 import AutoModSettings from "@/components/AutoModSettings";
 import AuditLogViewer from "@/components/AuditLogViewer";
@@ -170,6 +171,7 @@ function ChatPageInner() {
     return true;
   }, [openDmPanel]);
   const [gatheringsOpen, setGatheringsOpen] = useState(false);
+  const [noticesOpen, setNoticesOpen] = useState(false);
   // Message to scroll to + highlight once ChatPanel has it (search, saved, journal jumps).
   const [focusMessageId, setFocusMessageId] = useState<string | null>(null);
   // Ids removed by a moderator purge — hidden locally right away.
@@ -242,6 +244,11 @@ function ChatPageInner() {
       setViewingVoiceRoom(false);
       srv.selectServer(server, ch.setActiveChannel);
       setGatheringsOpen(true);
+      return;
+    }
+    if (notification.type === "moderation") {
+      // A notice about the member: the notices panel is where they read and appeal it.
+      setNoticesOpen(true);
       return;
     }
     if (notification.type === "friend_request") {
@@ -975,6 +982,7 @@ function ChatPageInner() {
           key={profileUserId}
           userId={profileUserId}
           currentUserId={auth.user.id}
+          serverId={dmOpen || friendsOpen ? null : srv.activeServer?.id}
           onClose={() => setProfileUserId(null)}
           onMessageUser={async (uid) => {
             if (await openDmWith(uid)) setProfileUserId(null);
@@ -1054,6 +1062,8 @@ function ChatPageInner() {
           onJumpToMessage={jumpToMessage}
         />
       )}
+
+      <ModerationNoticesPanel open={noticesOpen} onClose={() => setNoticesOpen(false)} />
 
       {/* Schedule message modal */}
       {scheduleModalOpen && ch.activeChannel && (

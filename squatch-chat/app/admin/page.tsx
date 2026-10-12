@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { getSession } from "@/lib/auth";
 import { isInstanceAdmin } from "@/lib/instanceAdmin";
+import OperatorReportsPanel from "@/components/OperatorReportsPanel";
 
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
 
@@ -80,7 +81,7 @@ export default async function AdminPage() {
   if (!session || !isInstanceAdmin(session.userId)) notFound();
 
   const { prisma } = await import("@/lib/db");
-  const { listUnscopedOpenReports } = await import("@/lib/reports");
+  const { listOperatorReports } = await import("@/lib/reports");
 
   const now = await getDashboardNow();
   const nowMs = now.getTime();
@@ -94,7 +95,7 @@ export default async function AdminPage() {
     topServers,
     topChannels,
     openReports,
-    unscopedReports,
+    operatorReports,
   ] =
     await Promise.all([
       prisma.user.count(),
@@ -114,10 +115,10 @@ export default async function AdminPage() {
         orderBy: { createdAt: "desc" },
         take: 7,
       }),
-      prisma.report.count({ where: { status: "open" } }),
-      // Reports with no provable server context never reach a server's
-      // Ranger Desk, so the operator is their only reader.
-      listUnscopedOpenReports(),
+      prisma.report.count({ where: { status: { in: ["open", "escalated"] } } }),
+      // Escalated reports and ones with no community context only the
+      // operator can close; each camp's Ranger Desk handles the rest.
+      listOperatorReports(),
     ]);
 
   // Group messages by day
@@ -186,35 +187,7 @@ export default async function AdminPage() {
         )}
       </div>
 
-      {/* User-level and orphaned reports: no server desk can see these. */}
-      <section className="mt-8 bg-[var(--panel)] rounded-lg p-4">
-        <h3 className="text-sm font-semibold text-[var(--muted)] mb-1 uppercase tracking-wide">
-          Reports without a server context
-        </h3>
-        <p className="text-xs text-[var(--muted)] mb-3">
-          User-level reports and reports whose message was deleted. Message reports are handled by each
-          server&apos;s moderators in the Moderation Panel.
-        </p>
-        {unscopedReports.length === 0 ? (
-          <p className="text-sm text-[var(--muted)]">Nothing waiting.</p>
-        ) : (
-          <ul className="divide-y divide-[var(--accent-2)]/20">
-            {unscopedReports.map((report) => (
-              <li key={report.id} className="py-2 text-sm">
-                <div className="flex flex-wrap items-baseline gap-2 text-xs">
-                  <strong>{report.reporter.username}</strong>
-                  <span className="text-[var(--muted)]">reported</span>
-                  <strong className="text-[var(--danger)]">{report.targetUser.username}</strong>
-                  {report.messageDeleted && <span className="text-[var(--muted)]">(message deleted)</span>}
-                  <span className="ml-auto text-[var(--muted)]">{report.createdAt.toISOString().slice(0, 16).replace("T", " ")} UTC</span>
-                </div>
-                <p className="mt-1 whitespace-pre-wrap break-words">{report.reason}</p>
-                <p className="mt-0.5 text-[10px] text-[var(--muted)]">id {report.id}</p>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+      <OperatorReportsPanel unscoped={operatorReports.unscoped} escalated={operatorReports.escalated} />
     </div>
   );
 }

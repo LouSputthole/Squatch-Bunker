@@ -3,7 +3,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 
-const DESKTOP_SCHEMA_VERSION = 5;
+const DESKTOP_SCHEMA_VERSION = 6;
 
 const TABLES = [
   [
@@ -122,6 +122,69 @@ const TABLES = [
     CONSTRAINT "GatheringRsvp_gatheringId_fkey" FOREIGN KEY ("gatheringId") REFERENCES "Gathering" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
     CONSTRAINT "GatheringRsvp_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
   )`,
+  `CREATE TABLE IF NOT EXISTS "ReportEvent" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "reportId" TEXT NOT NULL,
+    "actorId" TEXT,
+    "type" TEXT NOT NULL,
+    "detail" TEXT,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "ReportEvent_reportId_fkey" FOREIGN KEY ("reportId") REFERENCES "Report" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+  )`,
+  `CREATE TABLE IF NOT EXISTS "ReportAppeal" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "reportId" TEXT NOT NULL,
+    "appellantId" TEXT NOT NULL,
+    "reason" TEXT NOT NULL,
+    "status" TEXT NOT NULL DEFAULT 'open',
+    "decidedById" TEXT,
+    "decisionNote" TEXT,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "decidedAt" DATETIME,
+    CONSTRAINT "ReportAppeal_reportId_fkey" FOREIGN KEY ("reportId") REFERENCES "Report" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "ReportAppeal_appellantId_fkey" FOREIGN KEY ("appellantId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+  )`,
+];
+
+// Ranger Desk (schema v6): message reports filed before the desk learn their
+// community and evidence from the message where it still exists, and every
+// report gets its "filed" case event. Same statements as the PostgreSQL
+// migration 20261012000000_ranger_desk.
+const REPORT_BACKFILL = [
+  `UPDATE "Report" SET
+    "serverId" = (SELECT "Channel"."serverId" FROM "Message" JOIN "Channel" ON "Channel"."id" = "Message"."channelId" WHERE "Message"."id" = "Report"."messageId"),
+    "evidenceContent" = (SELECT "Message"."content" FROM "Message" WHERE "Message"."id" = "Report"."messageId"),
+    "evidenceAttachmentName" = (SELECT "Message"."attachmentName" FROM "Message" WHERE "Message"."id" = "Report"."messageId"),
+    "evidenceAttachmentUrl" = (SELECT "Message"."attachmentUrl" FROM "Message" WHERE "Message"."id" = "Report"."messageId"),
+    "evidenceChannelId" = (SELECT "Message"."channelId" FROM "Message" WHERE "Message"."id" = "Report"."messageId"),
+    "evidenceChannelName" = (SELECT "Channel"."name" FROM "Message" JOIN "Channel" ON "Channel"."id" = "Message"."channelId" WHERE "Message"."id" = "Report"."messageId"),
+    "evidenceMessageAt" = (SELECT "Message"."createdAt" FROM "Message" WHERE "Message"."id" = "Report"."messageId")
+  WHERE "serverId" IS NULL
+    AND "messageId" IS NOT NULL
+    AND EXISTS (SELECT 1 FROM "Message" WHERE "Message"."id" = "Report"."messageId")`,
+  `INSERT INTO "ReportEvent" ("id", "reportId", "actorId", "type", "createdAt")
+  SELECT 'legacy-filed-' || "Report"."id", "Report"."id", "Report"."reporterId", 'filed', "Report"."createdAt"
+  FROM "Report"
+  WHERE NOT EXISTS (SELECT 1 FROM "ReportEvent" WHERE "ReportEvent"."reportId" = "Report"."id")`,
+];
+
+const REPORT_CASE_COLUMNS = [
+  ["serverId", 'TEXT REFERENCES "Server" ("id") ON DELETE SET NULL ON UPDATE CASCADE'],
+  ["assigneeId", 'TEXT REFERENCES "User" ("id") ON DELETE SET NULL ON UPDATE CASCADE'],
+  ["assignedAt", "DATETIME"],
+  ["escalatedById", "TEXT"],
+  ["escalatedAt", "DATETIME"],
+  ["escalationNote", "TEXT"],
+  ["resolvedById", "TEXT"],
+  ["resolvedAt", "DATETIME"],
+  ["resolution", "TEXT"],
+  ["resolutionNote", "TEXT"],
+  ["evidenceContent", "TEXT"],
+  ["evidenceAttachmentName", "TEXT"],
+  ["evidenceAttachmentUrl", "TEXT"],
+  ["evidenceChannelId", "TEXT"],
+  ["evidenceChannelName", "TEXT"],
+  ["evidenceMessageAt", "DATETIME"],
 ];
 
 const INDEXES = [
@@ -131,6 +194,11 @@ const INDEXES = [
   'CREATE UNIQUE INDEX IF NOT EXISTS "Message_privateUploadId_key" ON "Message"("privateUploadId")',
   'CREATE INDEX IF NOT EXISTS "Report_targetUserId_status_idx" ON "Report"("targetUserId", "status")',
   'CREATE INDEX IF NOT EXISTS "Report_reporterId_idx" ON "Report"("reporterId")',
+  'CREATE INDEX IF NOT EXISTS "Report_serverId_status_createdAt_idx" ON "Report"("serverId", "status", "createdAt")',
+  'CREATE INDEX IF NOT EXISTS "Report_assigneeId_idx" ON "Report"("assigneeId")',
+  'CREATE INDEX IF NOT EXISTS "ReportEvent_reportId_createdAt_idx" ON "ReportEvent"("reportId", "createdAt")',
+  'CREATE UNIQUE INDEX IF NOT EXISTS "ReportAppeal_reportId_key" ON "ReportAppeal"("reportId")',
+  'CREATE INDEX IF NOT EXISTS "ReportAppeal_appellantId_status_idx" ON "ReportAppeal"("appellantId", "status")',
   'CREATE UNIQUE INDEX IF NOT EXISTS "DirectMessage_privateUploadId_key" ON "DirectMessage"("privateUploadId")',
   'CREATE INDEX IF NOT EXISTS "JournalEntry_privateUploadId_idx" ON "JournalEntry"("privateUploadId")',
   'CREATE INDEX IF NOT EXISTS "UserBlock_blockedId_idx" ON "UserBlock"("blockedId")',
@@ -207,6 +275,17 @@ function addColumn(database, table, column, definition) {
   );
 }
 
+// The backfill reads the message columns Campfire has always had; a database
+// too old to have them (none shipped) just keeps its reports unscoped.
+function canBackfillReports(database) {
+  const message = tableColumns(database, "Message");
+  const channel = tableColumns(database, "Channel");
+  return (
+    ["content", "attachmentName", "attachmentUrl", "channelId", "createdAt"].every((c) => message.has(c)) &&
+    ["serverId", "name"].every((c) => channel.has(c))
+  );
+}
+
 function assertNoDuplicates(database, table, column) {
   if (!tableColumns(database, table).has(column)) {
     throw new Error(`Desktop database is missing ${table}.${column}`);
@@ -248,7 +327,16 @@ function assertCurrentSchema(database) {
       "inviteRevokedAt",
     ],
     WebhookEvent: ["id", "status", "updatedAt"],
-    Report: ["id", "reporterId", "targetUserId", "reason", "status"],
+    Report: [
+      "id",
+      "reporterId",
+      "targetUserId",
+      "reason",
+      "status",
+      ...REPORT_CASE_COLUMNS.map(([column]) => column),
+    ],
+    ReportEvent: ["id", "reportId", "actorId", "type", "detail", "createdAt"],
+    ReportAppeal: ["id", "reportId", "appellantId", "reason", "status", "decidedById", "decisionNote", "createdAt", "decidedAt"],
     Channel: ["roomMode", "roomScene", "retentionDays"],
     Message: ["privateUploadId"],
     DirectMessage: ["privateUploadId"],
@@ -284,6 +372,11 @@ function assertCurrentSchema(database) {
   assertForeignKey(database, "PrivateUpload", "ownerId", "User", "RESTRICT");
   assertForeignKey(database, "Report", "reporterId", "User", "CASCADE");
   assertForeignKey(database, "Report", "targetUserId", "User", "CASCADE");
+  assertForeignKey(database, "Report", "serverId", "Server", "SET NULL");
+  assertForeignKey(database, "Report", "assigneeId", "User", "SET NULL");
+  assertForeignKey(database, "ReportEvent", "reportId", "Report", "CASCADE");
+  assertForeignKey(database, "ReportAppeal", "reportId", "Report", "CASCADE");
+  assertForeignKey(database, "ReportAppeal", "appellantId", "User", "CASCADE");
   assertForeignKey(database, "Message", "privateUploadId", "PrivateUpload", "SET NULL");
   assertForeignKey(database, "DirectMessage", "privateUploadId", "PrivateUpload", "SET NULL");
   assertForeignKey(database, "JournalEntry", "privateUploadId", "PrivateUpload", "SET NULL");
@@ -399,6 +492,13 @@ function upgradeDesktopDatabase({
            WHERE "status" = 'blocked' AND "addresseeId" <> "requesterId"`,
         );
         database.exec(`DELETE FROM "Friendship" WHERE "status" = 'blocked'`);
+      }
+
+      for (const [column, definition] of REPORT_CASE_COLUMNS) {
+        addColumn(database, "Report", column, definition);
+      }
+      if (canBackfillReports(database)) {
+        for (const sql of REPORT_BACKFILL) database.exec(sql);
       }
 
       for (const sql of INDEXES) database.exec(sql);

@@ -15,11 +15,22 @@ import { displayName } from "@/lib/utils";
  * desktop toasts remain a client decision (quiet hours, focus mode).
  */
 
-export const NOTIFICATION_TYPES = ["mention", "reply", "dm", "friend_request", "gathering"] as const;
+export const NOTIFICATION_TYPES = [
+  "mention",
+  "reply",
+  "dm",
+  "friend_request",
+  "gathering",
+  // Ranger Desk: a moderation notice to the reported member, an outcome to the reporter.
+  "moderation",
+  "report_update",
+] as const;
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
 
 export const MAX_MENTION_TARGETS = 10;
 const BODY_PREVIEW_LENGTH = 140;
+const MAX_TITLE_LENGTH = 120;
+const MAX_BODY_LENGTH = 500;
 // Guests are stored as "Name#tag" and the composer inserts the full username,
 // so the optional tag must be part of the token.
 const MENTION_PATTERN = /@(\w{1,32}(?:#\w{1,16})?)/g;
@@ -335,6 +346,38 @@ export async function createGatheringReminderNotifications(
     }
   }
   return created;
+}
+
+export interface SimpleNotificationInput {
+  userId: string;
+  type: NotificationType;
+  title: string;
+  body: string;
+  serverId?: string | null;
+  channelId?: string | null;
+  actorId?: string | null;
+}
+
+/**
+ * One notification row for a system event the recipient must see (moderation
+ * notices, report outcomes). Deliberately skips space policy and block checks:
+ * these are not social notifications and a member can't opt out of a notice.
+ */
+export async function createSimpleNotification(
+  input: SimpleNotificationInput,
+  database: NotificationDatabase = prisma,
+): Promise<NotificationRecord> {
+  return database.notification.create({
+    data: {
+      userId: input.userId,
+      type: input.type,
+      title: input.title.slice(0, MAX_TITLE_LENGTH),
+      body: input.body.slice(0, MAX_BODY_LENGTH),
+      serverId: input.serverId ?? null,
+      channelId: input.channelId ?? null,
+      actorId: input.actorId ?? null,
+    },
+  });
 }
 
 export async function createFriendRequestNotification(

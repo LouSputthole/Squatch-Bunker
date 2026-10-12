@@ -32,6 +32,11 @@ const ACTION_LABELS: Record<string, { label: string; icon: string; color: string
   server_update: { label: "Updated Server", icon: "⚙️", color: "text-[var(--accent-2)]" },
   report_resolve: { label: "Resolved Report", icon: "🛡️", color: "text-[var(--accent)]" },
   report_dismiss: { label: "Dismissed Report", icon: "🧹", color: "text-[var(--muted)]" },
+  report_assign: { label: "Assigned Report", icon: "🪪", color: "text-[var(--muted)]" },
+  report_unassign: { label: "Unassigned Report", icon: "🪪", color: "text-[var(--muted)]" },
+  report_escalate: { label: "Escalated Report", icon: "⛰️", color: "text-[var(--accent)]" },
+  appeal_accept: { label: "Accepted Appeal", icon: "🤝", color: "text-[var(--accent)]" },
+  appeal_reject: { label: "Rejected Appeal", icon: "🚷", color: "text-[var(--muted)]" },
 };
 
 function formatAction(action: string) {
