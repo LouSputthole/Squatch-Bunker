@@ -15,26 +15,27 @@ How Campfire gets launched free (in the browser and as a Windows app), how we co
   - Silent auto-update for the installed `.exe`.
 
   A real packaged `.exe` was smoke-tested in cloud mode, host mode and auto-update.
-- **Built, not yet merged into the launch branch:**
-  - Terms of Service and Privacy Policy (with owner placeholders).
+- **Merged on 2026-10-12** into the branch `claude/gifted-carson-ja99l1` (on GitHub, stacked on `main` after PRs #16 and #17), together with Ranger Desk and Trail Boards:
+  - Terms of Service and Privacy Policy (with owner placeholders), rewritten where Ranger Desk changed the report flow.
   - Self-service account deletion.
-- **Unfinished:** operator moderation tools (suspend or ban, remove content, evidence hold). There is a WIP commit; it has not been tested or reviewed.
-- **Not done, owner-gated:** domain, hosting accounts, deploy, publishing a desktop release, merging PRs. Nothing has been pushed to GitHub yet.
+  - Full suite green on the merged branch: 764 tests, lint, TypeScript, `db:check`.
+- **Unfinished:** operator moderation tools (suspend or ban, remove content, evidence hold). `feat/launch-moderation` is pushed but still the untested WIP commit; it is not merged and has no PR.
+- **Not done, owner-gated:** open and merge the PR for `claude/gifted-carson-ja99l1`, domain, hosting accounts, deploy ([docs/LAUNCH.md](./LAUNCH.md) runbook), publishing a desktop release.
 
 ## Branches and worktrees
 
-Every branch is **local only (not pushed)**. They all build on the unmerged PR stack #16 → #17 (`feat/completion-wave-1008`, `6cf329c`).
+All three `feat/launch-*` branches were pushed to GitHub on 2026-10-12. PRs #16 and #17 are merged on `main` (`88117c8`). The launch and legal branches are merged into `claude/gifted-carson-ja99l1`, which is the branch to PR into `main`.
 
 | Branch | Worktree | Tip | State |
 |---|---|---|---|
 | `feat/launch-reach-telemetry` | `code\Squatch-Bunker-polish` | `639742c` | **The launch branch.** Online client mode, telemetry, free-for-now, `/download`, review fixes, and `feat/launch-ops` merged in (deploy kit, notices, auto-update) plus merge follow-ups. Full suite green at the merge (708 tests). |
 | `feat/launch-ops` | `code\Squatch-Bunker-launch2` | `2aa4ab8` | Already merged into the launch branch at `0e2770a`. Its `desktop/dist` holds **smoke-test builds with `http://127.0.0.1:3871` baked in: never publish them.** |
-| `feat/launch-legal` | `code\Squatch-Bunker-legal` | `7c132d4` | **Not merged yet.** `/terms`, `/privacy` (cloud edition only), consent line with 13+ attestation, self-service account deletion, operator report list. Based on `99400e4`. 707 of 709 tests pass; the one failure is the known `sqlite-sync` timeout, which passes when run alone. |
+| `feat/launch-legal` | `code\Squatch-Bunker-legal` | `7c132d4` | **Merged into `claude/gifted-carson-ja99l1` on 2026-10-12.** `/terms`, `/privacy` (cloud edition only), consent line with 13+ attestation, self-service account deletion, operator report list. Based on `99400e4`. 707 of 709 tests pass; the one failure is the known `sqlite-sync` timeout, which passes when run alone. |
 | `feat/launch-moderation` | `code\Squatch-Bunker-mod` | `199f3bb` | **WIP, incomplete.** Operator moderation was cut short at wrap-up. Schema, migration `20261011010000_instance_moderation`, `lib/instanceModeration.ts`, `lib/serverDeletion.ts`, `/api/admin/moderation`. Tests were never run and the review never happened. Based on `feat/launch-legal`. |
 
 Merge order to finish the stack:
-1. Merge `feat/launch-legal` into `feat/launch-reach-telemetry`. Expect conflicts in `docs/LAUNCH.md`, `app/admin/page.tsx`, `server.ts`, `proxy.ts` and the login page, because both sides edited them after `99400e4`.
-2. Finish `feat/launch-moderation` (see "Next work"), then merge it in.
+1. ~~Merge `feat/launch-legal` into the launch branch.~~ Done 2026-10-12 (both are in `claude/gifted-carson-ja99l1`; `/admin` keeps the Ranger Desk operator panel and gained the 30-day message-report list the Terms promise).
+2. Finish `feat/launch-moderation` (see "Next work"), rebase it onto `claude/gifted-carson-ja99l1` (or `main` once that is merged), then merge it in.
 3. Run full checks (`db:check`, `tsc`, `lint`, `npm test`, `build`, `desktop:stage` + `desktop:verify -- --require-stage`), then push and open one PR against `main`, stacked after #17.
 
 The other worktrees can be removed after merging. First check that `node_modules` are real directories, not junctions, before running `git worktree remove`.
@@ -64,7 +65,7 @@ Verification evidence:
 
 ## Next work (in order)
 
-1. **Merge `feat/launch-legal`** (see above).
+1. ~~**Merge `feat/launch-legal`**~~ Done 2026-10-12.
 2. **Finish operator moderation** (`feat/launch-moderation`, WIP `199f3bb`). Goal: from `/admin`, an instance admin can
    - suspend or unsuspend an account (sessions and sockets killed; login, guest and OAuth refused);
    - block re-registration by email or OAuth identity hash;
@@ -105,4 +106,4 @@ Verification evidence:
 
 ## Marketing site
 
-The separate repo `code\campfire-site` (local git only) has its own handoff at `docs/HANDOFF.md`. It's a Three.js scroll film, "Closer to the Fire", that ports into sboxskins.gg as `/campfire`.
+The separate repo https://github.com/LouSputthole/campfire-site (private) has its own handoff at `docs/HANDOFF.md` and Vercel deploy steps in its README. It's a Three.js scroll film, "Closer to the Fire", that ports into sboxskins.gg as `/campfire`.
