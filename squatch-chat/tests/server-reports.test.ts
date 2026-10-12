@@ -10,7 +10,7 @@ vi.mock("@/lib/auth", () => authMock);
 
 import { GET } from "@/app/api/servers/[serverId]/reports/route";
 import { PATCH } from "@/app/api/servers/[serverId]/reports/[reportId]/route";
-import { evidenceFromMessage, listOperatorReports } from "@/lib/reports";
+import { evidenceFromMessage, listOperatorReports, listRecentMessageReports } from "@/lib/reports";
 
 const tag = Math.random().toString(36).slice(2, 8);
 
@@ -223,5 +223,21 @@ describe("PATCH /api/servers/:serverId/reports/:reportId", () => {
 
     const after = await (await list()).json();
     expect(after.reports).toHaveLength(0);
+  });
+
+  it("still shows the operator a message report after a camp moderator handled it", async () => {
+    const operatorView = await listRecentMessageReports();
+    const handled = operatorView.find((r) => r.id === visibleReportId);
+    expect(handled).toMatchObject({
+      status: "resolved",
+      reporter: { username: reporter.username },
+      targetUser: { username: offender.username },
+      message: { snippet: "visible abuse line", channelName: "general", serverName: "Desk", deleted: false },
+    });
+    expect(operatorView.map((r) => r.id)).toEqual(expect.arrayContaining([hiddenReportId, foreignReportId]));
+    expect(operatorView.map((r) => r.id)).not.toContain(userLevelReportId);
+
+    const monthLater = new Date(Date.now() + 31 * 24 * 60 * 60 * 1000);
+    expect((await listRecentMessageReports(monthLater)).map((r) => r.id)).not.toContain(visibleReportId);
   });
 });

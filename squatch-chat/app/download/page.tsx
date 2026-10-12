@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
+import { connection } from "next/server";
+import { legalPagesEnabled } from "@/lib/legal";
 import { formatSize, latestWindowsDownload } from "./release";
 
 const REPO_URL = "https://github.com/LouSputthole/Squatch-Bunker";
@@ -10,13 +12,14 @@ export const metadata: Metadata = {
   description: "Sit around the fire with your people. Use Campfire in your browser, on Windows, or host your own.",
 };
 
-// GitHub is asked about the latest release at most every 10 minutes.
-export const revalidate = 600;
-
 const linkClass =
   "underline underline-offset-2 hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]";
 
 export default async function DownloadPage() {
+  // Rendered per request so the edition (legal links) is read at runtime; the
+  // GitHub release lookup stays cached for 10 minutes by its own fetch options.
+  await connection();
+  const legal = legalPagesEnabled();
   const windows = await latestWindowsDownload();
   const details = [windows.version && `Version ${windows.version}`, windows.size && formatSize(windows.size), "Windows 10/11, 64-bit"]
     .filter(Boolean)
@@ -120,6 +123,18 @@ export default async function DownloadPage() {
           <a href={`${REPO_URL}/blob/main/squatch-chat/docs/TELEMETRY.md`} className={linkClass}>
             Anonymous usage ping
           </a>
+          {legal && (
+            <>
+              {" "}|{" "}
+              <Link href="/terms" className={linkClass}>
+                Terms
+              </Link>{" "}
+              |{" "}
+              <Link href="/privacy" className={linkClass}>
+                Privacy
+              </Link>
+            </>
+          )}
         </p>
       </footer>
     </div>

@@ -1020,3 +1020,65 @@ export async function usersShareServer(serverId: string, userA: string, userB: s
   const isIn = async (userId: string) => server.ownerId === userId || !!(await requireMembership(serverId, userId));
   return (await isIn(userA)) && (await isIn(userB));
 }
+
+export interface OperatorMessageReportView {
+  id: string;
+  status: ReportStatus;
+  reason: string;
+  createdAt: string;
+  reporter: { username: string };
+  targetUser: { username: string };
+  message: {
+    id: string;
+    snippet: string;
+    channelName: string | null;
+    serverName: string | null;
+    deleted: boolean;
+  };
+}
+
+/**
+ * Instance-operator view of the message reports camp moderators handle: every
+ * one filed in the last 30 days, whatever its status, so illegal content
+ * reaches the operator even when a camp's own moderators dismiss the report
+ * (Terms section 8: "we can see it too"). Reads the evidence snapshot, so a
+ * message the camp already removed still shows what was reported.
+ */
+export async function listRecentMessageReports(now = new Date(), limit = 100): Promise<OperatorMessageReportView[]> {
+  const rows = await prisma.report.findMany({
+    where: { messageId: { not: null }, createdAt: { gte: new Date(now.getTime() - RECENT_HANDLED_MS) } },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    take: limit,
+    select: {
+      id: true,
+      reason: true,
+      status: true,
+      messageId: true,
+      createdAt: true,
+      evidenceContent: true,
+      evidenceChannelName: true,
+      reporter: { select: { username: true } },
+      targetUser: { select: { username: true } },
+      server: { select: { name: true } },
+    },
+  });
+  const messageIds = rows.map((row) => row.messageId).filter((id): id is string => !!id);
+  const surviving = messageIds.length > 0
+    ? new Set((await prisma.message.findMany({ where: { id: { in: messageIds } }, select: { id: true } })).map((m) => m.id))
+    : new Set<string>();
+  return rows.map((row) => ({
+    id: row.id,
+    status: row.status as ReportStatus,
+    reason: row.reason,
+    createdAt: row.createdAt.toISOString(),
+    reporter: row.reporter,
+    targetUser: row.targetUser,
+    message: {
+      id: row.messageId!,
+      snippet: snippetOf(row.evidenceContent ?? ""),
+      channelName: row.evidenceChannelName,
+      serverName: row.server?.name ?? null,
+      deleted: !surviving.has(row.messageId!),
+    },
+  }));
+}

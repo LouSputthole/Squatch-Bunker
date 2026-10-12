@@ -103,7 +103,7 @@ export default async function AdminPage() {
   if (!session || !isInstanceAdmin(session.userId)) notFound();
 
   const { prisma } = await import("@/lib/db");
-  const { listOperatorReports } = await import("@/lib/reports");
+  const { listOperatorReports, listRecentMessageReports } = await import("@/lib/reports");
   const { githubReleaseDownloads, isTelemetryCollector, telemetrySummary } = await import(
     "@/lib/telemetryCollector"
   );
@@ -122,6 +122,7 @@ export default async function AdminPage() {
     topChannels,
     openReports,
     operatorReports,
+    messageReports,
   ] =
     await Promise.all([
       prisma.user.count(),
@@ -145,6 +146,9 @@ export default async function AdminPage() {
       // Reports with no provable server context never reach a server's
       // Ranger Desk, so the operator is their only reader.
       listOperatorReports(),
+      // Camp moderators handle these, but the operator must still see
+      // illegal content, including reports a camp dismissed.
+      listRecentMessageReports(now),
     ]);
 
   // People = distinct message authors; guests split out. Install pings and
@@ -379,7 +383,11 @@ export default async function AdminPage() {
         </section>
       )}
 
-      <OperatorReportsPanel unscoped={operatorReports.unscoped} escalated={operatorReports.escalated} />
+      <OperatorReportsPanel
+        unscoped={operatorReports.unscoped}
+        escalated={operatorReports.escalated}
+        recentMessages={messageReports}
+      />
     </div>
   );
 }

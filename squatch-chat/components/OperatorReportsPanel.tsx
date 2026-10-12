@@ -2,12 +2,14 @@
 
 import { useState } from "react";
 import PromptDialog, { type PromptDialogRequest } from "@/components/PromptDialog";
-import type { OperatorReportView } from "@/lib/reports";
+import type { OperatorMessageReportView, OperatorReportView } from "@/lib/reports";
 import { toast, toastResponseError } from "@/lib/toast";
 
 interface OperatorReportsPanelProps {
   unscoped: OperatorReportView[];
   escalated: OperatorReportView[];
+  /** Every message report from the last 30 days, whatever its camp decided (Terms section 8). */
+  recentMessages?: OperatorMessageReportView[];
 }
 
 function formatUtc(iso: string) {
@@ -15,10 +17,11 @@ function formatUtc(iso: string) {
 }
 
 /**
- * Instance-operator desk on /admin: reports no community desk can see and
- * reports a desk escalated. Closing one goes through /api/admin/reports/:id.
+ * Instance-operator desk on /admin: reports no community desk can see,
+ * reports a desk escalated, and a read-only view of every message report
+ * from the last 30 days. Closing one goes through /api/admin/reports/:id.
  */
-export default function OperatorReportsPanel({ unscoped, escalated }: OperatorReportsPanelProps) {
+export default function OperatorReportsPanel({ unscoped, escalated, recentMessages = [] }: OperatorReportsPanelProps) {
   const [handled, setHandled] = useState<Set<string>>(new Set());
   const [pending, setPending] = useState<Set<string>>(new Set());
   const [dialog, setDialog] = useState<PromptDialogRequest | null>(null);
@@ -154,6 +157,48 @@ export default function OperatorReportsPanel({ unscoped, escalated }: OperatorRe
           handled by each camp&apos;s moderators in the Moderation Panel.
         </p>
         {renderList(unscoped, "Nothing waiting.", false)}
+      </section>
+
+      {/* Message reports camp moderators handle, kept visible here for illegal content. */}
+      <section className="mt-8 bg-[var(--panel)] rounded-lg p-4">
+        <h3 className="text-sm font-semibold text-[var(--muted)] mb-1 uppercase tracking-wide">
+          Message reports in camps (last 30 days)
+        </h3>
+        <p className="text-xs text-[var(--muted)] mb-3">
+          Every report on a message, whatever the camp&apos;s rangers decided, with the message as it was when
+          reported. Check these for anything illegal or involving a child&apos;s safety.
+        </p>
+        {recentMessages.length === 0 ? (
+          <p className="text-sm text-[var(--muted)]">None in the last 30 days.</p>
+        ) : (
+          <ul className="divide-y divide-[var(--accent-2)]/20">
+            {recentMessages.map((report) => (
+              <li key={report.id} className="py-2 text-sm">
+                <div className="flex flex-wrap items-baseline gap-2 text-xs">
+                  <strong>{report.reporter.username}</strong>
+                  <span className="text-[var(--muted)]">reported</span>
+                  <strong className="text-[var(--danger)]">{report.targetUser.username}</strong>
+                  <span className="text-[var(--muted)]">
+                    in {report.message.serverName ?? "a deleted camp"}
+                    {report.message.channelName ? ` #${report.message.channelName}` : ""}
+                  </span>
+                  <span className={report.status === "open" || report.status === "escalated" ? "text-[var(--danger)]" : "text-[var(--muted)]"}>
+                    {report.status}
+                  </span>
+                  {report.message.deleted && <span className="text-[var(--muted)]">(message deleted)</span>}
+                  <span className="ml-auto text-[var(--muted)]">{formatUtc(report.createdAt)}</span>
+                </div>
+                <p className="mt-1 whitespace-pre-wrap break-words">{report.reason}</p>
+                <blockquote className="mt-1.5 border-l-2 border-[var(--accent-2)] pl-3 text-xs text-[var(--muted)]">
+                  <span className="text-[var(--text)] break-words">{report.message.snippet || "(no text)"}</span>
+                </blockquote>
+                <p className="mt-0.5 text-[10px] text-[var(--muted)]">
+                  id {report.id} · message {report.message.id}
+                </p>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
 
       {dialog && <PromptDialog key={dialog.title} {...dialog} onCancel={() => setDialog(null)} />}

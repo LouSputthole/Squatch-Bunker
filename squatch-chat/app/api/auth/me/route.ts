@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
-import { createToken, getSession, setTokenCookie } from "@/lib/auth";
-import { MAX_USERNAME_LENGTH, MIN_USERNAME_LENGTH } from "@/lib/accountCredentials";
+import { clearTokenCookie, createToken, getSession, setTokenCookie, verifyPassword } from "@/lib/auth";
+import { hasUsablePassword, MAX_USERNAME_LENGTH, MIN_USERNAME_LENGTH } from "@/lib/accountCredentials";
+import { deleteAccount } from "@/lib/accountDeletion";
 import { prismaErrorCode } from "@/lib/prismaErrors";
 import { checkWeightedLimit } from "@/lib/rateLimit";
 
 const USERNAME_CHANGES_PER_HOUR = 5;
+const DELETE_ATTEMPTS_PER_HOUR = 10;
 
 /**
  * PATCH /api/auth/me — update the caller's statusMessage and/or username.
@@ -103,6 +105,82 @@ export async function PATCH(request: Request) {
   }
 }
 
+/**
+ * DELETE /api/auth/me — delete the caller's account (lib/accountDeletion.ts).
+ * Body: { username, password? }. Typing the exact username confirms intent;
+ * the current password is also required when the account has one (not for
+ * guests or GitHub/Google-only accounts). DELETE rather than POST so a
+ * cross-site form can never send it with the session cookie.
+ */
+export async function DELETE(request: Request) {
+  const session = await getSession();
+  if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+
+  const limit = checkWeightedLimit(`account-delete:${session.userId}`, 1, DELETE_ATTEMPTS_PER_HOUR, 60 * 60 * 1000);
+  if (!limit.allowed) {
+    return NextResponse.json(
+      { error: "Too many attempts. Try again later." },
+      { status: 429, headers: { "Retry-After": String(Math.ceil((limit.resetAt - Date.now()) / 1000)) } },
+    );
+  }
+
+  let body: Record<string, unknown>;
+  try {
+    const parsed: unknown = await request.json();
+    body = parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {};
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  try {
+    const { prisma } = await import("@/lib/db");
+    const user = await prisma.user.findUnique({
+      where: { id: session.userId },
+      select: { username: true, isGuest: true, passwordHash: true },
+    });
+    if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
+    if (typeof body.username !== "string" || body.username.trim() !== user.username) {
+      return NextResponse.json({ error: "Type your username exactly to confirm" }, { status: 400 });
+    }
+    if (
+      hasUsablePassword(user)
+      && (typeof body.password !== "string" || !(await verifyPassword(body.password, user.passwordHash)))
+    ) {
+      return NextResponse.json({ error: "Incorrect password" }, { status: 403 });
+    }
+
+    const result = await deleteAccount(session.userId);
+    if (!result.ok) {
+      if (result.reason === "owns_camps") {
+        const named = result.camps.slice(0, 3).map((name) => `"${name}"`).join(", ");
+        const more = result.camps.length > 3 ? ` and ${result.camps.length - 3} more` : "";
+        return NextResponse.json(
+          {
+            error: `You still own ${named}${more}. Delete ${result.camps.length === 1 ? "that camp" : "those camps"} first (Server Settings, Danger Zone); camps can't be handed to someone else yet.`,
+          },
+          { status: 409 },
+        );
+      }
+      if (result.reason === "subscription") {
+        return NextResponse.json(
+          { error: "Cancel your subscription in Manage billing before deleting your account." },
+          { status: 409 },
+        );
+      }
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
+
+    const response = NextResponse.json({ ok: true });
+    clearTokenCookie(response);
+    return response;
+  } catch (err) {
+    console.error("[Campfire] DELETE me:", err);
+    return NextResponse.json({ error: "Server error" }, { status: 500 });
+  }
+}
+
 export async function GET() {
   try {
     const session = await getSession();
@@ -123,11 +201,14 @@ export async function GET() {
           statusMessage: true,
           isGuest: true,
           guestExpiresAt: true,
+          passwordHash: true,
         },
       });
 
       if (user) {
-        return NextResponse.json({ user });
+        // Never the hash itself: only whether deleting the account asks for a password.
+        const { passwordHash, ...profile } = user;
+        return NextResponse.json({ user: { ...profile, hasPassword: hasUsablePassword({ isGuest: user.isGuest, passwordHash }) } });
       }
     } catch {
       // Database not available — fall through to JWT-based response

@@ -1,3 +1,7 @@
+import { existsSync } from "node:fs";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { prisma } from "@/lib/db";
 import { sweepExpiredGuests } from "@/lib/guestCleanup";
@@ -31,6 +35,10 @@ let talkerServerId: string;
 let joinNoticeId: string;
 let replyId: string;
 let talkerMessageId: string;
+let talkerNoticeId: string;
+let talkerAvatarFile: string;
+let mediaRoot: string;
+let previousMediaRoot: string | undefined;
 
 beforeAll(async () => {
   regular = await prisma.user.create({
@@ -75,9 +83,30 @@ beforeAll(async () => {
     data: { channelId: general.id, authorId: talker.id, content: "hello from a guest" },
   })).id;
   await prisma.friendship.create({ data: { requesterId: talker.id, addresseeId: regular.id, status: "accepted" } });
+
+  // Personal data a retired guest must lose (Terms section 4: only the name stays).
+  mediaRoot = await mkdtemp(join(tmpdir(), "campfire-guest-sweep-"));
+  await mkdir(join(mediaRoot, "avatars"));
+  previousMediaRoot = process.env.CAMPFIRE_UPLOAD_DIR;
+  process.env.CAMPFIRE_UPLOAD_DIR = mediaRoot;
+  talkerAvatarFile = join(mediaRoot, "avatars", `${talker.id}.png`);
+  await writeFile(talkerAvatarFile, "avatar");
+  await prisma.user.update({
+    where: { id: talker.id },
+    data: { avatar: `/avatars/${talker.id}.png`, bio: "guest bio", statusMessage: "around" },
+  });
+  await prisma.reaction.create({ data: { messageId: replyId, userId: talker.id, emoji: "👋" } });
+  await prisma.journalEntry.create({ data: { serverId, authorId: talker.id, sourceMessageId: replyId, content: "welcome!" } });
+  await prisma.userNote.create({ data: { authorId: talker.id, targetUserId: regular.id, content: "nice host" } });
+  talkerNoticeId = (await prisma.notification.create({
+    data: { userId: regular.id, actorId: talker.id, type: "mention", title: `talker#${tag} mentioned you`, body: "hello" },
+  })).id;
 });
 
 afterAll(async () => {
+  if (previousMediaRoot === undefined) delete process.env.CAMPFIRE_UPLOAD_DIR;
+  else process.env.CAMPFIRE_UPLOAD_DIR = previousMediaRoot;
+  await rm(mediaRoot, { recursive: true, force: true });
   await prisma.$disconnect();
 });
 
@@ -109,6 +138,13 @@ describe("sweepExpiredGuests", () => {
     expect(await prisma.friendship.count({
       where: { OR: [{ requesterId: talker.id }, { addresseeId: talker.id }] },
     })).toBe(0);
+    // Only the name stays: profile, reactions, Journal, notes, and notices about them go.
+    expect(retired).toMatchObject({ username: `talker#${tag}`, avatar: null, bio: null, statusMessage: null });
+    expect(existsSync(talkerAvatarFile)).toBe(false);
+    expect(await prisma.reaction.count({ where: { userId: talker.id } })).toBe(0);
+    expect(await prisma.journalEntry.count({ where: { authorId: talker.id } })).toBe(0);
+    expect(await prisma.userNote.count({ where: { authorId: talker.id } })).toBe(0);
+    expect(await prisma.notification.findUnique({ where: { id: talkerNoticeId } })).toBeNull();
 
     // Fresh guest: untouched.
     expect(await prisma.serverMember.findUnique({

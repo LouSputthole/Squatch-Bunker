@@ -6,6 +6,14 @@ export const MAX_EMAIL_LENGTH = 254;
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u;
 
+/** A GitHub/Google sign-up stores this unusable hash prefix until a password reset sets a real one. */
+export const OAUTH_PASSWORD_PREFIX = "oauth_";
+
+/** Whether the account has a password its owner knows (guests and GitHub/Google-only accounts don't). */
+export function hasUsablePassword(user: { isGuest: boolean; passwordHash: string }): boolean {
+  return !user.isGuest && !user.passwordHash.startsWith(OAUTH_PASSWORD_PREFIX);
+}
+
 export interface AccountCredentials {
   email: string;
   username: string;
