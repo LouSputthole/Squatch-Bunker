@@ -20,7 +20,7 @@ How Campfire gets launched free (in the browser and as a Windows app), how we co
   - Self-service account deletion.
   - Full suite green on the merged branch: 764 tests, lint, TypeScript, `db:check`.
 - **Unfinished:** operator moderation tools (suspend or ban, remove content, evidence hold). `feat/launch-moderation` is pushed but still the untested WIP commit; it is not merged and has no PR.
-- **Not done, owner-gated:** open and merge the PR for `claude/gifted-carson-ja99l1`, domain, hosting accounts, deploy ([docs/LAUNCH.md](./LAUNCH.md) runbook), publishing a desktop release.
+- **Not done, owner-gated:** open and merge the PR for `claude/gifted-carson-ja99l1`, domain, hosting accounts, deploy ([docs/LAUNCH.md](./LAUNCH.md) runbook; fly.io is unreachable from the cloud session), and the desktop release. The `.exe` has to be built on the Windows PC: Electron 43 is Node ABI 148 and better-sqlite3 has no Electron-148 prebuild, so staging compiles it with node-gyp, which needs the Electron headers host and a C++ toolchain the cloud session lacks. Commands are in ROADMAP.md's handoff.
 
 ## Branches and worktrees
 
