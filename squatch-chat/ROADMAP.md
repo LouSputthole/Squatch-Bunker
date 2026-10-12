@@ -1,15 +1,16 @@
 # Campfire product and engineering roadmap
 
-Updated: 2026-10-08
+Updated: 2026-10-12
 
 Campfire’s direction is **Discord-shaped community infrastructure with a warmer, more intentional social layer**. The goal is not to copy every Discord surface at once. The sequence is: make the current product trustworthy for small communities, prove operations, scale media, then deepen both parity and Campfire’s own identity.
 
-## Handoff — where things stand (2026-10-08)
+## Handoff — where things stand (2026-10-12)
 
-- **Open PRs:** #16 (polish pass) and #17 (completion wave, built on top of #16) both target `main`, CI is green, and every review thread is resolved. Merging #17 lands both, and GitHub then marks #16 as merged. If you merge #16 first, run `gh pr update-branch 17` and wait for CI before merging #17, because branch protection requires an up-to-date branch. Neither PR changes the schema or adds migrations.
-- **Verified on the branch:** about 680 tests, lint, TypeScript, production build, `release:check`, `db:check`, and the dependency audit gate. Both PRs also had code and security reviews.
+- **Merged:** PRs #16 (polish pass) and #17 (completion wave, stacked on #16) landed on `main` on 2026-10-12 as merge commit `88117c8`. Every review thread was resolved and CI was green on the merged head. Neither PR changes the schema or adds migrations.
+- **Verified before merge:** about 680 tests, lint, TypeScript, production build, `release:check`, `db:check`, and the dependency audit gate. Both PRs also had code and security reviews.
 - **Not done (machine/infra):** the `0.1.0-beta.1` desktop build. Run `npm run desktop:stage && npm run desktop:verify -- --require-stage && npm run desktop:dist`, smoke-test the portable and installer builds (persistence, LAN toggle, no orphaned server process), record SHA-256 checksums, and attach them to a **draft** GitHub release only. Publishing a release arms the auto-updater for installed 0.0.x users, and the beta tag stays unpublished until the evidence gates in [the release notes](./docs/releases/0.1.0-beta.1.md#evidence-gates-before-tagging) are met.
-- **Needs people/infra:** a two-person real-microphone voice playtest (including Fireside Stage), public HTTPS + TURN staging, code signing, and a browser matrix. Four stale merged branches still need deleting: `agent/public-staging-verifier`, `codex/campfire-five-features-20260712`, `feat/hosted-postgres`, and `release/0.1.0-beta.1`. A scratch Neon project (`flat-leaf-31484496`) also needs deleting.
+- **Needs people/infra:** a two-person real-microphone voice playtest (including Fireside Stage), public HTTPS + TURN staging, code signing, and a browser matrix.
+- **Housekeeping:** six merged branches still need deleting, because the repository does not delete head branches on merge: `agent/public-staging-verifier`, `codex/campfire-five-features-20260712`, `feat/hosted-postgres`, `release/0.1.0-beta.1`, `feat/polish-pass-1008`, and `feat/completion-wave-1008`. A scratch Neon project (`flat-leaf-31484496`) also needs deleting.
 - **Next build-out:** the rest of Ranger Desk (assignment, evidence, escalation, appeals), then Trail Boards and Gathering Seasons. See [Next five build-outs](#next-five-build-outs).
 
 Status notation:

@@ -1,6 +1,6 @@
 # Campfire gap analysis
 
-Snapshot: 2026-10-08, after the polish pass and completion wave (PRs #16 and #17). The [roadmap handoff](../ROADMAP.md#handoff--where-things-stand-2026-10-08) lists what landed and what is still open.
+Snapshot: 2026-10-12, after the polish pass and completion wave (PRs #16 and #17) merged to `main`. The [roadmap handoff](../ROADMAP.md#handoff--where-things-stand-2026-10-12) lists what landed and what is still open.
 
 Campfire now has a credible private-alpha feature set and a distinct product identity. It is not yet a Discord replacement for large public communities, and this document is not a production certification. “Implemented” below means the source and focused tests exist in this worktree; every release candidate must still pass the full [release checklist](./RELEASE_CHECKLIST.md) on clean SQLite and PostgreSQL environments.
 
