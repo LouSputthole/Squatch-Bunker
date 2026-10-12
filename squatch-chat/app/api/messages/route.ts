@@ -154,7 +154,7 @@ export async function POST(request: Request) {
 
     const channel = await prisma.channel.findUnique({
       where: { id: channelId },
-      select: { serverId: true, slowModeSeconds: true },
+      select: { serverId: true, slowModeSeconds: true, type: true },
     });
 
     if (!channel) {
@@ -193,6 +193,24 @@ export async function POST(request: Request) {
           { status: 400 },
         );
       }
+    }
+
+    // Trail Boards: root posts are topics (POST /api/boards/:id/topics) and
+    // replies go under a topic's root; an archived topic takes no more replies.
+    let boardRootId: string | null = null;
+    if (channel.type === "board") {
+      if (typeof parentMessageId !== "string" || !parentMessageId) {
+        return NextResponse.json({ error: "Start a topic on this board instead" }, { status: 400 });
+      }
+      const { topicForRoot } = await import("@/lib/boards");
+      const topic = await topicForRoot(parentMessageId);
+      if (!topic) {
+        return NextResponse.json({ error: "Replies go under a topic on this board" }, { status: 400 });
+      }
+      if (topic.status === "archived") {
+        return NextResponse.json({ error: "This topic is archived" }, { status: 403 });
+      }
+      boardRootId = parentMessageId;
     }
 
     // Slow mode check
@@ -240,6 +258,10 @@ export async function POST(request: Request) {
           attachmentName:
             typeof attachmentName === "string" ? attachmentName.slice(0, 255) : null,
         };
+      }
+      if (boardRootId) {
+        const { touchBoardTopic } = await import("@/lib/boards");
+        await touchBoardTopic(boardRootId, tx);
       }
       return tx.message.create({
         data: {

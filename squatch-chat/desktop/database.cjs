@@ -3,7 +3,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 
-const DESKTOP_SCHEMA_VERSION = 7;
+const DESKTOP_SCHEMA_VERSION = 8;
 
 const TABLES = [
   [
@@ -139,6 +139,25 @@ const TABLES = [
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT "Notification_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
   )`,
+  // Trail Boards (schema v8).
+  `CREATE TABLE IF NOT EXISTS "BoardTopic" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "channelId" TEXT NOT NULL,
+    "rootMessageId" TEXT NOT NULL,
+    "ownerId" TEXT,
+    "title" TEXT NOT NULL,
+    "tags" TEXT NOT NULL DEFAULT '[]',
+    "status" TEXT NOT NULL DEFAULT 'open',
+    "pinned" BOOLEAN NOT NULL DEFAULT false,
+    "lastActivityAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "resolvedAt" DATETIME,
+    "archivedAt" DATETIME,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "BoardTopic_channelId_fkey" FOREIGN KEY ("channelId") REFERENCES "Channel" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "BoardTopic_rootMessageId_fkey" FOREIGN KEY ("rootMessageId") REFERENCES "Message" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "BoardTopic_ownerId_fkey" FOREIGN KEY ("ownerId") REFERENCES "User" ("id") ON DELETE SET NULL ON UPDATE CASCADE
+  )`,
   `CREATE TABLE IF NOT EXISTS "ReportEvent" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "reportId" TEXT NOT NULL,
@@ -234,6 +253,9 @@ const INDEXES = [
   'CREATE INDEX IF NOT EXISTS "User_billingCheckoutPendingAt_idx" ON "User"("billingCheckoutPendingAt")',
   'CREATE INDEX IF NOT EXISTS "Notification_userId_readAt_idx" ON "Notification"("userId", "readAt")',
   'CREATE INDEX IF NOT EXISTS "Notification_userId_createdAt_idx" ON "Notification"("userId", "createdAt")',
+  'CREATE UNIQUE INDEX IF NOT EXISTS "BoardTopic_rootMessageId_key" ON "BoardTopic"("rootMessageId")',
+  'CREATE INDEX IF NOT EXISTS "BoardTopic_channelId_status_lastActivityAt_idx" ON "BoardTopic"("channelId", "status", "lastActivityAt")',
+  'CREATE INDEX IF NOT EXISTS "BoardTopic_channelId_pinned_lastActivityAt_idx" ON "BoardTopic"("channelId", "pinned", "lastActivityAt")',
 ];
 
 function quoteIdentifier(identifier) {
@@ -355,6 +377,7 @@ function assertCurrentSchema(database) {
       ...REPORT_CASE_COLUMNS.map(([column]) => column),
     ],
     Notification: ["id", "userId", "type", "title", "body", "serverId", "channelId", "conversationId", "messageId", "actorId", "readAt", "createdAt"],
+    BoardTopic: ["id", "channelId", "rootMessageId", "ownerId", "title", "tags", "status", "pinned", "lastActivityAt", "resolvedAt", "archivedAt", "createdAt", "updatedAt"],
     ReportEvent: ["id", "reportId", "actorId", "type", "detail", "createdAt"],
     ReportAppeal: ["id", "reportId", "appellantId", "reason", "status", "decidedById", "decisionNote", "createdAt", "decidedAt"],
     Channel: ["roomMode", "roomScene", "retentionDays"],
@@ -395,6 +418,9 @@ function assertCurrentSchema(database) {
   assertForeignKey(database, "Report", "serverId", "Server", "SET NULL");
   assertForeignKey(database, "Report", "assigneeId", "User", "SET NULL");
   assertForeignKey(database, "Notification", "userId", "User", "CASCADE");
+  assertForeignKey(database, "BoardTopic", "channelId", "Channel", "CASCADE");
+  assertForeignKey(database, "BoardTopic", "rootMessageId", "Message", "CASCADE");
+  assertForeignKey(database, "BoardTopic", "ownerId", "User", "SET NULL");
   assertForeignKey(database, "ReportEvent", "reportId", "Report", "CASCADE");
   assertForeignKey(database, "ReportAppeal", "reportId", "Report", "CASCADE");
   assertForeignKey(database, "ReportAppeal", "appellantId", "User", "CASCADE");

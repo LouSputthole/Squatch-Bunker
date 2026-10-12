@@ -1045,6 +1045,19 @@ export function attachSocketIO(
       socket.to(`channel:${data.channelId}`).emit(`message:deleted:${data.channelId}`, { messageId: data.messageId });
     }));
 
+    // Trail Boards: after an authorized HTTP topic change, relay the fresh row
+    // to everyone viewing the board. Loaded from the DB, never from the client.
+    socket.on("board:topic:update", safeHandler(async (data: { channelId: string; topicId: string }) => {
+      if (!isObj(data) || !isStr(data.channelId) || !isStr(data.topicId)) return;
+      if (overLimit("board:topic:update")) return;
+      const access = await resolveChannelAccess(data.channelId, currentUserId);
+      if (!access?.canView) return;
+      const { getBoardTopic } = await import("@/lib/boards");
+      const detail = await getBoardTopic(data.channelId, data.topicId);
+      if (!detail) return;
+      socket.to(`channel:${data.channelId}`).emit(`board:topic:updated:${data.channelId}`, detail.topic);
+    }));
+
     // Bulk form of message:delete for purges: one limiter hit per batch, and
     // only ids the authorized HTTP purge really removed are relayed.
     const MAX_PURGE_RELAY_IDS = 200;

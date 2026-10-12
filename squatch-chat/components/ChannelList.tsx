@@ -21,12 +21,26 @@ interface Channel {
   name: string;
   type?: string;
   category?: string | null;
-  description?: string;
+  description?: string | null;
   position?: number;
   roomMode?: string;
   roomScene?: string;
   retentionDays?: number | null;
   slowModeSeconds?: number;
+}
+
+/** Text channels and Trail Boards share the message-channel tools (boards keep no retention: topics are meant to last). */
+function isTextLike(channel: Pick<Channel, "type">): boolean {
+  return !channel.type || channel.type === "text" || channel.type === "board";
+}
+
+function BoardIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0 opacity-70">
+      <rect x="3" y="4" width="18" height="12" rx="2" />
+      <path d="M7 8h10M7 12h6M12 16v4M9 20h6" />
+    </svg>
+  );
 }
 
 const SLOW_MODE_OPTIONS = [
@@ -166,7 +180,7 @@ export default function ChannelList({
   onVoiceView,
   onOpenServerSettings,
 }: ChannelListProps) {
-  const [creating, setCreating] = useState<"text" | "voice" | null>(null);
+  const [creating, setCreating] = useState<"text" | "voice" | "board" | null>(null);
   const [createLoading, setCreateLoading] = useState(false);
   const [newName, setNewName] = useState("");
   const [inviteOpen, setInviteOpen] = useState(false);
@@ -278,7 +292,7 @@ export default function ChannelList({
           name: newName.trim(),
           type: creating,
           category: newCategory.trim() || undefined,
-          description: creating === "text" ? newDescription.trim() || undefined : undefined,
+          description: creating === "text" || creating === "board" ? newDescription.trim() || undefined : undefined,
           roomMode: creating === "voice" ? newRoomMode : undefined,
           roomScene: creating === "voice" ? newRoomScene : undefined,
         }),
@@ -536,6 +550,7 @@ export default function ChannelList({
     [localChannels],
   );
   const voiceChannels = sortedLocalChannels.filter((c) => c.type === "voice");
+  const boardChannels = sortedLocalChannels.filter((c) => c.type === "board");
 
   // Group text channels by category using useMemo
   const { categoryMap, sortedCategories } = useMemo(() => {
@@ -559,6 +574,7 @@ export default function ChannelList({
     ...sortedCategories.flatMap((cat) =>
       collapsedCategories.has(cat) ? [] : categoryMap.get(cat)!
     ),
+    ...boardChannels,
     ...voiceChannels,
   ];
 
@@ -833,6 +849,95 @@ export default function ChannelList({
           </form>
         )}
 
+        {/* Trail Boards: forum-style channels */}
+        {(boardChannels.length > 0 || canManageChannels) && (
+          <div className="px-2 mb-1 mt-4 flex items-center justify-between">
+            <span className="text-xs font-semibold text-[var(--muted)] uppercase tracking-wide">
+              Trail Boards
+            </span>
+            {canManageChannels && (
+              <button
+                onClick={() => setCreating("board")}
+                className="text-[var(--muted)] hover:text-[var(--text)] text-lg leading-none"
+                title="Create Trail Board"
+                aria-label="Create trail board"
+              >
+                +
+              </button>
+            )}
+          </div>
+        )}
+        {canManageChannels && creating === "board" && (
+          <form onSubmit={handleCreate} className="px-2 mb-1 space-y-1" aria-label="Create trail board">
+            <label htmlFor="new-board-name" className="sr-only">Board name</label>
+            <input
+              id="new-board-name"
+              type="text"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              placeholder="board-name (Enter to save)"
+              className="w-full text-sm px-2 py-1 bg-[var(--panel-2)] text-[var(--text)] border border-[var(--accent-2)] rounded focus:outline-none"
+              autoFocus
+              onKeyDown={(e) => { if (e.key === "Escape") setCreating(null); }}
+            />
+            <label htmlFor="new-board-description" className="sr-only">Description (optional)</label>
+            <input
+              id="new-board-description"
+              type="text"
+              value={newDescription}
+              onChange={(e) => setNewDescription(e.target.value)}
+              placeholder="What goes here? (optional)"
+              maxLength={200}
+              className="w-full text-xs px-2 py-1 bg-[var(--panel-2)] text-[var(--text)] border border-[var(--accent-2)]/50 rounded focus:outline-none"
+              onKeyDown={(e) => { if (e.key === "Escape") setCreating(null); }}
+            />
+            <p className="text-[10px] text-[var(--muted)] leading-tight">Topics with tags, search, and resolved/archived states instead of a timeline.</p>
+            <div className="flex gap-1">
+              <button type="submit" disabled={!newName.trim() || createLoading} className="flex-1 text-xs py-1 bg-[var(--accent-2)]/30 text-[var(--accent)] rounded hover:bg-[var(--accent-2)]/45 disabled:opacity-30 transition-colors">Create</button>
+              <button type="button" onClick={() => setCreating(null)} className="text-xs py-1 px-2 text-[var(--muted)] hover:text-[var(--text)]">Cancel</button>
+            </div>
+          </form>
+        )}
+        {boardChannels.length > 0 && (
+          <ul role="list" aria-label="Trail boards">
+            {boardChannels.map((channel) => {
+              const unread = unreadCounts?.get(channel.id) || 0;
+              const muted = isMuted(channel.id);
+              const showBadge = !muted && unread > 0;
+              return (
+                <li key={channel.id} role="listitem">
+                  <button
+                    onClick={() => onChannelSelect(channel)}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      setChannelMenu({ channel, x: e.clientX, y: e.clientY });
+                    }}
+                    title={channel.description || undefined}
+                    aria-label={`Trail board ${channel.name}${unread > 0 && !muted ? `, ${unread} unread` : ""}${muted ? ", muted" : ""}`}
+                    aria-current={activeChannelId === channel.id ? "page" : undefined}
+                    className={`w-full text-left px-2 py-1 rounded text-sm flex items-center gap-1.5 ${
+                      activeChannelId === channel.id
+                        ? "bg-[var(--panel-2)] text-[var(--text)]"
+                        : showBadge
+                          ? "text-[var(--text)] font-semibold hover:bg-[var(--panel-2)]/50"
+                          : "text-[var(--muted)] hover:bg-[var(--panel-2)]/50 hover:text-[var(--text)]"
+                    }`}
+                  >
+                    <BoardIcon />
+                    <span className="flex-1 truncate">{channel.name}</span>
+                    {muted && <MuteIcon />}
+                    {showBadge && (
+                      <span className="ml-auto bg-[var(--accent)] text-[var(--bg)] text-xs font-bold rounded-full min-w-[1.25rem] h-5 flex items-center justify-center px-1" aria-label={`${unread} unread messages`}>
+                        {unread > 99 ? "99+" : unread}
+                      </span>
+                    )}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+
         {/* Voice Channels */}
         <div className="px-2 mb-1 mt-4 flex items-center justify-between">
           <span className="text-xs font-semibold text-[var(--muted)] uppercase tracking-wide">
@@ -997,9 +1102,9 @@ export default function ChannelList({
             }}
           >
             <div className="px-3 py-1.5 text-xs text-[var(--muted)] border-b border-[var(--accent-2)]/20 truncate max-w-[200px]">
-              {channelMenu.channel.type === "voice" ? "🔊 " : "# "}{channelMenu.channel.name}
+              {channelMenu.channel.type === "voice" ? "🔊 " : channelMenu.channel.type === "board" ? "🪧 " : "# "}{channelMenu.channel.name}
             </div>
-            {(!channelMenu.channel.type || channelMenu.channel.type === "text") && (
+            {isTextLike(channelMenu.channel) && (
               <button
                 onClick={() => { toggleMute(channelMenu.channel.id); setChannelMenu(null); }}
                 className="w-full text-left px-3 py-1.5 text-xs text-[var(--text)] hover:bg-[var(--panel-2)]"
@@ -1017,7 +1122,7 @@ export default function ChannelList({
                     Room Purpose &amp; Scene
                   </button>
                 )}
-                {(!channelMenu.channel.type || channelMenu.channel.type === "text") && (
+                {isTextLike(channelMenu.channel) && (
                   <>
                     <button
                       onClick={() => { const c = channelMenu.channel; setChannelMenu(null); handleConfigureSlowMode(c); }}
@@ -1025,12 +1130,14 @@ export default function ChannelList({
                     >
                       Slow Mode{channelMenu.channel.slowModeSeconds ? " (on)" : ""}
                     </button>
-                    <button
-                      onClick={() => { const c = channelMenu.channel; setChannelMenu(null); handleConfigureRetention(c); }}
-                      className="w-full text-left px-3 py-1.5 text-xs text-[var(--text)] hover:bg-[var(--panel-2)]"
-                    >
-                      Leave-no-trace Retention
-                    </button>
+                    {channelMenu.channel.type !== "board" && (
+                      <button
+                        onClick={() => { const c = channelMenu.channel; setChannelMenu(null); handleConfigureRetention(c); }}
+                        className="w-full text-left px-3 py-1.5 text-xs text-[var(--text)] hover:bg-[var(--panel-2)]"
+                      >
+                        Leave-no-trace Retention
+                      </button>
+                    )}
                     {currentUserRole === "owner" && (
                       <button
                         onClick={() => { const c = channelMenu.channel; setChannelMenu(null); void handleExportChannel(c); }}

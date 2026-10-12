@@ -30,7 +30,8 @@ export async function POST(request: Request) {
     );
   }
 
-  const channelType = type === "voice" ? "voice" : "text";
+  // "board" = Trail Board: a forum-style channel whose root posts are topics.
+  const channelType = type === "voice" ? "voice" : type === "board" ? "board" : "text";
 
   const roomConfig = channelType === "voice"
     ? normalizeVoiceRoomConfig({ mode: roomMode, scene: roomScene })

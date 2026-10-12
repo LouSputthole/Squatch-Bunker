@@ -1,8 +1,10 @@
 export interface Channel {
   id: string;
   name: string;
+  /** "text" (default), "voice", or "board" (Trail Board). */
   type?: string;
   topic?: string | null;
+  description?: string | null;
   roomMode?: string;
   roomScene?: string;
   retentionDays?: number | null;

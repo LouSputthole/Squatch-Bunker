@@ -27,6 +27,12 @@ The existing foundation includes:
 9. **Camp Gatherings** — scheduled events, RSVPs, reminders, counts, and active-room join links.
 10. **Offshoots** — ephemeral side voice bubbles that can return to the main camp.
 
+### Since then
+
+- **Ember Inbox** — durable notifications with quiet hours; **Fireside Stage** — listener/speaker voice rooms with a raise-hand queue.
+- **Ranger Desk** — per-camp moderation cases: message evidence captured at filing, assignment, resolve by removing/warning/kicking/banning, escalation to the instance operator, and one appeal per action.
+- **Trail Boards** — forum-style channels: tagged, searchable topics with open/resolved/archived states and a durable owner; replies are the topic's thread.
+
 The exact authorization, lifecycle, and privacy boundaries are documented in [GAP_ANALYSIS.md](./docs/GAP_ANALYSIS.md). In particular, Lantern and Offshoot state is currently process-local, and Offshoot audio separation is client-side routing inside the parent WebRTC mesh—not a security boundary.
 
 ## Quick start: local or trusted-LAN self-host

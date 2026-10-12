@@ -11,7 +11,7 @@ Campfire’s direction is **Discord-shaped community infrastructure with a warme
 - **Not done (machine/infra):** the `0.1.0-beta.1` desktop build. Run `npm run desktop:stage && npm run desktop:verify -- --require-stage && npm run desktop:dist`, smoke-test the portable and installer builds (persistence, LAN toggle, no orphaned server process), record SHA-256 checksums, and attach them to a **draft** GitHub release only. Publishing a release arms the auto-updater for installed 0.0.x users, and the beta tag stays unpublished until the evidence gates in [the release notes](./docs/releases/0.1.0-beta.1.md#evidence-gates-before-tagging) are met.
 - **Needs people/infra:** a two-person real-microphone voice playtest (including Fireside Stage), public HTTPS + TURN staging, code signing, and a browser matrix.
 - **Housekeeping:** six merged branches still need deleting, because the repository does not delete head branches on merge: `agent/public-staging-verifier`, `codex/campfire-five-features-20260712`, `feat/hosted-postgres`, `release/0.1.0-beta.1`, `feat/polish-pass-1008`, and `feat/completion-wave-1008`. A scratch Neon project (`flat-leaf-31484496`) also needs deleting.
-- **Next build-out:** Trail Boards, then Gathering Seasons. The rest of Ranger Desk (assignment, evidence, escalation, appeals) is complete in the worktree as of 2026-10-12 and ships with a schema migration. See [Next five build-outs](#next-five-build-outs).
+- **Next build-out:** Gathering Seasons. Ranger Desk and Trail Boards are complete in the worktree as of 2026-10-12; both ship with schema migrations (desktop schema v8). See [Next five build-outs](#next-five-build-outs).
 
 Status notation:
 
@@ -77,6 +77,13 @@ Status notation:
 - **Escalation:** a desk hands a case to the instance operator with a note; `/admin` lists escalated and community-less reports and the operator can dismiss, resolve, or remove the message. The desk can still close an escalated case.
 - **Appeals:** the reported member appeals once within 14 days from their notices panel; a reviewer other than the resolver (or the owner) accepts or rejects it, and accepting a ban lifts it. Every step is a case event (`ReportEvent`) shown as the case history, and an audit-log row that names no reporter or target.
 - **Boundaries:** evidence is a snapshot, not a legal hold; escalation is a hand-off to the operator, not an external trust-and-safety process; appeals are decided by the same camp's moderators.
+
+### Trail Boards (2026-10-12)
+
+- **A board is a channel** (`Channel.type = "board"`): each topic is an ordinary root message plus a `BoardTopic` row (title, up to five tags, open/resolved/archived, pinned, owner, last activity); replies are the root message's thread. Everything the chat already does — reactions, edits, attachments, voice notes, reports and evidence, retention sweeps, notifications — keeps working on topics and replies.
+- **Durable ownership:** the member who opened a topic runs it (title, tags, resolve/reopen) until a moderator (MANAGE_MESSAGES) hands it to another member; moderators also pin, archive (no more replies), and unarchive.
+- **Finding things:** the board lists pinned topics first, then by last activity, filtered by status and tag, with title/body/tag search; tag chips come from the topics themselves. Jump-to links from search, saved messages, and the journal open the right topic.
+- **Boundaries:** search runs in memory over the newest 300 matching topics per board; there is no per-board tag registry, moderation queue, or cross-board search yet.
 
 These lists describe implementation scope, not a public release. The authoritative boundaries are in [docs/GAP_ANALYSIS.md](./docs/GAP_ANALYSIS.md).
 
@@ -173,11 +180,11 @@ These are the ranked follow-on features after the current ten-feature wave:
 
 1. **Ranger Desk** — **complete in worktree (2026-10-12):** a moderation case desk per community. Moderators with MANAGE_MESSAGES/KICK/BAN see the reports filed in their camp (message reports only for channels they can view; never reports about themselves), with the message evidence snapshotted at filing. They assign cases, resolve them by actually removing the message, warning, kicking, or banning (permission- and hierarchy-checked, audited), dismiss them, or escalate to the instance operator, whose `/admin` desk closes escalated and community-less reports. The reported member is notified and can appeal once within 14 days; another reviewer (or the owner) decides, and accepting a ban lifts it. Every step is in the case history. First slice (queue, resolve/dismiss) landed 2026-10-08.
 2. **Fireside Stage** — **complete in worktree (2026-07-26):** the `fireside-stage` voice-room mode opens with the first arrival hosting; listeners raise hands into a FIFO queue, the host or a MOVE_MEMBERS moderator promotes/demotes, capacity is eight speakers, and host transfer/cleanup runs on leave, kick, move, and disconnect. Stage state shares the Lantern trust boundary: process-local, advisory, client-side audience muting — not media-enforced.
-3. **Trail Boards** — forum-style channels with tags, searchable posts, resolved/archived states, and durable topic ownership.
+3. **Trail Boards** — **complete in worktree (2026-10-12):** forum-style channels where each topic is a root message with a title, up to five tags, open/resolved/archived state, pin, and a durable owner; replies are the topic's thread. Boards list pinned topics first, filter by status and tag, and search titles, bodies, and tags; owners resolve and edit, moderators archive, pin, and hand topics over.
 4. **Ember Inbox** — **complete in worktree (2026-07-26):** durable per-user notifications (mentions, replies, DMs collapsed per conversation, friend requests) with unread state, mark-read/clear APIs, per-space all/mentions/none policy enforcement, quiet hours (client-evaluated, DB-synced), realtime `notification:new` push, and an inbox UI replacing the ephemeral bell. Digest/email delivery remains future work.
 5. **Gathering Seasons** — recurring Gatherings with external calendar links, host controls, capacity, waitlists, and reminder policy.
 
-Items 1, 2, and 4 describe implementation scope, not a public release — they still pass through the release gates like everything else. Trail Boards is next.
+Items 1 to 4 describe implementation scope, not a public release — they still pass through the release gates like everything else. Gathering Seasons is next.
 
 ## Milestone 6 — deepen Campfire’s own flare
 

@@ -187,7 +187,8 @@ interface ReplySnippet {
   author: { id: string; username: string };
 }
 
-interface Message {
+/** The channel-message shape ChatPanel renders (the GET /api/messages payload). */
+export interface Message {
   id: string;
   channelId?: string;
   content: string;
@@ -238,6 +239,15 @@ interface ChatPanelProps {
   purgedMessageIds?: readonly string[];
   /** Open a message in another channel (Saved / Camp Journal jump-to). */
   onJumpToMessage?: (channelId: string, messageId: string) => void;
+  /**
+   * Trail Boards: show one topic — this root message and its replies — as the
+   * timeline instead of the channel. Sends go under the root.
+   */
+  topicRoot?: Message;
+  topicTitle?: string;
+  /** Archived topics take no more replies. */
+  topicArchived?: boolean;
+  onTopicBack?: () => void;
 }
 
 type SidePanel = "pins" | "journal" | "saved";
@@ -300,7 +310,9 @@ function saveDraft(key: string, text: string) {
 export default function ChatPanel(props: ChatPanelProps) {
   // Fetched here, outside the per-channel remount, so it loads once per server.
   const customEmojis = useServerEmojis(props.serverId);
-  return <ChatPanelContent key={props.channelId} {...props} customEmojis={customEmojis} />;
+  // A topic is its own timeline: remount when switching topics on a board.
+  const key = props.topicRoot ? `${props.channelId}:topic:${props.topicRoot.id}` : props.channelId;
+  return <ChatPanelContent key={key} {...props} customEmojis={customEmojis} />;
 }
 
 function ChatPanelContent({
@@ -319,12 +331,17 @@ function ChatPanelContent({
   onFocusHandled,
   purgedMessageIds,
   onJumpToMessage,
+  topicRoot,
+  topicTitle,
+  topicArchived = false,
+  onTopicBack,
   customEmojis,
 }: ChatPanelProps & { customEmojis: CustomEmojiMap }) {
   const topicBaseline = channelTopic ?? "";
+  const topicRootId = topicRoot?.id ?? null;
   const [messages, setMessages] = useState<Message[]>([]);
   const [bookmarkedMessageIds, setBookmarkedMessageIds] = useState<Set<string>>(new Set());
-  const draftKey = `squatch:draft:${currentUserId}:${channelId}`;
+  const draftKey = `squatch:draft:${currentUserId}:${channelId}${topicRootId ? `:${topicRootId}` : ""}`;
   const [newMessage, setNewMessage] = useState(() => loadDraft(draftKey));
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
@@ -490,13 +507,15 @@ function ChatPanelContent({
   useEffect(() => {
     const controller = new AbortController();
 
-    fetch(`/api/messages?channelId=${encodeURIComponent(channelId)}`, { signal: controller.signal })
+    const topicQuery = topicRootId ? `&parentId=${encodeURIComponent(topicRootId)}` : "";
+    fetch(`/api/messages?channelId=${encodeURIComponent(channelId)}${topicQuery}`, { signal: controller.signal })
       .then((res) => {
         if (!res.ok) throw new Error("Failed to load messages");
         return res.json();
       })
       .then((data: MessagePage) => {
-        const page: Message[] = data.messages || [];
+        // Topic mode: the root message heads its replies.
+        const page: Message[] = topicRoot ? [topicRoot, ...(data.messages || [])] : (data.messages || []);
         const known = new Set(page.map((m) => m.id));
         // Keep anything that arrived over the socket (or was sent) while loading.
         setMessages((prev) => [...page, ...prev.filter((m) => !known.has(m.id))]);
@@ -513,7 +532,7 @@ function ChatPanelContent({
       });
 
     return () => controller.abort();
-  }, [channelId, reloadKey]);
+  }, [channelId, reloadKey, topicRoot, topicRootId]);
 
   // Scroll bookkeeping that must happen before paint: jump to the bottom after
   // the first page renders, and keep the viewport anchored when older pages
@@ -546,13 +565,14 @@ function ChatPanelContent({
 
   const loadOlder = useCallback(async (): Promise<Message[] | null> => {
     if (loadingOlderRef.current || !hasMoreRef.current) return null;
-    const oldest = messagesRef.current.find((m) => !isPendingMessage(m));
+    const oldest = messagesRef.current.find((m) => !isPendingMessage(m) && m.id !== topicRootId);
     if (!oldest) return null;
     loadingOlderRef.current = true;
     setLoadingOlder(true);
     try {
+      const topicQuery = topicRootId ? `&parentId=${encodeURIComponent(topicRootId)}` : "";
       const res = await fetch(
-        `/api/messages?channelId=${encodeURIComponent(channelId)}&cursor=${encodeURIComponent(oldest.id)}`,
+        `/api/messages?channelId=${encodeURIComponent(channelId)}&cursor=${encodeURIComponent(oldest.id)}${topicQuery}`,
       );
       if (!res.ok) {
         await toastResponseError(res, "Couldn't load older messages");
@@ -567,7 +587,10 @@ function ChatPanelContent({
       restoreScrollRef.current = el ? el.scrollHeight - el.scrollTop : null;
       setMessages((prev) => {
         const known = new Set(prev.map((m) => m.id));
-        return [...older.filter((m) => !known.has(m.id)), ...prev];
+        const fresh = older.filter((m) => !known.has(m.id));
+        // The topic root stays on top; older replies slot in beneath it.
+        if (topicRootId && prev[0]?.id === topicRootId) return [prev[0], ...fresh, ...prev.slice(1)];
+        return [...fresh, ...prev];
       });
       return older;
     } catch {
@@ -577,7 +600,7 @@ function ChatPanelContent({
       loadingOlderRef.current = false;
       setLoadingOlder(false);
     }
-  }, [channelId]);
+  }, [channelId, topicRootId]);
 
   /**
    * Scroll to a message, paging back through history until it is loaded.
@@ -661,8 +684,12 @@ function ChatPanelContent({
     function handleChannelMessage(message: Message) {
       clearTypingFor(message.author.id);
 
+      // Topic mode: only this topic's replies belong here; other topics and
+      // new root posts are the board's business.
+      if (topicRootId && message.parentMessageId !== topicRootId) return;
+
       // Thread replies: bump the parent's count and feed an open thread panel.
-      if (message.parentMessageId) {
+      if (!topicRootId && message.parentMessageId) {
         const parentId = message.parentMessageId;
         if (threadMessagesRef.current.some((m) => m.id === message.id)) return;
         if (threadParentIdRef.current === parentId) {
@@ -791,7 +818,7 @@ function ChatPanelContent({
       socket.emit("channel:leave", channelId);
       socket.off("typing:update", handleTyping);
     };
-  }, [channelId, scrollToBottom, currentUserId]);
+  }, [channelId, scrollToBottom, currentUserId, topicRootId]);
 
   function handleInputChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
     const val = e.target.value;
@@ -982,7 +1009,7 @@ function ChatPanelContent({
 
   async function handleSend(e: React.FormEvent) {
     e.preventDefault();
-    if (!newMessage.trim()) return;
+    if (!newMessage.trim() || topicArchived) return;
 
     let content = newMessage.trim();
 
@@ -1029,6 +1056,7 @@ function ChatPanelContent({
       createdAt: new Date().toISOString(),
       author: { id: currentUserId, username: currentUsername, avatar: currentAvatar },
       replyTo: replyTarget ? { id: replyTarget.id, content: replyTarget.content, author: { id: replyTarget.author.id, username: replyTarget.author.username } } : null,
+      ...(topicRootId ? { parentMessageId: topicRootId } : {}),
       pending: true,
     };
     setMessages((prev) => [...prev, optimisticMsg]);
@@ -1044,7 +1072,12 @@ function ChatPanelContent({
       const res = await fetch("/api/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ channelId, content, ...(replyTarget ? { replyToId: replyTarget.id } : {}) }),
+        body: JSON.stringify({
+          channelId,
+          content,
+          ...(replyTarget ? { replyToId: replyTarget.id } : {}),
+          ...(topicRootId ? { parentMessageId: topicRootId } : {}),
+        }),
       });
 
       if (res.ok) {
@@ -1282,6 +1315,7 @@ function ChatPanelContent({
           channelId,
           content: "",
           attachmentId,
+          ...(topicRootId ? { parentMessageId: topicRootId } : {}),
         }),
       });
       if (!res.ok) {
@@ -1319,7 +1353,7 @@ function ChatPanelContent({
       const res = await fetch("/api/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ channelId, content: "", attachmentId }),
+        body: JSON.stringify({ channelId, content: "", attachmentId, ...(topicRootId ? { parentMessageId: topicRootId } : {}) }),
       });
       if (!res.ok) {
         // Surface the server's reason (slow mode, revoked access) instead of
@@ -1345,7 +1379,7 @@ function ChatPanelContent({
       const res = await fetch("/api/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ channelId, content: "", attachmentUrl: gifUrl, attachmentName: "gif" }),
+        body: JSON.stringify({ channelId, content: "", attachmentUrl: gifUrl, attachmentName: "gif", ...(topicRootId ? { parentMessageId: topicRootId } : {}) }),
       });
       if (!res.ok) {
         await toastResponseError(res, "Couldn't send that GIF");
@@ -1450,7 +1484,8 @@ function ChatPanelContent({
           : null;
 
   const purgedIds = useMemo(() => new Set(purgedMessageIds ?? []), [purgedMessageIds]);
-  const visibleMessages = messages.filter((m) => !m.parentMessageId && !purgedIds.has(m.id));
+  const visibleMessages = messages.filter((m) =>
+    (topicRootId ? m.id === topicRootId || m.parentMessageId === topicRootId : !m.parentMessageId) && !purgedIds.has(m.id));
   const visibleThreadMessages = threadMessages.filter((m) => !purgedIds.has(m.id));
   const pinnedCount = visibleMessages.filter((m) => m.pinned).length;
 
@@ -1505,9 +1540,27 @@ function ChatPanelContent({
       >
       <div className="flex h-12 shrink-0 items-center gap-3 border-b border-[var(--accent-2)]/30 bg-[var(--panel-2)] px-4">
         <div className="flex min-w-0 flex-1 items-center gap-2">
-          <ChatIcon name="hash" size={20} className="shrink-0 text-[var(--muted)]" />
-          <h3 className="max-w-[45%] shrink-0 truncate font-bold text-[var(--text)]" title={channelName}>{channelName}</h3>
-          {editingTopic ? (
+          {topicRoot ? (
+            <>
+              {onTopicBack && (
+                <button
+                  type="button"
+                  onClick={onTopicBack}
+                  className="shrink-0 rounded px-1.5 py-0.5 text-xs text-[var(--muted)] transition-colors hover:bg-[var(--panel)] hover:text-[var(--text)]"
+                  aria-label={`Back to #${channelName}`}
+                >
+                  ← #{channelName}
+                </button>
+              )}
+              <h3 className="min-w-0 flex-1 truncate font-bold text-[var(--text)]" title={topicTitle}>{topicTitle}</h3>
+            </>
+          ) : (
+            <>
+              <ChatIcon name="hash" size={20} className="shrink-0 text-[var(--muted)]" />
+              <h3 className="max-w-[45%] shrink-0 truncate font-bold text-[var(--text)]" title={channelName}>{channelName}</h3>
+            </>
+          )}
+          {!topicRoot && editingTopic ? (
             <form
               className="flex min-w-0 flex-1 items-center gap-1"
               onSubmit={(e) => { e.preventDefault(); void saveTopic(); }}
@@ -1527,7 +1580,7 @@ function ChatPanelContent({
               <button type="submit" className="shrink-0 rounded bg-[var(--accent)] px-2 py-1 text-xs font-medium text-[var(--bg)] transition-colors hover:bg-[var(--accent-2)] hover:text-[var(--text)]">Save</button>
               <button type="button" onClick={() => setEditingTopic(false)} className="shrink-0 px-1 text-xs text-[var(--muted)] hover:text-[var(--text)]">Cancel</button>
             </form>
-          ) : (topic || canEditTopic) && (
+          ) : !topicRoot && (topic || canEditTopic) && (
             <>
               <span className="h-5 w-px shrink-0 bg-[var(--accent-2)]/30" aria-hidden="true" />
               {canEditTopic ? (
@@ -1547,7 +1600,7 @@ function ChatPanelContent({
           )}
         </div>
         <div role="toolbar" aria-label="Channel tools" className="flex shrink-0 items-center gap-0.5">
-          <HeaderButton icon="vote" label="Start a Camp Vote" onClick={() => setShowPollModal(true)} />
+          {!topicRoot && <HeaderButton icon="vote" label="Start a Camp Vote" onClick={() => setShowPollModal(true)} />}
           {serverId && (
             <HeaderButton icon="journal" label="Camp Journal" active={sidePanel === "journal"} onClick={() => togglePanel("journal")} />
           )}
@@ -1598,7 +1651,7 @@ function ChatPanelContent({
                   {loadingOlder ? "Loading older messages…" : "Load older messages"}
                 </button>
               </div>
-            ) : (
+            ) : topicRoot ? null : (
               <ChannelWelcome channelName={channelName} topic={topic} />
             )}
             {visibleMessages.map((msg, index) => {
@@ -1654,7 +1707,7 @@ function ChatPanelContent({
                     onReply={(target) => { setReplyingTo(target); inputRef.current?.focus(); }}
                     onScrollToMessage={(id) => { void jumpToMessage(id); }}
                     onPin={handlePin}
-                    onThread={openThread}
+                    onThread={topicRoot ? undefined : openThread}
                     onBookmark={handleBookmark}
                     isBookmarked={bookmarkedMessageIds.has(msg.id)}
                     onJournal={serverId ? handleJournal : undefined}
@@ -1814,11 +1867,11 @@ function ChatPanelContent({
               void handleFileDrop(file);
             }}
             onKeyDown={handleComposerKeyDown}
-            placeholder={uploading ? "Uploading..." : slowRemaining > 0 ? `Wait ${slowRemaining}s to send again` : `Message #${channelName}`}
+            placeholder={topicArchived ? "This topic is archived — no more replies" : uploading ? "Uploading..." : slowRemaining > 0 ? `Wait ${slowRemaining}s to send again` : topicRoot ? `Reply to ${topicTitle || "this topic"}` : `Message #${channelName}`}
             rows={1}
             className="flex-1 min-w-0 px-2 py-3 bg-transparent text-[var(--text)] focus:outline-none placeholder:text-[var(--muted)] placeholder:truncate resize-none overflow-y-auto"
             style={{ minHeight: "44px", maxHeight: "200px" }}
-            disabled={uploading || slowRemaining > 0}
+            disabled={uploading || slowRemaining > 0 || topicArchived}
           />
           <button
             type="button"

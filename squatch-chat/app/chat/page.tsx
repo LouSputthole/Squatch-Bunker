@@ -5,6 +5,7 @@ import Image from "next/image";
 import ServerList from "@/components/ServerList";
 import ChannelList from "@/components/ChannelList";
 import ChatPanel from "@/components/ChatPanel";
+import BoardPanel from "@/components/BoardPanel";
 import MemberList from "@/components/MemberList";
 import VoicePanel from "@/components/VoicePanel";
 import VoiceRoom from "@/components/VoiceRoom";
@@ -665,6 +666,23 @@ function ChatPageInner() {
             {blockLoadFailed && <button className="mt-3 rounded bg-[var(--accent-2)] px-3 py-1.5 text-xs text-white" onClick={() => setBlockReloadToken((value) => value + 1)}>Retry</button>}
           </div>
         </div>
+      ) : ch.activeChannel && auth.user && blockedUserIds && ch.activeChannel.type === "board" ? (
+        <BoardPanel
+          channelId={ch.activeChannel.id}
+          channelName={ch.activeChannel.name}
+          channelDescription={ch.activeChannel.description ?? ch.activeChannel.topic}
+          channelSlowMode={activeChannelDetails?.slowModeSeconds ?? 0}
+          serverId={srv.activeServer?.id}
+          currentUserId={auth.user.id}
+          currentUsername={auth.user.username}
+          currentAvatar={auth.user.avatar}
+          canModerate={presence.userRole === "owner" || presence.userRole === "admin" || presence.userRole === "mod"}
+          blockedUserIds={blockedUserIds}
+          focusMessageId={focusMessageId}
+          onFocusHandled={() => setFocusMessageId(null)}
+          purgedMessageIds={purgedIds}
+          onJumpToMessage={jumpToMessage}
+        />
       ) : ch.activeChannel && auth.user && blockedUserIds ? (
         <ChatPanel
           channelId={ch.activeChannel.id}

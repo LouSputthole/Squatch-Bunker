@@ -24,7 +24,9 @@ export const FEATURES: Record<string, FeatureDefinition> = {
   voice_facilitation: { name: "Voice Facilitation", description: "Pass the Lantern and Offshoot side rooms", tier: "free" },
   fireside_stage: { name: "Fireside Stage", description: "Listener/speaker rooms with a raise-hand queue", tier: "free" },
   ember_inbox: { name: "Ember Inbox", description: "Durable notification center with quiet hours", tier: "free" },
+  ranger_desk: { name: "Ranger Desk", description: "Moderation cases with evidence, escalation, and appeals", tier: "free" },
   retention_rooms: { name: "Leave-no-trace Rooms", description: "Optional 1, 7, or 30 day message retention", tier: "free" },
+  trail_boards: { name: "Trail Boards", description: "Forum-style channels with tagged, searchable topics", tier: "free" },
 
   custom_emoji: { name: "Custom Emoji", description: "Upload custom emoji for your server", tier: "premium" },
   server_banner: { name: "Server Banner", description: "Custom banner image for your server", tier: "premium" },
