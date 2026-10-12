@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { normalizeVoiceRoomConfig } from "@/lib/voiceRoomConfig";
+import { MAX_CHANNEL_DESCRIPTION_LENGTH, parseChannelName } from "@/lib/inputLimits";
 
 export async function POST(request: Request) {
   const session = await getSession();
@@ -8,11 +9,24 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
 
-  const { serverId, name, type, description, category, roomMode, roomScene } = await request.json();
-  if (!serverId || !name || !name.trim()) {
+  const { serverId, name: rawName, type, description, category, roomMode, roomScene } = await request.json();
+  if (!serverId || typeof rawName !== "string" || !rawName.trim()) {
     return NextResponse.json(
       { error: "Server ID and channel name are required" },
       { status: 400 }
+    );
+  }
+  const name = parseChannelName(rawName);
+  if (!name.ok) {
+    return NextResponse.json({ error: name.error }, { status: 400 });
+  }
+  if (description !== undefined && description !== null && typeof description !== "string") {
+    return NextResponse.json({ error: "Description must be a string" }, { status: 400 });
+  }
+  if (typeof description === "string" && description.trim().length > MAX_CHANNEL_DESCRIPTION_LENGTH) {
+    return NextResponse.json(
+      { error: `Description must be at most ${MAX_CHANNEL_DESCRIPTION_LENGTH} characters` },
+      { status: 400 },
     );
   }
 
@@ -45,13 +59,19 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "You need the Manage Channels permission to create channels" }, { status: 403 });
     }
 
+    // Append after the server's current last channel.
+    const last = await prisma.channel.aggregate({
+      where: { serverId },
+      _max: { position: true },
+    });
     const channel = await prisma.channel.create({
       data: {
         serverId,
-        name: name.trim().toLowerCase().replace(/\s+/g, "-"),
+        name: name.value,
         type: channelType,
+        position: last._max.position === null ? 0 : last._max.position + 1,
         ...(description?.trim() ? { description: description.trim() } : {}),
-        ...(category?.trim() ? { category: category.trim() } : {}),
+        ...(typeof category === "string" && category.trim() ? { category: category.trim().slice(0, 100) } : {}),
         roomMode: roomConfig.roomMode,
         roomScene: roomConfig.roomScene,
       },
@@ -63,22 +83,20 @@ export async function POST(request: Request) {
         type: true,
         category: true,
         description: true,
+        position: true,
+        slowModeSeconds: true,
         serverId: true,
         createdAt: true,
       },
     });
-
-    // Post welcome system message for text channels
-    if (channelType === "text") {
-      await prisma.message.create({
-        data: {
-          channelId: channel.id,
-          authorId: session.userId,
-          content: `Welcome to #${channel.name}!`,
-          isSystem: true,
-        },
-      });
-    }
+    await prisma.auditLog.create({
+      data: {
+        serverId,
+        actorId: session.userId,
+        action: "channel_create",
+        detail: `Created ${channelType} channel #${channel.name}`,
+      },
+    });
 
     return NextResponse.json({ channel }, { status: 201 });
   } catch (err) {

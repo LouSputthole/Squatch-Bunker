@@ -426,7 +426,7 @@ describe("server-scoped effective permissions", () => {
       jsonRequest(
         "http://test.local/api/servers/" + serverId + "/emoji",
         "POST",
-        { name: "trailfire", url: "https://example.test/trailfire.png" },
+        { name: "trailfire", url: "/uploads/trailfire.png" },
       ),
       serverParams(),
     );

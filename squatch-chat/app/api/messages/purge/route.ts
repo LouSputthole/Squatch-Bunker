@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { resolveChannelAccess } from "@/lib/channelAccess";
 import {
-  removeUnreferencedPrivateUpload,
-  removeUnreferencedUpload,
+  cleanupDeletedMessageUploads,
+  collectThreadReplies,
+  type DeletableMessage,
 } from "@/lib/messageRetention";
 import { memberHasPermission } from "@/lib/serverRoles";
 
@@ -47,15 +48,14 @@ export async function POST(req: NextRequest) {
       });
 
       if (messages.length === 0) {
-        return {
-          deleted: 0,
-          messageIds: [] as string[],
-          attachmentUrls: [] as string[],
-          privateUploadIds: [] as string[],
-        };
+        return { deleted: 0, messages: [] as DeletableMessage[] };
       }
 
-      const messageIds = messages.map((message) => message.id);
+      // Purged thread parents take their replies with them; otherwise the
+      // replies would surface in the main timeline (thread FK is SET NULL).
+      const replies = await collectThreadReplies(tx, messages.map((message) => message.id));
+      const doomed = [...messages, ...replies];
+      const messageIds = doomed.map((message) => message.id);
       await Promise.all([
         tx.reaction.deleteMany({ where: { messageId: { in: messageIds } } }),
         tx.bookmark.deleteMany({ where: { messageId: { in: messageIds } } }),
@@ -72,33 +72,13 @@ export async function POST(req: NextRequest) {
         },
       });
 
-      return {
-        deleted: result.count,
-        messageIds,
-        attachmentUrls: [
-          ...new Set(
-            messages
-              .map((message) => message.attachmentUrl)
-              .filter((url): url is string => !!url),
-          ),
-        ],
-        privateUploadIds: [
-          ...new Set(
-            messages
-              .map((message) => message.privateUploadId)
-              .filter((id): id is string => Boolean(id)),
-          ),
-        ],
-      };
+      return { deleted: result.count, messages: doomed };
     });
 
-    await Promise.all([
-      ...deletion.attachmentUrls.map(removeUnreferencedUpload),
-      ...deletion.privateUploadIds.map(removeUnreferencedPrivateUpload),
-    ]);
+    await cleanupDeletedMessageUploads(deletion.messages);
     return NextResponse.json({
       deleted: deletion.deleted,
-      messageIds: deletion.messageIds,
+      messageIds: deletion.messages.map((message) => message.id),
     });
   } catch (err) {
     console.error("[Campfire] Purge error:", err);

@@ -3,6 +3,7 @@ import { getSession } from "@/lib/auth";
 import { resolveChannelAccess } from "@/lib/channelAccess";
 import { isPollClosed } from "@/lib/polls";
 import { memberHasPermission } from "@/lib/serverRoles";
+import { prismaErrorCode } from "@/lib/prismaErrors";
 
 const includePoll = {
   options: {
@@ -41,9 +42,18 @@ export async function POST(request: Request, { params }: { params: Promise<{ pol
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   const { pollId } = await params;
+  try {
+    return await castVote(request, pollId, session.userId);
+  } catch (error) {
+    console.error("[Campfire] Poll vote failed:", error);
+    return NextResponse.json({ error: "Could not record your vote" }, { status: 500 });
+  }
+}
+
+async function castVote(request: Request, pollId: string, userId: string) {
   const body = await request.json().catch(() => null);
   const optionId = body && typeof body.optionId === "string" ? body.optionId : "";
-  const { poll, access } = await findVisiblePoll(pollId, session.userId);
+  const { poll, access } = await findVisiblePoll(pollId, userId);
   if (!poll) return NextResponse.json({ error: "Poll not found" }, { status: 404 });
   if (!access?.canSend) return NextResponse.json({ error: "Not authorized to vote here" }, { status: 403 });
   if (isPollClosed(poll)) return NextResponse.json({ error: "This poll is closed" }, { status: 409 });
@@ -54,28 +64,34 @@ export async function POST(request: Request, { params }: { params: Promise<{ pol
   const { prisma } = await import("@/lib/db");
   const runVoteTransaction = (serializable: boolean) => prisma.$transaction(async (tx) => {
     const existing = await tx.pollVote.findUnique({
-      where: { optionId_userId: { optionId, userId: session.userId } },
+      where: { optionId_userId: { optionId, userId: userId } },
       select: { id: true },
     });
     if (existing) {
-      await tx.pollVote.delete({ where: { id: existing.id } });
+      await tx.pollVote.deleteMany({ where: { id: existing.id } });
       return;
     }
     if (!poll.allowMultiple) {
-      await tx.pollVote.deleteMany({ where: { pollId, userId: session.userId } });
+      await tx.pollVote.deleteMany({ where: { pollId, userId: userId } });
     }
-    await tx.pollVote.create({ data: { pollId, optionId, userId: session.userId } });
+    await tx.pollVote.create({ data: { pollId, optionId, userId: userId } });
   }, serializable ? { isolationLevel: "Serializable" } : undefined);
 
+  // A double-click on the same option races two inserts of one ballot; the
+  // loser's unique violation means the vote already landed.
+  const ignoreDuplicateBallot = (error: unknown) => {
+    if (prismaErrorCode(error) !== "P2002") throw error;
+  };
+
   if (poll.allowMultiple) {
-    await runVoteTransaction(false);
+    await runVoteTransaction(false).catch(ignoreDuplicateBallot);
   } else {
     // Concurrent choices are a write-skew on PostgreSQL: each request can see
     // no ballot, then insert a different option. Serializable aborts one whole
     // delete-and-insert transaction; retrying re-evaluates the winning ballot.
     for (let attempt = 1; attempt <= MAX_SERIALIZABLE_VOTE_ATTEMPTS; attempt += 1) {
       try {
-        await runVoteTransaction(true);
+        await runVoteTransaction(true).catch(ignoreDuplicateBallot);
         break;
       } catch (error) {
         if (!isSerializationConflict(error) || attempt === MAX_SERIALIZABLE_VOTE_ATTEMPTS) {

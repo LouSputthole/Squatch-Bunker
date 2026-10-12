@@ -20,17 +20,25 @@ export async function POST(request: Request) {
   }
 
   try {
-    const { email, password } = await request.json();
+    const body: unknown = await request.json().catch(() => null);
+    const { email, password } = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
 
-    if (!email || !password) {
+    if (typeof email !== "string" || !email.trim() || typeof password !== "string" || !password) {
       return NextResponse.json(
         { error: "Email and password are required" },
         { status: 400 }
       );
     }
 
+    // Register and forgot-password store/look up trim().toLowerCase(); fall
+    // back to the entered form for accounts created before normalization.
+    const enteredEmail = email.trim();
+    const normalizedEmail = enteredEmail.toLowerCase();
     const { prisma } = await import("@/lib/db");
-    const user = await prisma.user.findUnique({ where: { email } });
+    const user = (await prisma.user.findUnique({ where: { email: normalizedEmail } }))
+      ?? (enteredEmail !== normalizedEmail
+        ? await prisma.user.findUnique({ where: { email: enteredEmail } })
+        : null);
 
     if (!user || !(await verifyPassword(password, user.passwordHash))) {
       return NextResponse.json(

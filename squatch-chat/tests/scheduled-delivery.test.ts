@@ -1,10 +1,17 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
+
+const authMock = vi.hoisted(() => ({ getSession: vi.fn() }));
+vi.mock("@/lib/auth", () => authMock);
+
 import { deliverDueMessages } from "@/lib/scheduledDelivery";
 import { POST as processScheduledMessages } from "@/app/api/scheduled-messages/process/route";
+import { POST as scheduleMessage } from "@/app/api/channels/[channelId]/scheduled/route";
 
 let authorId: string;
 let channelId: string;
+let serverId: string;
 
 beforeAll(async () => {
   const suffix = Math.random().toString(36).slice(2);
@@ -26,6 +33,7 @@ beforeAll(async () => {
   });
   authorId = author.id;
   channelId = channel.id;
+  serverId = server.id;
 });
 
 afterEach(() => {
@@ -152,6 +160,56 @@ describe("deliverDueMessages", () => {
         data: { banned: false },
       });
     }
+  });
+});
+
+describe("scheduled delivery notifications", () => {
+  it("fans out mention notifications for a delivered message", async () => {
+    const suffix = Math.random().toString(36).slice(2, 8);
+    const listener = await prisma.user.create({
+      data: { email: `listener-${suffix}@test.local`, username: `listener${suffix}`, passwordHash: "x" },
+    });
+    await prisma.serverMember.create({ data: { serverId, userId: listener.id } });
+    await prisma.scheduledMessage.create({
+      data: {
+        channelId,
+        authorId,
+        content: `Wake up @listener${suffix}`,
+        sendAt: new Date(Date.now() - 1_000),
+      },
+    });
+
+    const result = await deliverDueMessages();
+    const delivered = result.delivered.find((m) => m.content === `Wake up @listener${suffix}`);
+    expect(delivered).toBeDefined();
+    expect(result.notifications).toEqual([
+      expect.objectContaining({ userId: listener.id, type: "mention", messageId: delivered!.id }),
+    ]);
+    expect(
+      await prisma.notification.count({ where: { userId: listener.id, messageId: delivered!.id } }),
+    ).toBe(1);
+  });
+});
+
+describe("POST /api/channels/:channelId/scheduled", () => {
+  function schedule(body: unknown) {
+    authMock.getSession.mockResolvedValue({ userId: authorId, username: "author" });
+    return scheduleMessage(
+      new NextRequest(`http://test.local/api/channels/${channelId}/scheduled`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+      { params: Promise.resolve({ channelId }) },
+    );
+  }
+
+  it("rejects unparseable dates and overlong content instead of failing", async () => {
+    const later = new Date(Date.now() + 60_000).toISOString();
+    expect((await schedule({ content: "hi", sendAt: "not a date" })).status).toBe(400);
+    expect((await schedule({ content: "hi", sendAt: { at: later } })).status).toBe(400);
+    expect((await schedule({ content: "x".repeat(4001), sendAt: later })).status).toBe(400);
+    expect((await schedule({ content: "hi", sendAt: later })).status).toBe(200);
   });
 });
 

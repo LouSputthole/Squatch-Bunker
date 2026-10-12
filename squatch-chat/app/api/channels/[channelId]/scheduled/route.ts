@@ -3,6 +3,7 @@ import { getSession } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { resolveChannelAccess } from "@/lib/channelAccess";
 import { assertFeature } from "@/lib/features";
+import { MAX_MESSAGE_LENGTH } from "@/lib/inputLimits";
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ channelId: string }> }) {
   const session = await getSession();
@@ -38,12 +39,25 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ cha
     return NextResponse.json({ error: "Upgrade required" }, { status: 403 });
   }
 
-  const { content, sendAt } = await req.json();
-  if (!content?.trim() || !sendAt) {
+  const body: unknown = await req.json().catch(() => null);
+  const { content, sendAt } = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
+  if (
+    typeof content !== "string" || !content.trim()
+    || (typeof sendAt !== "string" && typeof sendAt !== "number")
+  ) {
     return NextResponse.json({ error: "content and sendAt required" }, { status: 400 });
+  }
+  if (content.length > MAX_MESSAGE_LENGTH) {
+    return NextResponse.json(
+      { error: `Message too long (max ${MAX_MESSAGE_LENGTH} characters)` },
+      { status: 400 },
+    );
   }
 
   const sendAtDate = new Date(sendAt);
+  if (Number.isNaN(sendAtDate.getTime())) {
+    return NextResponse.json({ error: "sendAt must be a valid date" }, { status: 400 });
+  }
   if (sendAtDate <= new Date()) {
     return NextResponse.json({ error: "sendAt must be in the future" }, { status: 400 });
   }

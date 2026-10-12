@@ -337,6 +337,31 @@ describe("channel membership gates", () => {
     }
   });
 
+  it("relays a purge batch only for ids that are really gone, and only from viewers", async () => {
+    const a = await connect(tokenA);
+    const b = await connect(tokenB);
+    const x = await connect(tokenX);
+    await joinChannel(a, channelC);
+    await joinChannel(b, channelC);
+
+    const kept = await prisma.message.create({
+      data: { channelId: channelC, authorId: userAId, content: "still here" },
+    });
+    const event = `message:deleted:${channelC}`;
+
+    const noOutsider = expectNoEvent(b, event, 300);
+    x.emit("messages:purge", { channelId: channelC, messageIds: ["gone-1"] });
+    await expect(noOutsider).resolves.toBeUndefined();
+
+    const relayed = waitFor<{ messageIds: string[] }>(b, event);
+    a.emit("messages:purge", { channelId: channelC, messageIds: ["gone-1", kept.id, 42, "gone-2"] });
+    expect((await relayed).messageIds.sort()).toEqual(["gone-1", "gone-2"]);
+
+    const noneGone = expectNoEvent(b, event, 300);
+    a.emit("messages:purge", { channelId: channelC, messageIds: [kept.id] });
+    await expect(noneGone).resolves.toBeUndefined();
+  });
+
   it("keeps hidden joins and read-only sends in parity with HTTP access", async () => {
     const owner = await connect(tokenA);
     const member = await connect(tokenB);

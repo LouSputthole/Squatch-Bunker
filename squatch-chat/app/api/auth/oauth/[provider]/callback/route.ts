@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { createToken, setTokenCookie } from "@/lib/auth";
 import { betaAccessRequired } from "@/lib/betaAccess";
+import { safeRedirectTarget } from "@/lib/safeRedirect";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 const SECURE_COOKIE = APP_URL.startsWith("https://");
@@ -167,8 +168,20 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ prov
 
     // Create session token and set auth cookie
     const token = createToken({ userId: user.id, username: user.username, tokenVersion: user.tokenVersion });
-    const response = NextResponse.redirect(`${APP_URL}/chat`);
+    // Re-validate the stored target rather than trusting the cookie value.
+    const next = safeRedirectTarget(
+      `?redirect=${encodeURIComponent(req.cookies.get(`oauth_next_${provider}`)?.value ?? "")}`,
+      new URL(APP_URL).origin,
+    );
+    const response = NextResponse.redirect(`${APP_URL}${next}`);
     setTokenCookie(response, token);
+    response.cookies.set(`oauth_next_${provider}`, "", {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: SECURE_COOKIE,
+      maxAge: 0,
+      path: "/api/auth/oauth/",
+    });
 
     // Clear the CSRF state cookie
     response.cookies.set(`oauth_state_${provider}`, "", {

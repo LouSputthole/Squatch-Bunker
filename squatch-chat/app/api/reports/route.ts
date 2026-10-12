@@ -9,9 +9,10 @@ const MIN_REASON = 10;
 const REPORTS_PER_HOUR = 5;
 
 /**
- * POST /api/reports — flag a user (optionally a specific message) for the
- * instance operator. v1 intentionally has no read API: reports are for the
- * operator, not other users, and the operator reads the table directly.
+ * POST /api/reports — flag a user (optionally a specific message). Server
+ * moderators review reports in their community's context through the Ranger
+ * Desk (GET/PATCH /api/servers/:serverId/reports, scoping in lib/reports.ts);
+ * reporters never get a read API.
  */
 export async function POST(req: Request) {
   const session = await getSession();

@@ -70,3 +70,13 @@ export const prisma = new Proxy({} as AppPrismaClient, {
 export function getDbType(): DbType {
   return isSQLite() ? "sqlite" : "postgres";
 }
+
+/**
+ * Case-insensitive substring filter. SQLite LIKE already ignores ASCII case;
+ * PostgreSQL needs `mode: "insensitive"`, which the SQLite client type omits.
+ */
+export function containsInsensitive(value: string): { contains: string } {
+  return (isSQLite()
+    ? { contains: value }
+    : { contains: value, mode: "insensitive" }) as { contains: string };
+}

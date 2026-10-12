@@ -3,7 +3,12 @@
 import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
 import Avatar from "@/components/Avatar";
+import PromptDialog from "@/components/PromptDialog";
+import ReportDialog from "@/components/ReportDialog";
+import { UserNoteCard } from "@/components/UserNoteCard";
+import { useEscape } from "@/hooks/useEscape";
 import { displayName } from "@/lib/utils";
+import { toast, toastResponseError } from "@/lib/toast";
 
 interface UserProfileModalProps {
   userId: string;
@@ -30,7 +35,7 @@ interface MutualServer {
   icon?: string | null;
 }
 
-type Tab = "about" | "servers" | "friends";
+type Tab = "about" | "servers";
 
 function formatJoinDate(iso: string) {
   const d = new Date(iso);
@@ -60,6 +65,8 @@ function UserProfileContent({
     userId === currentUserId ? "unblocked" : "loading",
   );
   const [blockError, setBlockError] = useState<string | null>(null);
+  const [confirmBlockOpen, setConfirmBlockOpen] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
 
   // Edit state
   const [editing, setEditing] = useState(false);
@@ -130,13 +137,8 @@ function UserProfileContent({
     };
   }, [tab, userId]);
 
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  // Stack-aware: Escape in the block/report dialog closes that dialog first.
+  useEscape(onClose);
 
   function handleBackdropClick(e: React.MouseEvent) {
     if (e.target === backdropRef.current) onClose();
@@ -165,17 +167,13 @@ function UserProfileContent({
     }
   }
 
+  function handleBlockClick() {
+    if (blockStatus === "blocked") void handleBlockToggle();
+    else setConfirmBlockOpen(true);
+  }
+
   async function handleBlockToggle() {
     const wasBlocked = blockStatus === "blocked";
-    if (
-      !wasBlocked &&
-      !window.confirm(
-        "Block this user? Existing friendship will be removed, their shared-server messages will be collapsed, and neither of you can start new DMs or friend requests.",
-      )
-    ) {
-      return;
-    }
-
     setBlockStatus("saving");
     setBlockError(null);
     try {
@@ -216,8 +214,12 @@ function UserProfileContent({
         const data = await res.json();
         setUser(data.user);
         setEditing(false);
+      } else {
+        await toastResponseError(res, "Couldn't save your profile");
       }
-    } catch { /* ignore */ }
+    } catch {
+      toast("Couldn't save your profile", "error");
+    }
     setSaving(false);
   }
 
@@ -229,8 +231,12 @@ function UserProfileContent({
       if (res.ok) {
         const data = await res.json();
         setEditBanner(data.url);
+      } else {
+        await toastResponseError(res, "Couldn't upload that banner");
       }
-    } catch { /* ignore */ }
+    } catch {
+      toast("Couldn't upload that banner", "error");
+    }
   }
 
   return (
@@ -338,11 +344,11 @@ function UserProfileContent({
                     onClick={handleAddFriend}
                     className={`flex-1 text-sm px-4 py-2 rounded-lg font-medium transition-colors ${
                       friendStatus === "friends"
-                        ? "bg-green-600/20 text-green-300"
+                        ? "bg-[var(--accent)]/15 text-[var(--accent)]"
                         : friendStatus === "sent"
-                        ? "bg-blue-600/20 text-blue-300"
+                        ? "bg-[var(--panel-2)] text-[var(--muted)]"
                         : friendStatus === "error"
-                        ? "bg-red-600/20 text-red-300"
+                        ? "bg-[var(--danger)]/15 text-[var(--danger)]"
                         : "bg-[var(--panel-2)] text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--accent-2)]/20"
                     }`}
                   >
@@ -360,12 +366,12 @@ function UserProfileContent({
                   </button>
                   <button
                     type="button"
-                    onClick={handleBlockToggle}
+                    onClick={handleBlockClick}
                     disabled={blockStatus === "loading" || blockStatus === "saving"}
                     className={`flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-colors disabled:opacity-50 ${
                       blockStatus === "blocked"
                         ? "bg-[var(--panel-2)] text-[var(--muted)] hover:text-[var(--text)]"
-                        : "bg-red-500/10 text-red-300 hover:bg-red-500/20"
+                        : "bg-[var(--danger)]/10 text-[var(--danger)] hover:bg-[var(--danger)]/20"
                     }`}
                   >
                     {blockStatus === "saving"
@@ -374,9 +380,21 @@ function UserProfileContent({
                       ? "Unblock"
                       : "Block"}
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => setReportOpen(true)}
+                    className="shrink-0 rounded-lg px-3 py-2 text-sm text-[var(--muted)] bg-[var(--panel-2)] hover:text-[var(--danger)] transition-colors"
+                    title={`Report ${displayName(user.username)}`}
+                    aria-label={`Report ${displayName(user.username)}`}
+                  >
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" />
+                      <line x1="4" y1="22" x2="4" y2="15" />
+                    </svg>
+                  </button>
                   </div>
                   {blockError && (
-                    <p className="text-xs text-red-300" role="alert">{blockError}</p>
+                    <p className="text-xs text-[var(--danger)]" role="alert">{blockError}</p>
                   )}
                 </div>
               )}
@@ -397,11 +415,10 @@ function UserProfileContent({
 
         {/* Tab bar */}
         <div className="flex border-b border-[var(--accent-2)]/20 px-6">
-          {(["about", "servers", "friends"] as Tab[]).map((t) => {
+          {(isSelf ? (["about"] as Tab[]) : (["about", "servers"] as Tab[])).map((t) => {
             const labels: Record<Tab, string> = {
               about: "About",
               servers: "Mutual Servers",
-              friends: "Mutual Friends",
             };
             return (
               <button
@@ -474,16 +491,6 @@ function UserProfileContent({
                 </div>
               ) : null}
 
-              <div>
-                <h3 className="text-xs font-semibold text-[var(--muted)] uppercase tracking-wide mb-2">
-                  Status
-                </h3>
-                <div className="flex items-center gap-2">
-                  <div className="w-3 h-3 rounded-full shrink-0 bg-green-500" />
-                  <span className="text-sm text-[var(--text)]">Online</span>
-                </div>
-              </div>
-
               {user.statusMessage && (
                 <div>
                   <h3 className="text-xs font-semibold text-[var(--muted)] uppercase tracking-wide mb-2">
@@ -499,6 +506,10 @@ function UserProfileContent({
                 </h3>
                 <p className="text-sm text-[var(--text)]">{formatJoinDate(user.createdAt)}</p>
               </div>
+
+              {!isSelf && (
+                <UserNoteCard targetUserId={userId} username={displayName(user.username)} />
+              )}
             </div>
           )}
 
@@ -541,20 +552,31 @@ function UserProfileContent({
             </div>
           )}
 
-          {tab === "friends" && (
-            <div className="flex flex-col items-center justify-center py-10 gap-2 text-[var(--muted)]">
-              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="opacity-40">
-                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-                <circle cx="9" cy="7" r="4" />
-                <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-                <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-              </svg>
-              <p className="text-sm font-medium">Coming soon</p>
-              <p className="text-xs">Mutual friends will appear here</p>
-            </div>
-          )}
         </div>
       </div>
+
+      {confirmBlockOpen && (
+        <PromptDialog
+          mode="confirm"
+          title={`Block ${user ? displayName(user.username) : "this user"}?`}
+          message="Existing friendship will be removed, their shared-server messages will be collapsed, and neither of you can start new DMs or friend requests."
+          confirmLabel="Block"
+          destructive
+          onConfirm={() => {
+            setConfirmBlockOpen(false);
+            void handleBlockToggle();
+          }}
+          onCancel={() => setConfirmBlockOpen(false)}
+        />
+      )}
+
+      {reportOpen && user && (
+        <ReportDialog
+          targetUserId={userId}
+          targetName={displayName(user.username)}
+          onClose={() => setReportOpen(false)}
+        />
+      )}
     </div>
   );
 }

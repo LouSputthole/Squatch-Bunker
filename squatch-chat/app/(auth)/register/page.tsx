@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
+import { safeRedirectTarget } from "@/lib/safeRedirect";
 import Link from "next/link";
 
 export default function RegisterPage() {
@@ -32,7 +33,7 @@ export default function RegisterPage() {
         return;
       }
 
-      router.push("/chat");
+      router.push(safeRedirectTarget(window.location.search, window.location.origin));
     } catch {
       setError("Something went wrong");
     } finally {
@@ -42,7 +43,7 @@ export default function RegisterPage() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-[var(--bg)]">
-      <div className="w-full max-w-md p-8 bg-[var(--panel)] rounded-lg border border-[var(--accent-2)]">
+      <div className="w-[calc(100%_-_2rem)] max-w-md p-8 bg-[var(--panel)] rounded-2xl border border-[var(--accent-2)]/40 shadow-2xl shadow-black/40">
         <div className="flex flex-col items-center mb-6">
           <Image src="/Campfire-Logo.png" alt="Campfire" width={96} height={96} className="mb-3" priority />
           <h1 className="text-3xl font-bold text-[var(--text)] mb-1">
@@ -127,7 +128,7 @@ export default function RegisterPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-2 bg-[var(--accent-2)] text-[var(--text)] rounded hover:bg-[var(--accent)] hover:text-[var(--bg)] transition-colors disabled:opacity-50 font-medium"
+            className="w-full py-2.5 bg-[var(--accent-2)] text-white rounded-lg hover:bg-[var(--accent)] hover:text-[var(--bg)] transition-colors disabled:opacity-50 font-semibold"
           >
             {loading ? "Setting up camp..." : "Create Account"}
           </button>
@@ -141,14 +142,15 @@ export default function RegisterPage() {
 
         <Link
           href="/login"
-          className="block w-full py-2 text-center bg-[var(--panel-2)] text-[var(--text)] rounded border border-[var(--accent-2)]/50 hover:border-[var(--accent-2)] transition-colors font-medium"
+          onClick={(e) => { e.preventDefault(); router.push(`/login${window.location.search}`); }}
+          className="block w-full py-2.5 text-center border border-[var(--accent)]/70 text-[var(--accent)] rounded-lg hover:bg-[var(--accent)]/10 transition-colors font-semibold"
         >
           Continue as Guest
         </Link>
 
         <p className="mt-6 text-center text-sm text-[var(--muted)]">
           Already have an account?{" "}
-          <Link href="/login" className="text-[var(--accent)] hover:underline">
+          <Link href="/login" onClick={(e) => { e.preventDefault(); router.push(`/login${window.location.search}`); }} className="text-[var(--accent)] hover:underline">
             Log In
           </Link>
         </p>

@@ -29,6 +29,7 @@ const TYPE_ICONS: Record<string, string> = {
   reply: "↩",
   dm: "✉",
   friend_request: "🤝",
+  gathering: "📅",
 };
 
 function relativeTime(iso: string): string {
@@ -238,7 +239,7 @@ export default function EmberInbox({ currentServerId, currentChannelId, onNaviga
       </button>
 
       {open && (
-        <div style={{ position: "absolute", bottom: "calc(100% + 8px)", right: -8, width: 320, maxHeight: 420, display: "flex", flexDirection: "column", background: "var(--panel)", border: "1px solid var(--muted)", borderRadius: 8, boxShadow: "0 8px 24px rgba(0,0,0,0.4)", zIndex: 60, overflow: "hidden" }}>
+        <div style={{ position: "fixed", bottom: 96, left: "max(8px, min(80px, calc(100vw - 328px)))", width: "min(320px, calc(100vw - 16px))", maxHeight: "min(420px, calc(100dvh - 120px))", display: "flex", flexDirection: "column", background: "var(--panel)", border: "1px solid color-mix(in srgb, var(--accent-2) 40%, transparent)", borderRadius: 10, boxShadow: "0 12px 32px rgba(0,0,0,0.45)", zIndex: 60, overflow: "hidden" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", borderBottom: "1px solid rgba(128,128,128,0.2)" }}>
             <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text)" }}>Ember Inbox</span>
             <span style={{ display: "inline-flex", gap: 8 }}>

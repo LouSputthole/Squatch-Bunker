@@ -1,8 +1,16 @@
 # Campfire product and engineering roadmap
 
-Updated: 2026-07-13
+Updated: 2026-10-08
 
 Campfire’s direction is **Discord-shaped community infrastructure with a warmer, more intentional social layer**. The goal is not to copy every Discord surface at once. The sequence is: make the current product trustworthy for small communities, prove operations, scale media, then deepen both parity and Campfire’s own identity.
+
+## Handoff — where things stand (2026-10-08)
+
+- **Open PRs:** #16 (polish pass) and #17 (completion wave, built on top of #16) both target `main`, CI is green, and every review thread is resolved. Merging #17 lands both, and GitHub then marks #16 as merged. If you merge #16 first, run `gh pr update-branch 17` and wait for CI before merging #17, because branch protection requires an up-to-date branch. Neither PR changes the schema or adds migrations.
+- **Verified on the branch:** about 680 tests, lint, TypeScript, production build, `release:check`, `db:check`, and the dependency audit gate. Both PRs also had code and security reviews.
+- **Not done (machine/infra):** the `0.1.0-beta.1` desktop build. Run `npm run desktop:stage && npm run desktop:verify -- --require-stage && npm run desktop:dist`, smoke-test the portable and installer builds (persistence, LAN toggle, no orphaned server process), record SHA-256 checksums, and attach them to a **draft** GitHub release only. Publishing a release arms the auto-updater for installed 0.0.x users, and the beta tag stays unpublished until the evidence gates in [the release notes](./docs/releases/0.1.0-beta.1.md#evidence-gates-before-tagging) are met.
+- **Needs people/infra:** a two-person real-microphone voice playtest (including Fireside Stage), public HTTPS + TURN staging, code signing, and a browser matrix. Four stale merged branches still need deleting: `agent/public-staging-verifier`, `codex/campfire-five-features-20260712`, `feat/hosted-postgres`, and `release/0.1.0-beta.1`. A scratch Neon project (`flat-leaf-31484496`) also needs deleting.
+- **Next build-out:** the rest of Ranger Desk (assignment, evidence, escalation, appeals), then Trail Boards and Gathering Seasons. See [Next five build-outs](#next-five-build-outs).
 
 Status notation:
 
@@ -50,6 +58,15 @@ Status notation:
 - Next.js, Stripe dependency, and Turbopack compatibility fixes.
 - Explicit fail-safe Community versus Cloud edition selection and production Cloud configuration validation.
 - Stripe checkout and entitlement hardening: guest rejection, Customer reuse, checkout claims, approved price/status validation, Stripe v22 item-period handling, stale-event rejection, invoice/cancellation transitions, unique Stripe IDs, and handler-level regression tests.
+
+### Polish and completion waves (2026-10-08, PRs #16 and #17)
+
+- **Security floor:** Next.js 16.3.8+ (critical RCE + SSRF advisories), patched transitive deps, Electron 43.7.9; OAuth and login keep a safe, same-origin post-login redirect.
+- **Realtime reliability:** sockets recover from server disconnects, database blips, and background-tab throttling; presence is per user with a grace period; guest upgrades re-handshake.
+- **Chat completion:** history paging, editing, threads (deletion respects reply authorship), saved messages, reports, search filters (local-timezone days), purge, slow mode, export, welcome messages, and in-app dialogs instead of `window.prompt`.
+- **Community features:** Ranger Desk first slice (moderator report inbox), gathering reminders in the Ember Inbox, expired-guest sweep, username changes (sessions read the current username from the database), DM attachments with unread/read state, custom emoji in chat and reactions (own uploads only), custom-role channel permission overrides, and server templates.
+- **Experience:** Campfire palette is the default and applies on every page; a mobile tab bar, channel drawer, and visible composer; Discord-style message grouping; toasts and focus rings.
+- **Desktop launcher:** tray menu, "Share on this network" LAN toggle (port 3939, plain HTTP with `COOKIE_SECURE=0`), prerelease-aware update checker, and a parent-PID watchdog, all on the current Electron pipeline.
 
 These lists describe implementation scope, not a public release. The authoritative boundaries are in [docs/GAP_ANALYSIS.md](./docs/GAP_ANALYSIS.md).
 
@@ -144,13 +161,13 @@ Exit: Campfire covers the high-value Discord workflows its target communities ac
 
 These are the ranked follow-on features after the current ten-feature wave:
 
-1. **Ranger Desk** — a moderation case inbox with evidence, assignment, action history, escalation, and appeals.
+1. **Ranger Desk** — a moderation case inbox with evidence, assignment, action history, escalation, and appeals. **First slice complete (2026-10-08):** moderators with MANAGE_MESSAGES/KICK/BAN see open message reports for channels they can view in their own server and resolve or dismiss them (audited); reports about the viewer and user-level reports never reach server moderators, and the instance admin page lists unscoped reports. Assignment, evidence capture, escalation, and appeals remain.
 2. **Fireside Stage** — **complete in worktree (2026-07-26):** the `fireside-stage` voice-room mode opens with the first arrival hosting; listeners raise hands into a FIFO queue, the host or a MOVE_MEMBERS moderator promotes/demotes, capacity is eight speakers, and host transfer/cleanup runs on leave, kick, move, and disconnect. Stage state shares the Lantern trust boundary: process-local, advisory, client-side audience muting — not media-enforced.
 3. **Trail Boards** — forum-style channels with tags, searchable posts, resolved/archived states, and durable topic ownership.
 4. **Ember Inbox** — **complete in worktree (2026-07-26):** durable per-user notifications (mentions, replies, DMs collapsed per conversation, friend requests) with unread state, mark-read/clear APIs, per-space all/mentions/none policy enforcement, quiet hours (client-evaluated, DB-synced), realtime `notification:new` push, and an inbox UI replacing the ephemeral bell. Digest/email delivery remains future work.
 5. **Gathering Seasons** — recurring Gatherings with external calendar links, host controls, capacity, waitlists, and reminder policy.
 
-Items 2 and 4 describe implementation scope, not a public release — they still pass through the release gates like everything else. Ranger Desk is next: safety tooling is the remaining prerequisite for larger public communities.
+Items 2 and 4 describe implementation scope, not a public release — they still pass through the release gates like everything else. The rest of Ranger Desk is next: safety tooling is the remaining prerequisite for larger public communities.
 
 ## Milestone 6 — deepen Campfire’s own flare
 

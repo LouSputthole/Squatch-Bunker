@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { safeRedirectTarget } from "@/lib/safeRedirect";
 
 const GITHUB_CLIENT_ID = process.env.GITHUB_CLIENT_ID ?? "";
 const GITHUB_CLIENT_SECRET = process.env.GITHUB_CLIENT_SECRET ?? "";
@@ -45,6 +46,14 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ prov
   // Store state in cookie for CSRF protection
   const response = NextResponse.redirect(authUrl);
   response.cookies.set(`oauth_state_${provider}`, state, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: SECURE_COOKIE,
+    maxAge: 300,
+    path: "/api/auth/oauth/",
+  });
+  // Where to land after the provider round-trip (invite links, deep links) — same-origin only.
+  response.cookies.set(`oauth_next_${provider}`, safeRedirectTarget(req.nextUrl.search, new URL(APP_URL).origin), {
     httpOnly: true,
     sameSite: "lax",
     secure: SECURE_COOKIE,

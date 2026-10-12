@@ -71,7 +71,8 @@ export function useKeyboardShortcuts({
       }
 
       // Escape: close overlays
-      if (e.key === "Escape") {
+      // Skip when a dialog's useEscape layer already handled it.
+      if (e.key === "Escape" && !e.defaultPrevented) {
         if (shortcutsOpen) { setShortcutsOpen?.(() => false); return; }
         if (searchOpen) { setSearchOpen(() => false); return; }
         if (settingsOpen) { setSettingsOpen(false); return; }

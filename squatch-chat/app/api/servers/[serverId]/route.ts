@@ -8,6 +8,7 @@ import {
 } from "@/lib/messageRetention";
 import { memberHasPermission } from "@/lib/serverRoles";
 import { notifyRealtimeAuthorizationChange } from "@/lib/realtimeControl";
+import { MAX_SERVER_DESCRIPTION_LENGTH, parseServerName } from "@/lib/inputLimits";
 
 export async function PATCH(
   request: Request,
@@ -18,7 +19,7 @@ export async function PATCH(
 
   const { serverId } = await params;
   const body = (await request.json()) as Record<string, unknown>;
-  const { name, regenerateInvite, revokeInvite, icon, banner } = body;
+  const { regenerateInvite, revokeInvite, icon, banner } = body;
 
   try {
     const { prisma } = await import("@/lib/db");
@@ -45,8 +46,33 @@ export async function PATCH(
       inviteRevokedAt?: Date | null;
       icon?: string | null;
       banner?: string | null;
+      description?: string | null;
+      isPublic?: boolean;
     } = {};
-    if (typeof name === "string" && name.trim()) updates.name = name.trim();
+    if ("name" in body) {
+      const name = parseServerName(body.name);
+      if (!name.ok) return NextResponse.json({ error: name.error }, { status: 400 });
+      updates.name = name.value;
+    }
+    if ("description" in body) {
+      if (body.description !== null && typeof body.description !== "string") {
+        return NextResponse.json({ error: "Description must be a string" }, { status: 400 });
+      }
+      const description = typeof body.description === "string" ? body.description.trim() : "";
+      if (description.length > MAX_SERVER_DESCRIPTION_LENGTH) {
+        return NextResponse.json(
+          { error: `Description must be at most ${MAX_SERVER_DESCRIPTION_LENGTH} characters` },
+          { status: 400 },
+        );
+      }
+      updates.description = description || null;
+    }
+    if ("isPublic" in body) {
+      if (typeof body.isPublic !== "boolean") {
+        return NextResponse.json({ error: "isPublic must be a boolean" }, { status: 400 });
+      }
+      updates.isPublic = body.isPublic;
+    }
     if (typeof icon === "string") updates.icon = icon || null;
     if (regenerateInvite === true) {
       const settings = parseInviteRegeneration(body);
@@ -80,11 +106,24 @@ export async function PATCH(
       return NextResponse.json({ error: "Nothing to update" }, { status: 400 });
     }
 
-    const updated = await prisma.server.update({
-      where: { id: serverId },
-      data: updates,
-      include: { channels: true, _count: { select: { members: true } } },
-    });
+    const changedFields = [
+      ...new Set(Object.keys(updates).map((key) => (key.startsWith("invite") ? "invite" : key))),
+    ];
+    const [updated] = await prisma.$transaction([
+      prisma.server.update({
+        where: { id: serverId },
+        data: updates,
+        include: { channels: true, _count: { select: { members: true } } },
+      }),
+      prisma.auditLog.create({
+        data: {
+          serverId,
+          actorId: session.userId,
+          action: "server_update",
+          detail: `Updated ${changedFields.join(", ")}`,
+        },
+      }),
+    ]);
     const replacedMedia = [
       updates.icon !== undefined && updates.icon !== server.icon
         ? server.icon

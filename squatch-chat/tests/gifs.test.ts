@@ -35,7 +35,6 @@ describe("GET /api/gifs", () => {
       username: "camper",
     });
     vi.stubEnv("GIPHY_API_KEY", "");
-    vi.stubEnv("TENOR_API_KEY", "");
     const GET = await loadGet();
     const response = await GET(request("campfire"));
 

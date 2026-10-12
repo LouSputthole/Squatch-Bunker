@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
+import { containsInsensitive } from "@/lib/db";
 
 // GET /api/users/search?q=username — search users by username
 export async function GET(req: NextRequest) {
@@ -16,7 +17,7 @@ export async function GET(req: NextRequest) {
 
     const users = await prisma.user.findMany({
       where: {
-        username: { contains: q },
+        username: containsInsensitive(q),
         id: { not: session.userId },
       },
       select: { id: true, username: true, avatar: true },

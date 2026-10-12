@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { downloadText } from "@/lib/download";
 import { journalMarkdown } from "@/lib/journal";
+import { toast, toastResponseError } from "@/lib/toast";
 
 interface JournalEntry {
   id: string;
@@ -28,8 +29,11 @@ export default function CampJournalPanel({
   onJumpToMessage?: (channelId: string, messageId: string) => void;
 }) {
   const [entries, setEntries] = useState<JournalEntry[]>([]);
-  const [loadedServerId, setLoadedServerId] = useState<string | null>(null);
-  const loading = loadedServerId !== serverId;
+  const [reloadCount, setReloadCount] = useState(0);
+  const loadKey = `${serverId}:${reloadCount}`;
+  const [loadedKey, setLoadedKey] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState(false);
+  const loading = loadedKey !== loadKey;
 
   useEffect(() => {
     const controller = new AbortController();
@@ -38,11 +42,12 @@ export default function CampJournalPanel({
     })
       .then(async (response) => ({
         ok: response.ok,
-        data: await response.json(),
+        data: await response.json().catch(() => ({})),
       }))
       .then(({ ok, data }) => {
         if (!controller.signal.aborted) {
           setEntries(ok ? data.entries ?? [] : []);
+          setLoadError(!ok);
         }
       })
       .catch((cause: unknown) => {
@@ -51,19 +56,28 @@ export default function CampJournalPanel({
           && (!(cause instanceof Error) || cause.name !== "AbortError")
         ) {
           setEntries([]);
+          setLoadError(true);
         }
       })
       .finally(() => {
-        if (!controller.signal.aborted) setLoadedServerId(serverId);
+        if (!controller.signal.aborted) setLoadedKey(`${serverId}:${reloadCount}`);
       });
     return () => controller.abort();
-  }, [serverId]);
+  }, [serverId, reloadCount]);
 
   async function remove(entryId: string) {
-    const response = await fetch(`/api/servers/${serverId}/journal?entryId=${encodeURIComponent(entryId)}`, {
-      method: "DELETE",
-    });
-    if (response.ok) setEntries((current) => current.filter((entry) => entry.id !== entryId));
+    try {
+      const response = await fetch(`/api/servers/${serverId}/journal?entryId=${encodeURIComponent(entryId)}`, {
+        method: "DELETE",
+      });
+      if (!response.ok) {
+        await toastResponseError(response, "Couldn't remove that keepsake");
+        return;
+      }
+      setEntries((current) => current.filter((entry) => entry.id !== entryId));
+    } catch {
+      toast("Couldn't remove that keepsake", "error");
+    }
   }
 
   return (
@@ -88,6 +102,16 @@ export default function CampJournalPanel({
       <div className="flex-1 overflow-y-auto p-3 space-y-3">
         {loading ? (
           <p className="text-xs text-[var(--muted)]">Opening your journal...</p>
+        ) : loadError ? (
+          <div className="text-center text-[var(--muted)] py-8" role="alert">
+            <p className="text-sm font-medium">Couldn&apos;t open your journal</p>
+            <button
+              onClick={() => setReloadCount((count) => count + 1)}
+              className="mt-2 rounded-lg bg-[var(--panel-2)] px-3 py-1.5 text-xs text-[var(--text)] hover:bg-[var(--accent-2)]/30"
+            >
+              Try again
+            </button>
+          </div>
         ) : entries.length === 0 ? (
           <div className="text-center text-[var(--muted)] py-8">
             <p className="text-sm font-medium">No keepsakes yet</p>
@@ -107,13 +131,14 @@ export default function CampJournalPanel({
               <div className="flex items-center gap-2">
                 {entry.sourceMessage && entry.sourceMessageId && onJumpToMessage && (
                   <button
-                    className="hover:text-[var(--accent-2)]"
+                    className="hover:text-[var(--accent)]"
                     onClick={() => onJumpToMessage(entry.sourceMessage!.channelId, entry.sourceMessageId!)}
+                    aria-label="Jump to original message"
                   >
                     Jump
                   </button>
                 )}
-                <button className="hover:text-[var(--danger)]" onClick={() => void remove(entry.id)}>Remove</button>
+                <button className="hover:text-[var(--danger)]" onClick={() => void remove(entry.id)} aria-label="Remove keepsake">Remove</button>
               </div>
             </div>
           </article>

@@ -2,7 +2,10 @@
 
 import { useState, useEffect, useCallback } from "react";
 import Avatar from "@/components/Avatar";
+import PromptDialog from "@/components/PromptDialog";
+import { useEscape } from "@/hooks/useEscape";
 import { displayName } from "@/lib/utils";
+import { toast, toastResponseError } from "@/lib/toast";
 
 interface FriendUser {
   id: string;
@@ -38,6 +41,8 @@ export default function FriendPanel({ onlineMemberIds, onMessageUser }: FriendPa
   const [loading, setLoading] = useState(true);
   const [addInput, setAddInput] = useState("");
   const [addStatus, setAddStatus] = useState<{ type: "ok" | "err"; msg: string } | null>(null);
+  const [pendingRemoval, setPendingRemoval] = useState<Friend | null>(null);
+  const [busyIds, setBusyIds] = useState<ReadonlySet<string>>(() => new Set());
   const searchQuery = tab === "add" && addInput.trim().length >= 2 ? addInput.trim() : "";
   const [searchState, setSearchState] = useState<{
     query: string;
@@ -51,16 +56,48 @@ export default function FriendPanel({ onlineMemberIds, onMessageUser }: FriendPa
   const fetchFriends = useCallback(async () => {
     try {
       const res = await fetch("/api/friends");
+      if (!res.ok) {
+        await toastResponseError(res, "Couldn't load your friends list");
+        return;
+      }
       const data = await res.json();
       setFriends(data.friends || []);
       setIncoming(data.incoming || []);
       setOutgoing(data.outgoing || []);
+    } catch {
+      toast("Couldn't load your friends list", "error");
     } finally {
       setLoading(false);
     }
   }, []);
 
-  useEffect(() => { fetchFriends(); }, [fetchFriends]);
+  /** Runs a friendship mutation, toasting the server's error on failure. */
+  async function mutateFriendship(id: string, init: RequestInit, failure: string, success?: string) {
+    if (busyIds.has(id)) return;
+    setBusyIds((current) => new Set(current).add(id));
+    try {
+      const res = await fetch(`/api/friends/${id}`, init);
+      if (!res.ok) {
+        await toastResponseError(res, failure);
+        return;
+      }
+      if (success) toast(success, "success");
+      await fetchFriends();
+    } catch {
+      toast(failure, "error");
+    } finally {
+      setBusyIds((current) => {
+        const next = new Set(current);
+        next.delete(id);
+        return next;
+      });
+    }
+  }
+
+  useEffect(() => {
+    const timer = setTimeout(() => { void fetchFriends(); }, 0);
+    return () => clearTimeout(timer);
+  }, [fetchFriends]);
 
   // Search users as they type
   useEffect(() => {
@@ -90,39 +127,46 @@ export default function FriendPanel({ onlineMemberIds, onMessageUser }: FriendPa
 
   async function sendRequest(username: string) {
     setAddStatus(null);
-    const res = await fetch("/api/friends", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username }),
-    });
-    const data = await res.json();
-    if (res.ok) {
-      setAddStatus({ type: "ok", msg: data.autoAccepted ? `Now friends with ${username}!` : `Request sent to ${username}` });
-      setAddInput("");
-      setSearchState({ query: "", users: [], searching: false });
-      fetchFriends();
-    } else {
-      setAddStatus({ type: "err", msg: data.error || "Failed" });
+    try {
+      const res = await fetch("/api/friends", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setAddStatus({ type: "ok", msg: data.autoAccepted ? `Now friends with ${username}!` : `Request sent to ${username}` });
+        setAddInput("");
+        setSearchState({ query: "", users: [], searching: false });
+        void fetchFriends();
+      } else {
+        setAddStatus({ type: "err", msg: data.error || "Couldn't send the friend request" });
+      }
+    } catch {
+      setAddStatus({ type: "err", msg: "Couldn't send the friend request. Check your connection." });
     }
   }
 
-  async function acceptRequest(id: string) {
-    await fetch(`/api/friends/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "accept" }),
-    });
-    fetchFriends();
+  function acceptRequest(id: string) {
+    return mutateFriendship(
+      id,
+      { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "accept" }) },
+      "Couldn't accept the request",
+    );
   }
 
-  async function rejectRequest(id: string) {
-    await fetch(`/api/friends/${id}`, { method: "DELETE" });
-    fetchFriends();
+  function rejectRequest(id: string, failure = "Couldn't decline the request") {
+    return mutateFriendship(id, { method: "DELETE" }, failure);
   }
 
-  async function removeFriend(id: string) {
-    await fetch(`/api/friends/${id}`, { method: "DELETE" });
-    fetchFriends();
+  async function removeFriend(friend: Friend) {
+    await mutateFriendship(
+      friend.id,
+      { method: "DELETE" },
+      "Couldn't remove friend",
+      `Removed ${displayName(friend.user.username)} from your friends`,
+    );
+    setPendingRemoval(null);
   }
 
   const onlineFriends = friends.filter((f) => onlineMemberIds.has(f.user.id));
@@ -147,13 +191,16 @@ export default function FriendPanel({ onlineMemberIds, onMessageUser }: FriendPa
               onClick={() => { setTab(t.key); setAddStatus(null); }}
               className={`px-3 py-1 rounded-md text-xs font-medium transition-colors relative ${
                 tab === t.key
-                  ? "bg-amber-600/20 text-amber-300"
+                  ? "bg-[var(--accent)]/20 text-[var(--accent)]"
                   : "text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--panel-2)]"
               }`}
             >
               {t.label}
               {t.badge ? (
-                <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[9px] rounded-full flex items-center justify-center">
+                <span
+                  aria-label={`${t.badge} pending`}
+                  className="absolute -top-1 -right-1 w-4 h-4 bg-[var(--danger)] text-white text-[9px] rounded-full flex items-center justify-center"
+                >
                   {t.badge}
                 </span>
               ) : null}
@@ -193,7 +240,7 @@ export default function FriendPanel({ onlineMemberIds, onMessageUser }: FriendPa
                         friend={f}
                         online
                         onMessage={() => onMessageUser(f.user.id)}
-                        onRemove={() => removeFriend(f.id)}
+                        onRemove={() => setPendingRemoval(f)}
                       />
                     ))}
                   </div>
@@ -210,7 +257,7 @@ export default function FriendPanel({ onlineMemberIds, onMessageUser }: FriendPa
                         friend={f}
                         online={false}
                         onMessage={() => onMessageUser(f.user.id)}
-                        onRemove={() => removeFriend(f.id)}
+                        onRemove={() => setPendingRemoval(f)}
                       />
                     ))}
                   </div>
@@ -237,16 +284,20 @@ export default function FriendPanel({ onlineMemberIds, onMessageUser }: FriendPa
                           <p className="text-[10px] text-[var(--muted)]">Incoming request</p>
                         </div>
                         <button
-                          onClick={() => acceptRequest(r.id)}
-                          className="w-8 h-8 rounded-full bg-green-600/20 text-green-400 hover:bg-green-600/30 flex items-center justify-center"
+                          onClick={() => void acceptRequest(r.id)}
+                          disabled={busyIds.has(r.id)}
+                          className="w-8 h-8 rounded-full bg-[var(--accent)]/20 text-[var(--accent)] hover:bg-[var(--accent)]/30 flex items-center justify-center disabled:opacity-50"
                           title="Accept"
+                          aria-label={`Accept friend request from ${displayName(r.user.username)}`}
                         >
                           ✓
                         </button>
                         <button
-                          onClick={() => rejectRequest(r.id)}
-                          className="w-8 h-8 rounded-full bg-red-600/20 text-red-400 hover:bg-red-600/30 flex items-center justify-center"
-                          title="Reject"
+                          onClick={() => void rejectRequest(r.id)}
+                          disabled={busyIds.has(r.id)}
+                          className="w-8 h-8 rounded-full bg-[var(--danger)]/20 text-[var(--danger)] hover:bg-[var(--danger)]/30 flex items-center justify-center disabled:opacity-50"
+                          title="Decline"
+                          aria-label={`Decline friend request from ${displayName(r.user.username)}`}
                         >
                           ✕
                         </button>
@@ -267,8 +318,10 @@ export default function FriendPanel({ onlineMemberIds, onMessageUser }: FriendPa
                           <p className="text-[10px] text-[var(--muted)]">Sent request</p>
                         </div>
                         <button
-                          onClick={() => rejectRequest(r.id)}
-                          className="text-xs text-[var(--muted)] hover:text-red-400"
+                          onClick={() => void rejectRequest(r.id, "Couldn't cancel the request")}
+                          disabled={busyIds.has(r.id)}
+                          aria-label={`Cancel friend request to ${displayName(r.user.username)}`}
+                          className="text-xs text-[var(--muted)] hover:text-[var(--danger)] disabled:opacity-50"
                         >
                           Cancel
                         </button>
@@ -288,21 +341,25 @@ export default function FriendPanel({ onlineMemberIds, onMessageUser }: FriendPa
                 type="text"
                 value={addInput}
                 onChange={(e) => { setAddInput(e.target.value); setAddStatus(null); }}
-                onKeyDown={(e) => { if (e.key === "Enter" && addInput.trim()) sendRequest(addInput.trim()); }}
+                onKeyDown={(e) => { if (e.key === "Enter" && addInput.trim()) void sendRequest(addInput.trim()); }}
                 placeholder="Enter username..."
-                className="flex-1 bg-[var(--panel)] text-[var(--text)] text-sm px-3 py-2 rounded-lg border border-[var(--accent-2)]/30 focus:outline-none focus:border-amber-600/50"
+                aria-label="Username to add"
+                className="flex-1 bg-[var(--panel)] text-[var(--text)] text-sm px-3 py-2 rounded-lg border border-[var(--accent-2)]/30 focus:outline-none focus:border-[var(--accent)]/60"
               />
               <button
-                onClick={() => addInput.trim() && sendRequest(addInput.trim())}
+                onClick={() => { if (addInput.trim()) void sendRequest(addInput.trim()); }}
                 disabled={!addInput.trim()}
-                className="px-4 py-2 bg-amber-600/30 text-amber-300 rounded-lg text-sm hover:bg-amber-600/40 disabled:opacity-30 transition-colors"
+                className="px-4 py-2 bg-[var(--accent-2)]/40 text-[var(--text)] rounded-lg text-sm hover:bg-[var(--accent-2)]/60 disabled:opacity-30 transition-colors"
               >
                 Send
               </button>
             </div>
 
             {addStatus && (
-              <p className={`text-xs mb-3 ${addStatus.type === "ok" ? "text-green-400" : "text-red-400"}`}>
+              <p
+                role={addStatus.type === "err" ? "alert" : "status"}
+                className={`text-xs mb-3 ${addStatus.type === "ok" ? "text-[var(--accent)]" : "text-[var(--danger)]"}`}
+              >
                 {addStatus.msg}
               </p>
             )}
@@ -317,8 +374,9 @@ export default function FriendPanel({ onlineMemberIds, onMessageUser }: FriendPa
                     <Avatar username={u.username} avatarUrl={u.avatar} size={36} />
                     <span className="text-sm text-[var(--text)] flex-1 truncate">{displayName(u.username)}</span>
                     <button
-                      onClick={() => sendRequest(u.username)}
-                      className="text-xs px-3 py-1 bg-amber-600/20 text-amber-300 rounded hover:bg-amber-600/30"
+                      onClick={() => void sendRequest(u.username)}
+                      aria-label={`Send friend request to ${displayName(u.username)}`}
+                      className="text-xs px-3 py-1 bg-[var(--accent-2)]/30 text-[var(--text)] rounded hover:bg-[var(--accent-2)]/50"
                     >
                       Add
                     </button>
@@ -329,6 +387,18 @@ export default function FriendPanel({ onlineMemberIds, onMessageUser }: FriendPa
           </div>
         )}
       </div>
+
+      {pendingRemoval && (
+        <PromptDialog
+          mode="confirm"
+          title={`Remove ${displayName(pendingRemoval.user.username)}?`}
+          message="They won't be notified. You can send a new friend request later."
+          confirmLabel="Remove friend"
+          destructive
+          onConfirm={() => removeFriend(pendingRemoval)}
+          onCancel={() => setPendingRemoval(null)}
+        />
+      )}
     </div>
   );
 }
@@ -345,6 +415,9 @@ function FriendRow({
   onRemove: () => void;
 }) {
   const [showMenu, setShowMenu] = useState(false);
+  const name = displayName(friend.user.username);
+
+  useEscape(() => setShowMenu(false), showMenu);
 
   return (
     <div
@@ -363,11 +436,12 @@ function FriendRow({
         <p className="text-sm font-medium text-[var(--text)] truncate">{displayName(friend.user.username)}</p>
         <p className="text-[10px] text-[var(--muted)]">{online ? "Online" : "Offline"}</p>
       </div>
-      <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+      <div className="flex gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity">
         <button
           onClick={onMessage}
           className="w-8 h-8 rounded-full bg-[var(--panel)] text-[var(--muted)] hover:text-[var(--text)] flex items-center justify-center"
           title="Message"
+          aria-label={`Message ${name}`}
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
@@ -376,6 +450,10 @@ function FriendRow({
         <button
           onClick={() => setShowMenu((p) => !p)}
           className="w-8 h-8 rounded-full bg-[var(--panel)] text-[var(--muted)] hover:text-[var(--text)] flex items-center justify-center"
+          title="More options"
+          aria-label={`More options for ${name}`}
+          aria-haspopup="menu"
+          aria-expanded={showMenu}
         >
           ⋯
         </button>
@@ -384,16 +462,18 @@ function FriendRow({
       {showMenu && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setShowMenu(false)} />
-          <div className="absolute right-4 top-10 bg-[var(--panel)] border border-[var(--accent-2)]/30 rounded-lg shadow-xl py-1 z-50 w-36">
+          <div role="menu" className="absolute right-4 top-10 bg-[var(--panel)] border border-[var(--accent-2)]/30 rounded-lg shadow-xl py-1 z-50 w-36">
             <button
+              role="menuitem"
               onClick={() => { onMessage(); setShowMenu(false); }}
               className="w-full px-3 py-1.5 text-left text-sm text-[var(--text)] hover:bg-[var(--accent-2)]/20"
             >
               Message
             </button>
             <button
+              role="menuitem"
               onClick={() => { onRemove(); setShowMenu(false); }}
-              className="w-full px-3 py-1.5 text-left text-sm text-red-400 hover:bg-red-600/10"
+              className="w-full px-3 py-1.5 text-left text-sm text-[var(--danger)] hover:bg-[var(--danger)]/10"
             >
               Remove Friend
             </button>

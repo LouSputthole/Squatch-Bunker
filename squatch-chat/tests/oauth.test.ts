@@ -243,3 +243,47 @@ describe("OAuth callback identity verification", () => {
     expect(mocks.auth.setTokenCookie).not.toHaveBeenCalled();
   });
 });
+
+describe("OAuth post-login target", () => {
+  function linkedGoogleUser() {
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: "provider-token" }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ id: "g-1", email: "linked@example.com", verified_email: true, name: "L", picture: null }),
+        { status: 200 },
+      ));
+    mocks.prisma.oAuthAccount.findUnique.mockResolvedValue({
+      user: { id: "u-1", email: "linked@example.com", username: "linked", tokenVersion: 0 },
+    });
+  }
+
+  function callbackWithNext(next: string) {
+    return new NextRequest(
+      `${APP_URL}/api/auth/oauth/google/callback?code=provider-code&state=s`,
+      { headers: { cookie: `oauth_state_google=s; oauth_next_google=${encodeURIComponent(next)}` } },
+    );
+  }
+
+  it("remembers a same-origin ?redirect= at initiation", async () => {
+    const { GET } = await import("@/app/api/auth/oauth/[provider]/route");
+    const response = await GET(
+      new NextRequest(`${APP_URL}/api/auth/oauth/google?redirect=${encodeURIComponent("/join/abc")}`),
+      { params: Promise.resolve({ provider: "google" }) },
+    );
+    expect(response.headers.get("set-cookie") ?? "").toContain(`oauth_next_google=${encodeURIComponent("/join/abc")}`);
+  });
+
+  it("lands on the remembered target after the callback", async () => {
+    linkedGoogleUser();
+    const { GET } = await import("@/app/api/auth/oauth/[provider]/callback/route");
+    const response = await GET(callbackWithNext("/join/abc"), { params: Promise.resolve({ provider: "google" }) });
+    expect(response.headers.get("location")).toBe(`${APP_URL}/join/abc`);
+  });
+
+  it("ignores a tampered off-origin target", async () => {
+    linkedGoogleUser();
+    const { GET } = await import("@/app/api/auth/oauth/[provider]/callback/route");
+    const response = await GET(callbackWithNext("//evil.example"), { params: Promise.resolve({ provider: "google" }) });
+    expect(response.headers.get("location")).toBe(`${APP_URL}/chat`);
+  });
+});

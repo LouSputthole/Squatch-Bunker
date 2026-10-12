@@ -6,6 +6,10 @@ import { getSocket } from "@/lib/socket";
 import { displayName } from "@/lib/utils";
 import { useMutedChannels } from "@/hooks/useMutedChannels";
 import InviteModal from "@/components/InviteModal";
+import PromptDialog, { type PromptDialogRequest } from "@/components/PromptDialog";
+import { useEscape } from "@/hooks/useEscape";
+import { downloadText } from "@/lib/download";
+import { toast, toastResponseError } from "@/lib/toast";
 import {
   VOICE_ROOM_MODES,
   VOICE_ROOM_SCENES,
@@ -22,7 +26,27 @@ interface Channel {
   roomMode?: string;
   roomScene?: string;
   retentionDays?: number | null;
+  slowModeSeconds?: number;
 }
+
+const SLOW_MODE_OPTIONS = [
+  { value: "0", label: "Off" },
+  { value: "5", label: "5 seconds" },
+  { value: "10", label: "10 seconds" },
+  { value: "30", label: "30 seconds" },
+  { value: "60", label: "1 minute" },
+  { value: "300", label: "5 minutes" },
+  { value: "900", label: "15 minutes" },
+  { value: "3600", label: "1 hour" },
+  { value: "21600", label: "6 hours" },
+];
+
+const RETENTION_OPTIONS = [
+  { value: "forever", label: "Keep forever" },
+  { value: "1", label: "24 hours" },
+  { value: "7", label: "7 days" },
+  { value: "30", label: "30 days" },
+];
 
 interface VoiceParticipant {
   userId: string;
@@ -98,7 +122,7 @@ function MuteIcon() {
 
 function MicOffIcon() {
   return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-red-400">
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-[var(--danger)]">
       <line x1="1" y1="1" x2="23" y2="23" /><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6" /><path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2c0 .76-.13 1.49-.35 2.17" /><line x1="12" y1="19" x2="12" y2="23" /><line x1="8" y1="23" x2="16" y2="23" />
     </svg>
   );
@@ -106,7 +130,7 @@ function MicOffIcon() {
 
 function HeadphonesOffIcon() {
   return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-red-400">
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-[var(--danger)]">
       <line x1="1" y1="1" x2="23" y2="23" /><path d="M3 18v-6a9 9 0 0 1 14.12-7.41" /><path d="M21 12v6" /><path d="M3 18a3 3 0 0 0 3 3h0a3 3 0 0 0 3-3v-1" /><path d="M15 17v1a3 3 0 0 0 3 3h0a3 3 0 0 0 3-3" />
     </svg>
   );
@@ -156,6 +180,8 @@ export default function ChannelList({
   const [newRoomMode, setNewRoomMode] = useState("hangout");
   const [newRoomScene, setNewRoomScene] = useState("campfire");
   const [newCategory, setNewCategory] = useState("");
+  const [newDescription, setNewDescription] = useState("");
+  const [dialog, setDialog] = useState<PromptDialogRequest | null>(null);
   const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(() => {
     if (typeof window === "undefined") return new Set<string>();
     try {
@@ -180,6 +206,7 @@ export default function ChannelList({
   const localChannels = channelState.source === channels ? channelState.value : channels;
   const [focusedChannelIndex, setFocusedChannelIndex] = useState<number>(-1);
   const [channelMenu, setChannelMenu] = useState<{ channel: Channel; x: number; y: number } | null>(null);
+  useEscape(() => setChannelMenu(null), !!channelMenu);
 
   function setLocalChannels(update: React.SetStateAction<Channel[]>) {
     setChannelState((current) => {
@@ -235,7 +262,7 @@ export default function ChannelList({
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
     if (!canManageChannels) {
-      alert("You do not have permission to manage channels");
+      toast("You do not have permission to manage channels", "error");
       setCreating(null);
       return;
     }
@@ -251,22 +278,24 @@ export default function ChannelList({
           name: newName.trim(),
           type: creating,
           category: newCategory.trim() || undefined,
+          description: creating === "text" ? newDescription.trim() || undefined : undefined,
           roomMode: creating === "voice" ? newRoomMode : undefined,
           roomScene: creating === "voice" ? newRoomScene : undefined,
         }),
       });
 
-      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        alert(data.error || "Failed to create channel");
+        await toastResponseError(res, "Failed to create channel");
         return;
       }
+      const data = await res.json();
       onChannelCreated(data.channel);
       setNewName("");
       setNewCategory("");
+      setNewDescription("");
       setCreating(null);
     } catch {
-      alert("Failed to create channel");
+      toast("Failed to create channel", "error");
     } finally {
       setCreateLoading(false);
       setNewRoomMode("hangout");
@@ -285,27 +314,60 @@ export default function ChannelList({
     });
   }
 
-  async function handleCategoryRename(cat: string, channels: Channel[]) {
-    if (!canManageChannels) return;
-    const newCat = window.prompt(`Rename category "${cat === "General" ? "General" : cat}" to:`, cat === "General" ? "" : cat);
-    if (newCat === null) return; // cancelled
-    const normalizedNew = newCat.trim() || null;
-    const responses = await Promise.all(
-      channels.map((ch) =>
-        fetch(`/api/channels/${ch.id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ category: normalizedNew }),
-        })
-      )
-    );
-    const failed = responses.find((response) => !response.ok);
-    if (failed) {
-      const data = await failed.json().catch(() => ({}));
-      alert(data.error || "Failed to rename category");
-      return;
+  /** PATCH one channel; toasts the server error and returns null on failure. */
+  async function patchChannel(channel: Channel, body: Record<string, unknown>, fallback: string): Promise<Channel | null> {
+    try {
+      const res = await fetch(`/api/channels/${channel.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        await toastResponseError(res, fallback);
+        return null;
+      }
+      const { channel: updated } = await res.json();
+      return { ...channel, ...updated };
+    } catch {
+      toast(fallback, "error");
+      return null;
     }
-    onChannelsUpdated?.(channels.map((ch) => ({ ...ch, category: normalizedNew })));
+  }
+
+  function handleCategoryRename(cat: string, channels: Channel[]) {
+    if (!canManageChannels) return;
+    setDialog({
+      title: `Rename category "${cat}"`,
+      message: "Leave blank to move these channels back to General.",
+      label: "Category name",
+      defaultValue: cat === "General" ? "" : cat,
+      allowEmpty: true,
+      maxLength: 100,
+      onConfirm: async (value) => {
+        const normalizedNew = value.trim() || null;
+        try {
+          const responses = await Promise.all(
+            channels.map((ch) =>
+              fetch(`/api/channels/${ch.id}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ category: normalizedNew }),
+              })
+            )
+          );
+          const failed = responses.find((response) => !response.ok);
+          if (failed) {
+            await toastResponseError(failed, "Failed to rename category");
+            return;
+          }
+        } catch {
+          toast("Failed to rename category", "error");
+          return;
+        }
+        onChannelsUpdated?.(channels.map((ch) => ({ ...ch, category: normalizedNew })));
+        setDialog(null);
+      },
+    });
   }
 
   async function handleDropOnCategory(targetCat: string) {
@@ -319,119 +381,151 @@ export default function ChannelList({
     );
     setDraggingId(null);
     setDragOverCategory(null);
-    const res = await fetch(`/api/channels/${draggingId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ category: newCat }),
-    });
-    if (res.ok) {
+    const moved = await patchChannel(ch, { category: newCat }, "Failed to move channel");
+    if (moved) {
       onChannelsUpdated?.([{ ...ch, category: newCat }]);
     } else {
       setLocalChannels(localChannels);
-      const data = await res.json().catch(() => ({}));
-      alert(data.error || "Failed to move channel");
     }
   }
 
-  async function handleRenameChannel(channel: Channel) {
+  function channelLabel(channel: Channel) {
+    return `${channel.type === "voice" ? "" : "#"}${channel.name}`;
+  }
+
+  function handleRenameChannel(channel: Channel) {
     if (!canManageChannels) return;
-    const entered = window.prompt(`Rename ${channel.type === "voice" ? "" : "#"}${channel.name} to:`, channel.name);
-    if (entered === null || !entered.trim() || entered.trim() === channel.name) return;
-    const res = await fetch(`/api/channels/${channel.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: entered.trim() }),
+    setDialog({
+      title: `Rename ${channelLabel(channel)}`,
+      label: "Channel name",
+      defaultValue: channel.name,
+      maxLength: 100,
+      onConfirm: async (value) => {
+        const name = value.trim();
+        if (name === channel.name) {
+          setDialog(null);
+          return;
+        }
+        const updated = await patchChannel(channel, { name }, "Failed to rename channel");
+        if (!updated) return;
+        onChannelsUpdated?.([{ ...channel, name: updated.name }]);
+        setDialog(null);
+      },
     });
-    if (res.ok) {
-      const { channel: updated } = await res.json();
-      onChannelsUpdated?.([{ ...channel, name: updated.name }]);
-    } else {
-      const data = await res.json().catch(() => ({}));
-      alert(data.error || "Failed to rename channel");
-    }
   }
 
-
-  async function handleConfigureVoiceRoom(channel: Channel) {
+  function handleConfigureVoiceRoom(channel: Channel) {
     if (!canManageChannels) return;
-    const modeIds = VOICE_ROOM_MODES.map((mode) => mode.id).join(", ");
-    const enteredMode = window.prompt(
-      `Room purpose (${modeIds}):`,
-      channel.roomMode || "hangout",
-    );
-    if (enteredMode === null) return;
-    const mode = VOICE_ROOM_MODES.find((candidate) => candidate.id === enteredMode.trim());
-    if (!mode) {
-      alert("Unknown room purpose");
-      return;
-    }
-
-    const sceneIds = VOICE_ROOM_SCENES.map((scene) => scene.id).join(", ");
-    const enteredScene = window.prompt(
-      `Shared scene (${sceneIds}):`,
-      channel.roomScene || mode.defaultScene,
-    );
-    if (enteredScene === null) return;
-    const scene = VOICE_ROOM_SCENES.find((candidate) => candidate.id === enteredScene.trim());
-    if (!scene) {
-      alert("Unknown room scene");
-      return;
-    }
-
-    const res = await fetch(`/api/channels/${channel.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ roomMode: mode.id, roomScene: scene.id }),
+    setDialog({
+      title: `Room purpose for ${channel.name}`,
+      message: "What is this voice room for? The shared scene is picked next.",
+      mode: "select",
+      label: "Purpose",
+      defaultValue: channel.roomMode || "hangout",
+      options: VOICE_ROOM_MODES.map((mode) => ({ value: mode.id, label: `${mode.label} — ${mode.description}` })),
+      confirmLabel: "Next",
+      onConfirm: (modeId) => {
+        const mode = VOICE_ROOM_MODES.find((candidate) => candidate.id === modeId);
+        if (!mode) return;
+        setDialog({
+          title: `Shared scene for ${channel.name}`,
+          mode: "select",
+          label: "Scene",
+          defaultValue: mode.id === channel.roomMode && channel.roomScene ? channel.roomScene : mode.defaultScene,
+          options: VOICE_ROOM_SCENES.map((scene) => ({ value: scene.id, label: scene.label })),
+          onConfirm: async (sceneId) => {
+            const updated = await patchChannel(
+              channel,
+              { roomMode: mode.id, roomScene: sceneId },
+              "Failed to update voice room",
+            );
+            if (!updated) return;
+            onChannelsUpdated?.([updated]);
+            setDialog(null);
+          },
+        });
+      },
     });
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      alert(data.error || "Failed to update voice room");
-      return;
-    }
-    const { channel: updated } = await res.json();
-    onChannelsUpdated?.([{ ...channel, ...updated }]);
   }
 
-  async function handleConfigureRetention(channel: Channel) {
+  function handleConfigureRetention(channel: Channel) {
     if (!canManageChannels) return;
-    const entered = window.prompt(
-      "Leave-no-trace retention (forever, 1, 7, or 30 days):",
-      channel.retentionDays ? String(channel.retentionDays) : "forever",
-    );
-    if (entered === null) return;
-    const normalized = entered.trim().toLowerCase();
-    const retentionDays = normalized === "forever" || normalized === "none"
-      ? null
-      : Number(normalized);
-    if (retentionDays !== null && ![1, 7, 30].includes(retentionDays)) {
-      alert("Choose forever, 1, 7, or 30 days");
-      return;
-    }
-
-    const response = await fetch(`/api/channels/${channel.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ retentionDays }),
+    setDialog({
+      title: `Leave-no-trace for #${channel.name}`,
+      message: "Messages older than this are deleted automatically.",
+      mode: "select",
+      label: "Keep messages for",
+      defaultValue: channel.retentionDays ? String(channel.retentionDays) : "forever",
+      options: RETENTION_OPTIONS,
+      onConfirm: async (value) => {
+        const retentionDays = value === "forever" ? null : Number(value);
+        const updated = await patchChannel(channel, { retentionDays }, "Failed to update retention");
+        if (!updated) return;
+        onChannelsUpdated?.([updated]);
+        setDialog(null);
+      },
     });
-    if (!response.ok) {
-      const data = await response.json().catch(() => ({}));
-      alert(data.error || "Failed to update retention");
-      return;
-    }
-    const { channel: updated } = await response.json();
-    onChannelsUpdated?.([{ ...channel, ...updated }]);
   }
 
-  async function handleDeleteChannel(channel: Channel) {
+  function handleConfigureSlowMode(channel: Channel) {
     if (!canManageChannels) return;
-    if (!confirm(`Delete ${channel.type === "voice" ? "" : "#"}${channel.name}? All its messages will be permanently deleted.`)) return;
-    const res = await fetch(`/api/channels/${channel.id}`, { method: "DELETE" });
-    if (res.ok) {
-      onChannelDeleted?.(channel.id);
-    } else {
-      const data = await res.json().catch(() => ({}));
-      alert(data.error || "Failed to delete channel");
+    const current = String(channel.slowModeSeconds ?? 0);
+    setDialog({
+      title: `Slow mode for #${channel.name}`,
+      message: "Everyone must wait this long between their messages in this channel.",
+      mode: "select",
+      label: "Cooldown",
+      defaultValue: SLOW_MODE_OPTIONS.some((option) => option.value === current) ? current : "0",
+      options: SLOW_MODE_OPTIONS,
+      onConfirm: async (value) => {
+        const updated = await patchChannel(channel, { slowModeSeconds: Number(value) }, "Failed to update slow mode");
+        if (!updated) return;
+        onChannelsUpdated?.([updated]);
+        toast(value === "0" ? `Slow mode off in #${channel.name}` : `Slow mode updated for #${channel.name}`, "success");
+        setDialog(null);
+      },
+    });
+  }
+
+  async function handleExportChannel(channel: Channel) {
+    try {
+      const res = await fetch(`/api/channels/${channel.id}/export`);
+      if (!res.ok) {
+        await toastResponseError(res, "Failed to export channel");
+        return;
+      }
+      const data = await res.json();
+      const stamp = new Date().toISOString().slice(0, 10);
+      downloadText(`${channel.name}-${stamp}.json`, "application/json", JSON.stringify(data, null, 2));
+      toast(`Exported #${channel.name}`, "success");
+    } catch {
+      toast("Failed to export channel", "error");
     }
+  }
+
+  function handleDeleteChannel(channel: Channel) {
+    if (!canManageChannels) return;
+    setDialog({
+      title: `Delete ${channelLabel(channel)}?`,
+      message: "All of its messages will be permanently deleted. This can't be undone.",
+      mode: "confirm",
+      confirmLabel: "Delete channel",
+      destructive: true,
+      onConfirm: async () => {
+        try {
+          const res = await fetch(`/api/channels/${channel.id}`, { method: "DELETE" });
+          if (!res.ok) {
+            await toastResponseError(res, "Failed to delete channel");
+            return;
+          }
+        } catch {
+          toast("Failed to delete channel", "error");
+          return;
+        }
+        setDialog(null);
+        onChannelDeleted?.(channel.id);
+      },
+    });
   }
 
   const canOpenServerSettings =
@@ -518,8 +612,7 @@ export default function ChannelList({
       onChannelsUpdated?.(reordered);
     } else {
       setLocalChannels(localChannels);
-      const data = await res.json().catch(() => ({}));
-      alert(data.error || "Failed to reorder channels");
+      await toastResponseError(res, "Failed to reorder channels");
     }
   }
 
@@ -548,10 +641,11 @@ export default function ChannelList({
         {inviteState.code && (
           <button
             onClick={() => setInviteOpen(true)}
-            className="text-[var(--muted)] hover:text-[var(--text)] opacity-0 group-hover/header:opacity-100 transition-opacity shrink-0 ml-1"
+            className="text-[var(--muted)] hover:text-[var(--text)] md:opacity-0 md:group-hover/header:opacity-100 md:group-focus-within/header:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100 transition-opacity shrink-0 ml-1 p-1 rounded"
             title="Invite People"
+            aria-label="Invite people"
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
               <circle cx="9" cy="7" r="4" />
               <line x1="19" y1="8" x2="19" y2="14" />
@@ -562,7 +656,7 @@ export default function ChannelList({
         {canOpenServerSettings && (
           <button
             onClick={() => onOpenServerSettings?.()}
-            className="text-[var(--muted)] hover:text-[var(--text)] opacity-0 group-hover/header:opacity-100 transition-opacity shrink-0 ml-1"
+            className="text-[var(--muted)] hover:text-[var(--text)] md:opacity-0 md:group-hover/header:opacity-100 md:group-focus-within/header:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100 transition-opacity shrink-0 ml-1 p-1 rounded"
             title="Server Settings"
             aria-label="Server settings"
           >
@@ -616,7 +710,7 @@ export default function ChannelList({
                 </button>
                 {canManageChannels && (
                   <button
-                    onClick={() => setCreating("text")}
+                    onClick={() => { setNewCategory(cat === "General" ? "" : cat); setCreating("text"); }}
                     className="text-[var(--muted)] hover:text-[var(--text)] text-lg leading-none shrink-0 ml-1"
                     title="Create Text Channel"
                     aria-label="Create channel"
@@ -659,7 +753,7 @@ export default function ChannelList({
                           <HashIcon />
                           <span className="flex-1 truncate">{channel.name}</span>
                           {channel.retentionDays && (
-                            <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-violet-500/15 text-violet-300" title={`Messages disappear after ${channel.retentionDays} day(s)`}>
+                            <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-[var(--panel-2)] text-[var(--muted)]" title={`Messages disappear after ${channel.retentionDays} day(s)`}>
                               {channel.retentionDays === 1 ? "24h" : `${channel.retentionDays}d`}
                             </span>
                           )}
@@ -679,6 +773,10 @@ export default function ChannelList({
           );
         })}
 
+        {sortedCategories.length === 0 && !canManageChannels && (
+          <div className="px-3 pt-2 text-xs text-[var(--muted)] italic">No channels yet</div>
+        )}
+
         {/* Add channel button (when no text channels at all yet) */}
         {sortedCategories.length === 0 && canManageChannels && (
           <div className="px-2 mb-1 flex items-center justify-between mt-1">
@@ -687,7 +785,7 @@ export default function ChannelList({
               onClick={() => setCreating("text")}
               className="text-[var(--muted)] hover:text-[var(--text)] text-lg leading-none"
               title="Create Text Channel"
-            aria-label="Create channel"
+              aria-label="Create channel"
             >
               +
             </button>
@@ -717,8 +815,19 @@ export default function ChannelList({
               className="w-full text-xs px-2 py-1 bg-[var(--panel-2)] text-[var(--text)] border border-[var(--accent-2)]/50 rounded focus:outline-none"
               onKeyDown={(e) => { if (e.key === "Escape") setCreating(null); }}
             />
+            <label htmlFor="new-text-channel-description" className="sr-only">Description (optional)</label>
+            <input
+              id="new-text-channel-description"
+              type="text"
+              value={newDescription}
+              onChange={(e) => setNewDescription(e.target.value)}
+              placeholder="Description (optional)"
+              maxLength={200}
+              className="w-full text-xs px-2 py-1 bg-[var(--panel-2)] text-[var(--text)] border border-[var(--accent-2)]/50 rounded focus:outline-none"
+              onKeyDown={(e) => { if (e.key === "Escape") setCreating(null); }}
+            />
             <div className="flex gap-1">
-              <button type="submit" disabled={!newName.trim() || createLoading} className="flex-1 text-xs py-1 bg-amber-600/30 text-amber-300 rounded hover:bg-amber-600/40 disabled:opacity-30 transition-colors">Create</button>
+              <button type="submit" disabled={!newName.trim() || createLoading} className="flex-1 text-xs py-1 bg-[var(--accent-2)]/30 text-[var(--accent)] rounded hover:bg-[var(--accent-2)]/45 disabled:opacity-30 transition-colors">Create</button>
               <button type="button" onClick={() => setCreating(null)} className="text-xs py-1 px-2 text-[var(--muted)] hover:text-[var(--text)]">Cancel</button>
             </div>
           </form>
@@ -787,7 +896,7 @@ export default function ChannelList({
               {VOICE_ROOM_MODES.find((mode) => mode.id === newRoomMode)?.description}
             </p>
             <div className="flex gap-1">
-              <button type="submit" disabled={!newName.trim() || createLoading} className="flex-1 text-xs py-1 bg-amber-600/30 text-amber-300 rounded hover:bg-amber-600/40 disabled:opacity-30 transition-colors">Create</button>
+              <button type="submit" disabled={!newName.trim() || createLoading} className="flex-1 text-xs py-1 bg-[var(--accent-2)]/30 text-[var(--accent)] rounded hover:bg-[var(--accent-2)]/45 disabled:opacity-30 transition-colors">Create</button>
               <button type="button" onClick={() => setCreating(null)} className="text-xs py-1 px-2 text-[var(--muted)] hover:text-[var(--text)]">Cancel</button>
             </div>
           </form>
@@ -822,7 +931,7 @@ export default function ChannelList({
                   aria-pressed={isActive}
                   className={`w-full text-left px-2 py-1 rounded text-sm flex items-center gap-1.5 ${
                     isActive
-                      ? `bg-green-600/20 text-green-400${isViewing ? " ring-1 ring-green-400/50" : ""}`
+                      ? `bg-[var(--accent)]/15 text-[var(--accent)]${isViewing ? " ring-1 ring-[var(--accent)]/50" : ""}`
                       : "text-[var(--muted)] hover:bg-[var(--panel-2)]/50 hover:text-[var(--text)]"
                   }`}
                 >
@@ -848,12 +957,12 @@ export default function ChannelList({
                           key={p.userId}
                           role="listitem"
                           className={`flex items-center gap-1.5 py-0.5 text-xs ${
-                            isSpeaking ? "text-amber-300" : p.userId === currentUserId ? "text-[var(--accent)]" : "text-[var(--text)]"
+                            isSpeaking ? "text-[var(--accent)]" : p.userId === currentUserId ? "text-[var(--accent)]" : "text-[var(--text)]"
                           }`}
                         >
                           <div
                             className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                              p.muted ? "bg-red-400" : isSpeaking ? "bg-amber-400" : "bg-green-500"
+                              p.muted ? "bg-[var(--danger)]" : isSpeaking ? "bg-[var(--accent)]" : "bg-green-500"
                             }`}
                             style={isSpeaking ? { boxShadow: "0 0 6px rgba(251,191,36,0.9)" } : undefined}
                             aria-hidden="true"
@@ -884,7 +993,7 @@ export default function ChannelList({
             className="fixed bg-[var(--panel)] border border-[var(--accent-2)]/30 rounded-lg shadow-xl py-1 z-50 min-w-[160px]"
             style={{
               left: Math.min(channelMenu.x, (typeof window !== "undefined" ? window.innerWidth : 800) - 180),
-              top: Math.min(channelMenu.y, (typeof window !== "undefined" ? window.innerHeight : 600) - 150),
+              top: Math.min(channelMenu.y, (typeof window !== "undefined" ? window.innerHeight : 600) - 260),
             }}
           >
             <div className="px-3 py-1.5 text-xs text-[var(--muted)] border-b border-[var(--accent-2)]/20 truncate max-w-[200px]">
@@ -902,19 +1011,35 @@ export default function ChannelList({
               <>
                 {channelMenu.channel.type === "voice" && (
                   <button
-                    onClick={() => { const c = channelMenu.channel; setChannelMenu(null); void handleConfigureVoiceRoom(c); }}
+                    onClick={() => { const c = channelMenu.channel; setChannelMenu(null); handleConfigureVoiceRoom(c); }}
                     className="w-full text-left px-3 py-1.5 text-xs text-[var(--text)] hover:bg-[var(--panel-2)]"
                   >
                     Room Purpose &amp; Scene
                   </button>
                 )}
                 {(!channelMenu.channel.type || channelMenu.channel.type === "text") && (
-                  <button
-                    onClick={() => { const c = channelMenu.channel; setChannelMenu(null); void handleConfigureRetention(c); }}
-                    className="w-full text-left px-3 py-1.5 text-xs text-[var(--text)] hover:bg-[var(--panel-2)]"
-                  >
-                    Leave-no-trace Retention
-                  </button>
+                  <>
+                    <button
+                      onClick={() => { const c = channelMenu.channel; setChannelMenu(null); handleConfigureSlowMode(c); }}
+                      className="w-full text-left px-3 py-1.5 text-xs text-[var(--text)] hover:bg-[var(--panel-2)]"
+                    >
+                      Slow Mode{channelMenu.channel.slowModeSeconds ? " (on)" : ""}
+                    </button>
+                    <button
+                      onClick={() => { const c = channelMenu.channel; setChannelMenu(null); handleConfigureRetention(c); }}
+                      className="w-full text-left px-3 py-1.5 text-xs text-[var(--text)] hover:bg-[var(--panel-2)]"
+                    >
+                      Leave-no-trace Retention
+                    </button>
+                    {currentUserRole === "owner" && (
+                      <button
+                        onClick={() => { const c = channelMenu.channel; setChannelMenu(null); void handleExportChannel(c); }}
+                        className="w-full text-left px-3 py-1.5 text-xs text-[var(--text)] hover:bg-[var(--panel-2)]"
+                      >
+                        Export Channel
+                      </button>
+                    )}
+                  </>
                 )}
                 <button
                   onClick={() => { const c = channelMenu.channel; setChannelMenu(null); handleRenameChannel(c); }}
@@ -924,7 +1049,7 @@ export default function ChannelList({
                 </button>
                 <button
                   onClick={() => { const c = channelMenu.channel; setChannelMenu(null); handleDeleteChannel(c); }}
-                  className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-red-600/10"
+                  className="w-full text-left px-3 py-1.5 text-xs text-[var(--danger)] hover:bg-[var(--danger)]/10"
                 >
                   Delete Channel
                 </button>
@@ -933,6 +1058,8 @@ export default function ChannelList({
           </div>
         </>
       )}
+
+      {dialog && <PromptDialog key={dialog.title} {...dialog} onCancel={() => setDialog(null)} />}
 
       {inviteOpen && inviteState.code && (
         <InviteModal

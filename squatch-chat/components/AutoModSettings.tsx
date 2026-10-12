@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useEscape } from "@/hooks/useEscape";
+import { toast } from "@/lib/toast";
 
 interface AutoModSettingsProps {
   serverId: string;
@@ -12,13 +14,18 @@ const DEFAULT_WORDS = [
   "spam", "scam", "phishing", "malware",
 ];
 
+/**
+ * Word filter settings. Honest scope: these live in this browser's
+ * localStorage and only stop messages *you* send from this device — there is
+ * no server-side enforcement yet, so there is no delete/warn/mute action.
+ */
 export default function AutoModSettings({ serverId, open, onClose }: AutoModSettingsProps) {
   const [enabled, setEnabled] = useState(false);
   const [words, setWords] = useState<string[]>([]);
   const [newWord, setNewWord] = useState("");
-  const [action, setAction] = useState<"delete" | "warn" | "mute">("delete");
-  const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+
+  useEscape(onClose, open);
 
   useEffect(() => {
     if (!open) return;
@@ -30,7 +37,6 @@ export default function AutoModSettings({ serverId, open, onClose }: AutoModSett
           const data = JSON.parse(saved);
           setEnabled(data.enabled ?? false);
           setWords(data.words ?? []);
-          setAction(data.action ?? "delete");
         }
       } catch { /* ignore */ }
     }, 0);
@@ -38,10 +44,13 @@ export default function AutoModSettings({ serverId, open, onClose }: AutoModSett
   }, [open, serverId]);
 
   function save() {
-    setSaving(true);
     const key = `campfire-automod-${serverId}`;
-    localStorage.setItem(key, JSON.stringify({ enabled, words, action }));
-    setSaving(false);
+    try {
+      localStorage.setItem(key, JSON.stringify({ enabled, words }));
+    } catch {
+      toast("Couldn't save the word filter on this device", "error");
+      return;
+    }
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   }
@@ -64,49 +73,46 @@ export default function AutoModSettings({ serverId, open, onClose }: AutoModSett
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="automod-title"
         className="w-full max-w-md bg-[var(--panel)] rounded-xl border border-[var(--accent-2)]/30 shadow-2xl overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--accent-2)]/20">
-          <h2 className="text-lg font-bold text-[var(--text)]">Auto-Moderation</h2>
-          <button onClick={onClose} className="text-[var(--muted)] hover:text-[var(--text)] text-xl leading-none">&times;</button>
+          <h2 id="automod-title" className="text-lg font-bold text-[var(--text)]">Word Filter</h2>
+          <button
+            onClick={onClose}
+            aria-label="Close word filter"
+            className="text-[var(--muted)] hover:text-[var(--text)] text-xl leading-none"
+          >
+            &times;
+          </button>
         </div>
 
         <div className="p-5 space-y-4 max-h-96 overflow-y-auto">
+          <p className="text-xs text-[var(--muted)] rounded-lg bg-[var(--panel-2)] px-3 py-2">
+            Applies on this device to messages you send — server-wide enforcement is coming.
+          </p>
+
           {/* Enable toggle */}
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-3">
             <div>
-              <div className="text-sm text-[var(--text)] font-medium">Enable Auto-Mod</div>
-              <div className="text-xs text-[var(--muted)]">Automatically filter messages containing blocked words</div>
+              <div id="automod-enable-label" className="text-sm text-[var(--text)] font-medium">Block my messages with these words</div>
+              <div className="text-xs text-[var(--muted)]">Stops a message from sending if it contains a blocked word</div>
             </div>
             <button
               onClick={() => setEnabled(!enabled)}
-              className={`w-11 h-6 rounded-full transition-colors relative ${enabled ? "bg-green-500" : "bg-[var(--accent-2)]/30"}`}
+              autoFocus
+              role="switch"
+              aria-checked={enabled}
+              aria-labelledby="automod-enable-label"
+              className={`w-11 h-6 rounded-full transition-colors relative shrink-0 ${enabled ? "bg-[var(--accent)]" : "bg-[var(--accent-2)]/30"}`}
             >
               <div className={`w-5 h-5 rounded-full bg-white absolute top-0.5 transition-transform ${enabled ? "translate-x-[22px]" : "translate-x-0.5"}`} />
             </button>
-          </div>
-
-          {/* Action */}
-          <div>
-            <label className="text-xs text-[var(--muted)] mb-1.5 block">Action on Match</label>
-            <div className="flex gap-2">
-              {(["delete", "warn", "mute"] as const).map((a) => (
-                <button
-                  key={a}
-                  onClick={() => setAction(a)}
-                  className={`flex-1 py-1.5 text-xs rounded-lg font-medium capitalize transition-colors ${
-                    action === a
-                      ? "bg-[var(--accent-2)] text-[var(--text)]"
-                      : "bg-[var(--panel-2)] text-[var(--muted)] hover:text-[var(--text)]"
-                  }`}
-                >
-                  {a}
-                </button>
-              ))}
-            </div>
           </div>
 
           {/* Blocked words */}
@@ -123,6 +129,7 @@ export default function AutoModSettings({ serverId, open, onClose }: AutoModSett
             <div className="flex gap-1 mb-2">
               <input
                 type="text"
+                aria-label="Word to block"
                 value={newWord}
                 onChange={(e) => setNewWord(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addWord(); } }}
@@ -146,7 +153,8 @@ export default function AutoModSettings({ serverId, open, onClose }: AutoModSett
                   {word}
                   <button
                     onClick={() => removeWord(word)}
-                    className="hover:text-red-300 transition-colors"
+                    aria-label={`Remove ${word}`}
+                    className="hover:text-[var(--text)] transition-colors"
                   >
                     &times;
                   </button>
@@ -161,10 +169,9 @@ export default function AutoModSettings({ serverId, open, onClose }: AutoModSett
           {/* Save */}
           <button
             onClick={save}
-            disabled={saving}
-            className="w-full py-2 bg-[var(--accent-2)] text-[var(--text)] rounded-lg hover:bg-[var(--accent)] hover:text-[var(--bg)] transition-colors font-medium disabled:opacity-50"
+            className="w-full py-2 bg-[var(--accent-2)] text-[var(--text)] rounded-lg hover:bg-[var(--accent)] hover:text-[var(--bg)] transition-colors font-medium"
           >
-            {saved ? "Saved!" : saving ? "Saving..." : "Save Settings"}
+            {saved ? "Saved on this device" : "Save"}
           </button>
         </div>
       </div>
@@ -172,7 +179,7 @@ export default function AutoModSettings({ serverId, open, onClose }: AutoModSett
   );
 }
 
-/** Check if a message should be filtered */
+/** Check if a message you're about to send hits this device's word filter. */
 export function checkAutoMod(serverId: string, content: string): { blocked: boolean; action: string; word?: string } {
   if (typeof window === "undefined") return { blocked: false, action: "none" };
   try {
@@ -183,7 +190,7 @@ export function checkAutoMod(serverId: string, content: string): { blocked: bool
     const lower = content.toLowerCase();
     for (const word of data.words) {
       if (lower.includes(word)) {
-        return { blocked: true, action: data.action || "delete", word };
+        return { blocked: true, action: "block", word };
       }
     }
   } catch { /* ignore */ }

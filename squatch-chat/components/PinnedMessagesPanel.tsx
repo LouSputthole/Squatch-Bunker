@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import Avatar from "./Avatar";
 import BlockedMessageGate from "./BlockedMessageGate";
+import ChatIcon from "./ChatIcons";
 
 interface PinnedMessage {
   id: string;
@@ -49,20 +50,28 @@ export default function PinnedMessagesPanel({
 }: PinnedMessagesPanelProps) {
   const [pinnedMessages, setPinnedMessages] = useState<PinnedMessage[]>([]);
   const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState(false);
+  const [reloadCount, setReloadCount] = useState(0);
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setLoading(true);
-      fetch(`/api/messages?channelId=${channelId}&pinned=true`)
-        .then((res) => res.json())
-        .then((data) => {
-          setPinnedMessages(data.messages || []);
-          setLoading(false);
-        })
-        .catch(() => setLoading(false));
-    }, 0);
-    return () => clearTimeout(timer);
-  }, [channelId]);
+    const controller = new AbortController();
+    fetch(`/api/messages?channelId=${encodeURIComponent(channelId)}&pinned=true`, { signal: controller.signal })
+      .then((res) => {
+        if (!res.ok) throw new Error("Failed to load pinned messages");
+        return res.json();
+      })
+      .then((data) => {
+        setPinnedMessages(data.messages || []);
+        setFailed(false);
+        setLoading(false);
+      })
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        setFailed(true);
+        setLoading(false);
+      });
+    return () => controller.abort();
+  }, [channelId, reloadCount]);
 
   function handleUnpin(messageId: string) {
     onUnpin(messageId);
@@ -72,21 +81,25 @@ export default function PinnedMessagesPanel({
   const count = pinnedMessages.length;
 
   return (
-    <div
-      className="w-64 shrink-0 flex flex-col border-l border-[var(--accent-2)]/30 bg-[var(--panel)]"
+    <aside
+      aria-label="Pinned messages"
+      className="w-72 shrink-0 flex flex-col border-l border-[var(--accent-2)]/30 bg-[var(--panel)]"
       style={{ height: "100%" }}
     >
       {/* Header */}
       <div className="h-12 px-3 flex items-center justify-between border-b border-[var(--accent-2)]/30 shrink-0">
-        <span className="text-sm font-semibold text-[var(--text)]">
-          {loading ? "📌 Pinned Messages" : count > 0 ? `📌 Pinned (${count})` : "📌 Pinned Messages"}
+        <span className="flex items-center gap-2 text-sm font-semibold text-[var(--text)]">
+          <ChatIcon name="pin" size={16} className="text-[var(--muted)]" />
+          {!loading && count > 0 ? `Pinned (${count})` : "Pinned Messages"}
         </span>
         <button
+          type="button"
           onClick={onClose}
-          className="text-[var(--muted)] hover:text-[var(--text)] text-lg leading-none"
-          title="Close pinned panel"
+          className="flex h-8 w-8 items-center justify-center rounded-md text-[var(--muted)] hover:bg-[var(--panel-2)] hover:text-[var(--text)]"
+          title="Close pinned messages"
+          aria-label="Close pinned messages"
         >
-          &times;
+          <ChatIcon name="close" size={16} />
         </button>
       </div>
 
@@ -94,10 +107,22 @@ export default function PinnedMessagesPanel({
       <div className="flex-1 overflow-y-auto">
         {loading ? (
           <div className="px-4 py-6 text-sm text-[var(--muted)] italic">Loading...</div>
+        ) : failed ? (
+          <div className="flex flex-col items-center gap-3 px-4 py-10 text-center text-sm text-[var(--muted)]">
+            <p>Couldn&apos;t load pinned messages.</p>
+            <button
+              type="button"
+              onClick={() => { setLoading(true); setReloadCount((n) => n + 1); }}
+              className="rounded-md bg-[var(--accent)] px-3 py-1.5 text-xs font-medium text-[var(--bg)] hover:bg-[var(--accent-2)] hover:text-[var(--text)]"
+            >
+              Try again
+            </button>
+          </div>
         ) : count === 0 ? (
           <div className="flex flex-col items-center justify-center h-full py-10 gap-2 text-[var(--muted)]">
-            <span className="text-3xl">📌</span>
+            <ChatIcon name="pin" size={28} />
             <span className="text-sm text-center px-4">No pinned messages yet</span>
+            {canPin && <span className="text-xs text-center px-6">Pin important messages from their ⋯ menu.</span>}
           </div>
         ) : (
           <ul className="divide-y divide-[var(--accent-2)]/10">
@@ -140,6 +165,7 @@ export default function PinnedMessagesPanel({
                   {/* Action buttons */}
                   <div className="flex items-center gap-1.5">
                     <button
+                      type="button"
                       onClick={() => onJumpToMessage(msg.id)}
                       className="text-[10px] px-2 py-0.5 rounded bg-[var(--accent-2)]/15 text-[var(--accent-2)] hover:bg-[var(--accent-2)]/30 transition-colors"
                     >
@@ -147,6 +173,7 @@ export default function PinnedMessagesPanel({
                     </button>
                     {canPin && (
                       <button
+                        type="button"
                         onClick={() => handleUnpin(msg.id)}
                         className="text-[10px] px-2 py-0.5 rounded bg-[var(--danger)]/10 text-[var(--danger)] hover:bg-[var(--danger)]/25 transition-colors"
                       >
@@ -161,6 +188,6 @@ export default function PinnedMessagesPanel({
           </ul>
         )}
       </div>
-    </div>
+    </aside>
   );
 }

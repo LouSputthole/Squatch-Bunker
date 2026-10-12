@@ -13,6 +13,12 @@ interface SearchResult {
   channel: { id: string; name: string };
 }
 
+interface Filters {
+  user: string;
+  from: string;
+  to: string;
+}
+
 interface SearchPanelProps {
   serverId: string;
   onClose: () => void;
@@ -29,41 +35,70 @@ export default function SearchPanel({ serverId, onClose, onJumpToMessage, blocke
   const [filterDateFrom, setFilterDateFrom] = useState("");
   const [filterDateTo, setFilterDateTo] = useState("");
   const [showFilters, setShowFilters] = useState(false);
+  const [error, setError] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const requestIdRef = useRef(0);
 
-  function handleSearch(value: string) {
-    setQuery(value);
+  const currentFilters = (): Filters => ({ user: filterUser, from: filterDateFrom, to: filterDateTo });
+  const hasFilters = Boolean(filterUser.trim() || filterDateFrom || filterDateTo);
+
+  // Filters are passed in explicitly so Clear/Apply never search with a
+  // stale closure of the previous filter values.
+  function runSearch(value: string, filters: Filters, delayMs = 300) {
     if (debounceRef.current) clearTimeout(debounceRef.current);
 
     if (!value.trim()) {
+      requestIdRef.current += 1; // drop any in-flight response
       setResults([]);
       setSearched(false);
+      setSearching(false);
       return;
     }
 
     debounceRef.current = setTimeout(async () => {
+      const requestId = ++requestIdRef.current;
       setSearching(true);
+      setError(false);
       try {
-        let url = `/api/messages/search?q=${encodeURIComponent(value.trim())}&serverId=${serverId}`;
-        if (filterUser.trim()) url += `&user=${encodeURIComponent(filterUser.trim())}`;
-        if (filterDateFrom) url += `&from=${filterDateFrom}`;
-        if (filterDateTo) url += `&to=${filterDateTo}`;
-        const res = await fetch(url);
+        const params = new URLSearchParams({ q: value.trim(), serverId });
+        if (filters.user.trim()) params.set("user", filters.user.trim());
+        if (filters.from) params.set("from", filters.from);
+        if (filters.to) params.set("to", filters.to);
+        if (filters.from || filters.to) params.set("tz", String(new Date().getTimezoneOffset()));
+        const res = await fetch(`/api/messages/search?${params.toString()}`);
+        if (requestId !== requestIdRef.current) return;
         if (res.ok) {
           const data = await res.json();
+          if (requestId !== requestIdRef.current) return;
           setResults(data.results || []);
+        } else {
+          setResults([]);
+          setError(true);
         }
-      } catch { /* ignore */ }
+      } catch {
+        if (requestId !== requestIdRef.current) return;
+        setResults([]);
+        setError(true);
+      }
       setSearching(false);
       setSearched(true);
-    }, 300);
+    }, delayMs);
+  }
+
+  function handleSearch(value: string) {
+    setQuery(value);
+    runSearch(value, currentFilters());
+  }
+
+  function applyFilters() {
+    runSearch(query, currentFilters(), 0);
   }
 
   function clearFilters() {
     setFilterUser("");
     setFilterDateFrom("");
     setFilterDateTo("");
-    if (query) handleSearch(query);
+    runSearch(query, { user: "", from: "", to: "" }, 0);
   }
 
   return (
@@ -77,13 +112,16 @@ export default function SearchPanel({ serverId, onClose, onJumpToMessage, blocke
           value={query}
           onChange={(e) => handleSearch(e.target.value)}
           placeholder="Search messages..."
+          aria-label="Search messages"
           className="flex-1 bg-transparent text-sm text-[var(--text)] focus:outline-none placeholder:text-[var(--muted)]"
           autoFocus
         />
         <button
           onClick={() => setShowFilters((v) => !v)}
-          className={`text-xs transition-colors ${showFilters ? "text-[var(--accent-2)]" : "text-[var(--muted)] hover:text-[var(--text)]"}`}
+          className={`relative text-xs transition-colors ${showFilters || hasFilters ? "text-[var(--accent)]" : "text-[var(--muted)] hover:text-[var(--text)]"}`}
           title="Search filters"
+          aria-label="Search filters"
+          aria-expanded={showFilters}
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
@@ -91,9 +129,11 @@ export default function SearchPanel({ serverId, onClose, onJumpToMessage, blocke
         </button>
         <button
           onClick={onClose}
+          aria-label="Close search"
+          title="Close search"
           className="text-[var(--muted)] hover:text-[var(--text)] text-lg leading-none"
         >
-          x
+          &times;
         </button>
       </div>
 
@@ -101,8 +141,9 @@ export default function SearchPanel({ serverId, onClose, onJumpToMessage, blocke
       {showFilters && (
         <div className="px-3 py-2 border-b border-[var(--accent-2)]/20 space-y-2 bg-[var(--panel-2)]">
           <div>
-            <label className="text-[10px] text-[var(--muted)] uppercase block mb-0.5">By User</label>
+            <label htmlFor="search-filter-user" className="text-[10px] text-[var(--muted)] uppercase block mb-0.5">By User</label>
             <input
+              id="search-filter-user"
               type="text"
               value={filterUser}
               onChange={(e) => setFilterUser(e.target.value)}
@@ -112,8 +153,9 @@ export default function SearchPanel({ serverId, onClose, onJumpToMessage, blocke
           </div>
           <div className="flex gap-2">
             <div className="flex-1">
-              <label className="text-[10px] text-[var(--muted)] uppercase block mb-0.5">From</label>
+              <label htmlFor="search-filter-from" className="text-[10px] text-[var(--muted)] uppercase block mb-0.5">From</label>
               <input
+                id="search-filter-from"
                 type="date"
                 value={filterDateFrom}
                 onChange={(e) => setFilterDateFrom(e.target.value)}
@@ -121,8 +163,9 @@ export default function SearchPanel({ serverId, onClose, onJumpToMessage, blocke
               />
             </div>
             <div className="flex-1">
-              <label className="text-[10px] text-[var(--muted)] uppercase block mb-0.5">To</label>
+              <label htmlFor="search-filter-to" className="text-[10px] text-[var(--muted)] uppercase block mb-0.5">To</label>
               <input
+                id="search-filter-to"
                 type="date"
                 value={filterDateTo}
                 onChange={(e) => setFilterDateTo(e.target.value)}
@@ -132,14 +175,16 @@ export default function SearchPanel({ serverId, onClose, onJumpToMessage, blocke
           </div>
           <div className="flex gap-2">
             <button
-              onClick={() => query && handleSearch(query)}
-              className="flex-1 py-1 text-xs bg-[var(--accent-2)] text-[var(--text)] rounded hover:bg-[var(--accent)] transition-colors"
+              onClick={applyFilters}
+              disabled={!query.trim()}
+              className="flex-1 py-1 text-xs bg-[var(--accent-2)] text-[var(--text)] rounded hover:bg-[var(--accent)] transition-colors disabled:opacity-50"
             >
               Apply
             </button>
             <button
               onClick={clearFilters}
-              className="flex-1 py-1 text-xs bg-[var(--panel)] text-[var(--muted)] rounded hover:text-[var(--text)] transition-colors"
+              disabled={!hasFilters}
+              className="flex-1 py-1 text-xs bg-[var(--panel)] text-[var(--muted)] rounded hover:text-[var(--text)] transition-colors disabled:opacity-50"
             >
               Clear
             </button>
@@ -152,9 +197,18 @@ export default function SearchPanel({ serverId, onClose, onJumpToMessage, blocke
           <div className="px-4 py-8 text-center text-sm text-[var(--muted)]">Searching...</div>
         )}
 
-        {!searching && searched && results.length === 0 && (
+        {!searching && searched && error && (
           <div className="px-4 py-8 text-center text-sm text-[var(--muted)]">
-            No results found for &ldquo;{query}&rdquo;
+            <p>Search failed.</p>
+            <button onClick={applyFilters} className="mt-2 text-xs text-[var(--accent)] hover:underline">
+              Try again
+            </button>
+          </div>
+        )}
+
+        {!searching && searched && !error && results.length === 0 && (
+          <div className="px-4 py-8 text-center text-sm text-[var(--muted)]">
+            No results found for &ldquo;{query}&rdquo;{hasFilters ? " with these filters" : ""}
           </div>
         )}
 
@@ -168,6 +222,7 @@ export default function SearchPanel({ serverId, onClose, onJumpToMessage, blocke
             >
               <button
                 onClick={() => onJumpToMessage?.(r.channel.id, r.id)}
+                title="Jump to message"
                 className="w-full text-left px-3 py-2.5 border-b border-[var(--accent-2)]/10 hover:bg-[var(--panel-2)]/50 transition-colors"
               >
                 <div className="flex items-center gap-2 mb-1">

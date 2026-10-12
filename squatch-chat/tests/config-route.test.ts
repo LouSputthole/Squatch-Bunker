@@ -6,6 +6,7 @@ vi.mock("@/lib/sfu", () => ({ sfuConfigured: () => false }));
 vi.mock("@/lib/edition", () => ({
   billingConfiguration: () => ({ enabled: false }),
   getEdition: () => "community",
+  isCommunityEdition: () => true,
 }));
 
 import { GET } from "@/app/api/config/route";

@@ -87,10 +87,15 @@ export default function PollCard({
   }
 
   async function closePoll() {
-    const response = await fetch(`/api/polls/${poll.id}`, { method: "DELETE" });
-    const data = await response.json();
-    if (response.ok) update(data.poll);
-    else setError(data.error || "Could not close this poll");
+    setError("");
+    try {
+      const response = await fetch(`/api/polls/${poll.id}`, { method: "DELETE" });
+      const data = await response.json().catch(() => ({}));
+      if (response.ok) update(data.poll);
+      else setError(data.error || "Could not close this poll");
+    } catch {
+      setError("Could not close this poll");
+    }
   }
 
   return (
@@ -99,7 +104,7 @@ export default function PollCard({
         <div>
           <p className="text-sm font-semibold text-[var(--text)]">{poll.question}</p>
           <p className="text-[10px] text-[var(--muted)]">
-            Camp Vote ? {poll.allowMultiple ? "Choose any" : "Choose one"} ? {totalVotes} vote{totalVotes === 1 ? "" : "s"}
+            Camp Vote · {poll.allowMultiple ? "Choose any" : "Choose one"} · {totalVotes} vote{totalVotes === 1 ? "" : "s"}
           </p>
         </div>
         {closed && <span className="text-[10px] rounded-full bg-[var(--muted)]/15 px-2 py-0.5 text-[var(--muted)]">Closed</span>}
@@ -113,10 +118,11 @@ export default function PollCard({
               key={option.id}
               disabled={closed || busyOption !== null}
               onClick={() => void vote(option.id)}
+              aria-pressed={selected}
               className={`relative w-full overflow-hidden rounded-lg border px-3 py-2 text-left text-xs transition-colors disabled:cursor-default ${selected ? "border-[var(--accent-2)] text-[var(--text)]" : "border-[var(--accent-2)]/25 text-[var(--muted)] hover:border-[var(--accent-2)]/60"}`}
             >
               <span className="absolute inset-y-0 left-0 bg-[var(--accent-2)]/12" style={{ width: `${percent}%` }} />
-              <span className="relative flex justify-between gap-3"><span>{selected ? "? " : ""}{option.text}</span><span>{percent}% ? {option.votes.length}</span></span>
+              <span className="relative flex justify-between gap-3"><span>{selected ? "✓ " : ""}{option.text}</span><span>{percent}% · {option.votes.length}</span></span>
             </button>
           );
         })}

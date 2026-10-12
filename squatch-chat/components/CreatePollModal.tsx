@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useEscape } from "@/hooks/useEscape";
 
 interface CreatePollModalProps {
   channelId: string;
@@ -15,6 +16,10 @@ export default function CreatePollModal({ channelId, onClose, onCreated }: Creat
   const [duration, setDuration] = useState("24");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+
+  useEscape(() => {
+    if (!saving) onClose();
+  });
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -40,14 +45,20 @@ export default function CreatePollModal({ channelId, onClose, onCreated }: Creat
   }
 
   return (
-    <div className="fixed inset-0 z-[80] bg-black/70 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="create-poll-title">
+    <div
+      className="fixed inset-0 z-[80] bg-black/70 flex items-center justify-center p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="create-poll-title"
+      onMouseDown={(event) => { if (event.target === event.currentTarget && !saving) onClose(); }}
+    >
       <form onSubmit={submit} className="w-full max-w-md rounded-xl border border-[var(--accent-2)]/35 bg-[var(--panel)] shadow-2xl p-5">
         <div className="flex items-start justify-between gap-4">
           <div>
             <h2 id="create-poll-title" className="font-semibold text-[var(--text)]">Start a Camp Vote</h2>
             <p className="text-xs text-[var(--muted)]">Take a quick trail decision together.</p>
           </div>
-          <button type="button" onClick={onClose} className="text-[var(--muted)] hover:text-[var(--text)] text-xl" aria-label="Close">&times;</button>
+          <button type="button" onClick={onClose} className="text-[var(--muted)] hover:text-[var(--text)] text-xl" aria-label="Close poll creator">&times;</button>
         </div>
         <label className="block mt-4 text-xs text-[var(--muted)]">
           Question
@@ -67,6 +78,7 @@ export default function CreatePollModal({ channelId, onClose, onCreated }: Creat
               <input
                 required
                 maxLength={120}
+                aria-label={`Option ${index + 1}`}
                 value={option}
                 placeholder={`Option ${index + 1}`}
                 onChange={(event) => setOptions((current) => current.map((value, position) => position === index ? event.target.value : value))}
@@ -88,14 +100,14 @@ export default function CreatePollModal({ channelId, onClose, onCreated }: Creat
             </select>
           </label>
           <label className="flex items-end gap-2 pb-2 text-xs text-[var(--muted)]">
-            <input type="checkbox" checked={allowMultiple} onChange={(event) => setAllowMultiple(event.target.checked)} />
+            <input type="checkbox" className="accent-[var(--accent)]" checked={allowMultiple} onChange={(event) => setAllowMultiple(event.target.checked)} />
             Multiple choices
           </label>
         </div>
         {error && <p role="alert" className="mt-3 text-xs text-[var(--danger)]">{error}</p>}
         <div className="mt-5 flex justify-end gap-2">
           <button type="button" onClick={onClose} className="rounded-lg px-3 py-2 text-sm text-[var(--muted)] hover:text-[var(--text)]">Cancel</button>
-          <button disabled={saving} className="rounded-lg bg-[var(--accent-2)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{saving ? "Starting..." : "Start vote"}</button>
+          <button type="submit" disabled={saving} className="rounded-lg bg-[var(--accent-2)] px-4 py-2 text-sm font-semibold text-[var(--text)] hover:bg-[var(--accent)] hover:text-[var(--bg)] transition-colors disabled:opacity-50">{saving ? "Starting..." : "Start vote"}</button>
         </div>
       </form>
     </div>

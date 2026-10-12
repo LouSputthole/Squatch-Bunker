@@ -18,12 +18,72 @@ interface ProjectableServer<TChannel extends ProjectableChannel> {
   channels: TChannel[];
 }
 
+/** Legacy tiers that can carry a channel override. Owners are never restricted. */
+export const CHANNEL_OVERRIDE_TIERS = ["member", "mod", "admin"] as const;
+
+const CUSTOM_ROLE_OVERRIDE_PREFIX = "role:";
+
+/**
+ * ChannelPermission.role key for a custom server role. The prefix keeps custom
+ * role ids from ever colliding with the legacy tier names.
+ */
+export function customRoleOverrideKey(roleId: string): string {
+  return `${CUSTOM_ROLE_OVERRIDE_PREFIX}${roleId}`;
+}
+
+/** The custom role id behind an override key, or null for a legacy tier key. */
+export function customRoleIdFromOverrideKey(key: string): string | null {
+  return key.startsWith(CUSTOM_ROLE_OVERRIDE_PREFIX)
+    ? key.slice(CUSTOM_ROLE_OVERRIDE_PREFIX.length) || null
+    : null;
+}
+
+interface ChannelOverride {
+  role: string;
+  canView: boolean;
+  canSend: boolean;
+}
+
+/** 0 = hidden, 1 = read-only, 2 = view + send. A hidden row never grants send. */
+function overrideLevel(override: Pick<ChannelOverride, "canView" | "canSend">): number {
+  if (!override.canView) return 0;
+  return override.canSend ? 2 : 1;
+}
+
+/**
+ * The single channel access rule shared by every caller:
+ * - overrides for custom roles the member holds are more specific than the
+ *   legacy tier override and replace it; across several held roles the most
+ *   permissive override wins (Discord-style role precedence);
+ * - otherwise the member's tier override applies;
+ * - with no applicable override the channel stays open.
+ * The server owner is never subject to custom-role overrides, and the API
+ * never writes an "owner" tier override, so the owner keeps full access.
+ */
+export function decideChannelAccess(input: {
+  tier: string;
+  heldRoleIds: readonly string[];
+  overrides: readonly ChannelOverride[];
+}): { canView: boolean; canSend: boolean } {
+  const heldKeys = new Set(
+    input.tier === "owner" ? [] : input.heldRoleIds.map(customRoleOverrideKey),
+  );
+  const roleOverrides = input.overrides.filter((override) => heldKeys.has(override.role));
+  let level: number;
+  if (roleOverrides.length > 0) {
+    level = Math.max(...roleOverrides.map(overrideLevel));
+  } else {
+    const tierOverride = input.overrides.find((override) => override.role === input.tier);
+    level = tierOverride ? overrideLevel(tierOverride) : 2;
+  }
+  return { canView: level >= 1, canSend: level >= 2 };
+}
+
 /**
  * The complete access decision for one user and one channel.
  *
  * A missing result means the channel does not exist or the user is not an
- * active member of its server. Channel overrides are keyed by the member's
- * legacy role; no override means the channel keeps its default open behavior.
+ * active member of its server. See decideChannelAccess for override rules.
  */
 export interface ChannelAccess {
   membership: ServerMember;
@@ -44,27 +104,36 @@ export async function resolveChannelAccess(
 ): Promise<ChannelAccess | null> {
   const context = await requireChannelMembership(channelId, userId, database);
   if (!context) return null;
+  const { membership } = context;
 
-  const permission = await database.channelPermission.findUnique({
-    where: {
-      channelId_role: {
-        channelId,
-        role: context.membership.role,
-      },
-    },
-    select: { canView: true, canSend: true },
+  const overrides = await database.channelPermission.findMany({
+    where: { channelId },
+    select: { role: true, canView: true, canSend: true },
   });
+  // Custom-role lookups only when this channel actually has a custom-role
+  // override, so the common no-override path stays a single query.
+  let heldRoleIds: string[] = [];
+  if (
+    membership.role !== "owner" &&
+    overrides.some((override) => customRoleIdFromOverrideKey(override.role))
+  ) {
+    const held = await database.serverMember.findUnique({
+      where: { id: membership.id },
+      select: { memberRoles: { select: { roleId: true } } },
+    });
+    heldRoleIds = held?.memberRoles.map((memberRole) => memberRole.roleId) ?? [];
+  }
 
-  const canView = permission?.canView ?? true;
-  const canSend = canView && (permission?.canSend ?? true);
-
-  return { ...context, canView, canSend };
+  return {
+    ...context,
+    ...decideChannelAccess({ tier: membership.role, heldRoleIds, overrides }),
+  };
 }
 
 /**
- * Remove servers without an active membership and channels denied to the
- * viewer's legacy role. One membership query and one override query cover the
- * complete hydrated list, avoiding per-channel access lookups.
+ * Remove servers without an active membership and channels the viewer cannot
+ * see. One membership query and one override query cover the complete hydrated
+ * list, avoiding per-channel access lookups.
  */
 export async function projectVisibleServerChannels<
   TChannel extends ProjectableChannel,
@@ -83,38 +152,57 @@ export async function projectVisibleServerChannels<
       userId,
       banned: false,
     },
-    select: { serverId: true, role: true },
+    select: {
+      serverId: true,
+      role: true,
+      memberRoles: { select: { roleId: true } },
+    },
   });
-  const roleByServer = new Map(
-    memberships.map((membership) => [membership.serverId, membership.role]),
+  const membershipByServer = new Map(
+    memberships.map((membership) => [
+      membership.serverId,
+      {
+        tier: membership.role,
+        heldRoleIds: membership.memberRoles.map((memberRole) => memberRole.roleId),
+      },
+    ]),
   );
 
-  const activeServers = servers.filter((server) => roleByServer.has(server.id));
+  const activeServers = servers.filter((server) => membershipByServer.has(server.id));
   const channelIds = activeServers.flatMap((server) =>
     server.channels.map((channel) => channel.id),
   );
   if (channelIds.length === 0) return activeServers;
 
-  const deniedOverrides = await database.channelPermission.findMany({
+  const overrideKeys = new Set<string>();
+  for (const membership of membershipByServer.values()) {
+    overrideKeys.add(membership.tier);
+    for (const roleId of membership.heldRoleIds) overrideKeys.add(customRoleOverrideKey(roleId));
+  }
+  const overrides = await database.channelPermission.findMany({
     where: {
       channelId: { in: channelIds },
-      role: { in: [...new Set(roleByServer.values())] },
-      canView: false,
+      role: { in: [...overrideKeys] },
     },
-    select: { channelId: true, role: true },
+    select: { channelId: true, role: true, canView: true, canSend: true },
   });
-  const denied = new Set(
-    deniedOverrides.map((permission) =>
-      `${permission.channelId}:${permission.role}`,
-    ),
-  );
+  const overridesByChannel = new Map<string, ChannelOverride[]>();
+  for (const override of overrides) {
+    const list = overridesByChannel.get(override.channelId) ?? [];
+    list.push(override);
+    overridesByChannel.set(override.channelId, list);
+  }
 
   return activeServers.map((server) => {
-    const role = roleByServer.get(server.id)!;
+    const membership = membershipByServer.get(server.id)!;
     return {
       ...server,
       channels: server.channels.filter(
-        (channel) => !denied.has(`${channel.id}:${role}`),
+        (channel) =>
+          decideChannelAccess({
+            ...membership,
+            overrides: overridesByChannel.get(channel.id) ?? [],
+          }).canView,
       ),
     };
   });

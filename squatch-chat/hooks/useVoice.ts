@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { getSocket } from "@/lib/socket";
+import { toast } from "@/lib/toast";
 import type { Channel, Server, VoiceParticipant } from "@/types/chat";
 import type { VoicePanelHandle, ScreenShareInfo } from "@/components/VoicePanel";
 
@@ -40,10 +41,13 @@ export function useVoice(activeServer: Server | null) {
   const [activeVoiceChannel, setActiveVoiceChannel] = useState<Channel | null>(() =>
     findStoredVoiceChannel(activeServer)
   );
-  const [lastCheckedVoiceServer, setLastCheckedVoiceServer] = useState<Server | null>(activeServer);
+  const [lastCheckedVoiceServerId, setLastCheckedVoiceServerId] = useState<string | null>(activeServer?.id ?? null);
   const [voiceParticipants, setVoiceParticipants] = useState<Map<string, VoiceParticipant[]>>(new Map());
-  const [voiceState, setVoiceState] = useState({ muted: false, deafened: false, reconnecting: false, sharing: false, cameraOn: false, participants: [] as VoiceParticipant[] });
+  const [voiceState, setVoiceState] = useState({ muted: false, deafened: false, reconnecting: false, sharing: false, cameraOn: false, serverMuted: false, serverDeafened: false, participants: [] as VoiceParticipant[] });
+  // Push-to-talk lives here only; VoicePanel gets it as a prop so a remount
+  // (channel switch, move, rejoin) cannot drop it while the button shows PTT.
   const [pttMode, setPttMode] = useState(false);
+  const pttModeRef = useRef(false);
   const [incomingScreenShares, setIncomingScreenShares] = useState<ScreenShareInfo[]>([]);
   const [remoteVideoStreams, setRemoteVideoStreams] = useState<Map<string, MediaStream>>(new Map());
   const [localCameraStream, setLocalCameraStream] = useState<MediaStream | null>(null);
@@ -87,8 +91,11 @@ export function useVoice(activeServer: Server | null) {
   }, []);
 
   // Adjust during a server transition so restoration does not require an effect.
-  if (lastCheckedVoiceServer !== activeServer) {
-    setLastCheckedVoiceServer(activeServer);
+  // Keyed on the id: the server object is recreated on every channel edit, and
+  // restoring on each of those re-joined users who had just been kicked.
+  const activeServerId = activeServer?.id ?? null;
+  if (lastCheckedVoiceServerId !== activeServerId) {
+    setLastCheckedVoiceServerId(activeServerId);
     const storedVoiceChannel = findStoredVoiceChannel(activeServer);
     if (storedVoiceChannel) setActiveVoiceChannel(storedVoiceChannel);
   }
@@ -105,12 +112,21 @@ export function useVoice(activeServer: Server | null) {
     });
   }, []);
 
-  const toggleMute = useCallback(() => voicePanelRef.current?.toggleMute(), []);
+  const serverMutedNow = voiceState.muted && (voiceState.serverMuted || voiceState.serverDeafened);
+  const toggleMute = useCallback(() => {
+    if (serverMutedNow) {
+      toast("A moderator has server-muted you.", "error");
+      return;
+    }
+    voicePanelRef.current?.toggleMute();
+  }, [serverMutedNow]);
   const toggleDeafen = useCallback(() => voicePanelRef.current?.toggleDeafen(), []);
   const disconnect = useCallback(() => voicePanelRef.current?.disconnect(), []);
   const togglePTT = useCallback(() => {
-    voicePanelRef.current?.togglePTT();
-    setPttMode((p) => !p);
+    const next = !pttModeRef.current;
+    pttModeRef.current = next;
+    setPttMode(next);
+    voicePanelRef.current?.setPTT(next);
   }, []);
   const setUserVolume = useCallback((userId: string, volume: number) => {
     voicePanelRef.current?.setUserVolume(userId, volume);
@@ -198,22 +214,39 @@ export function useVoice(activeServer: Server | null) {
   useEffect(() => {
     const socket = getSocket();
 
+    // VoicePanel reports the real mute/deafen state back through onStateChange;
+    // lifting a server mute never reopens the mic, it just allows unmuting.
     function handleForceMute(data: { muted: boolean; by: string }) {
-      if (data.muted) voicePanelRef.current?.forceMute?.();
-      setVoiceState((prev) => ({ ...prev, muted: data.muted }));
+      if (data.muted) {
+        voicePanelRef.current?.forceMute?.();
+        toast(`You were server-muted by ${data.by}.`, "error");
+      } else {
+        toast(`${data.by} lifted your server mute.`, "info");
+      }
     }
     function handleForceDeafen(data: { deafened: boolean; by: string }) {
-      if (data.deafened) voicePanelRef.current?.forceDeafen?.();
-      setVoiceState((prev) => ({ ...prev, deafened: data.deafened, muted: data.deafened || prev.muted }));
+      if (data.deafened) {
+        voicePanelRef.current?.forceDeafen?.();
+        toast(`You were server-deafened by ${data.by}.`, "error");
+      } else {
+        toast(`${data.by} lifted your server deafen.`, "info");
+      }
     }
-    function handleKicked() {
+    function handleKicked(data: { by?: string }) {
+      // Forget the room too, or the next server re-render restores a live mic.
+      clearLastVoice();
       setActiveVoiceChannel(null);
+      toast(`You were disconnected from voice${data?.by ? ` by ${data.by}` : ""}.`, "error");
     }
-    function handleMoved(data: { toChannelId: string }) {
+    function handleMoved(data: { toChannelId: string; by?: string }) {
       // Find the channel in the active server and switch to it
       if (activeServer) {
         const target = activeServer.channels.find((c) => c.id === data.toChannelId);
-        if (target) setActiveVoiceChannel(target);
+        if (target) {
+          saveLastVoice(target, activeServer.id);
+          setActiveVoiceChannel(target);
+          toast(`${data.by ?? "A moderator"} moved you to ${target.name}.`, "info");
+        }
       }
     }
 

@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import { useState, useRef, useEffect } from "react";
+import { useEscape } from "@/hooks/useEscape";
 
 interface Gif {
   id: string;
@@ -41,6 +42,8 @@ function GifResult({ gif, onSelect, onClose }: {
       }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
+      aria-label={gif.title ? `Send GIF: ${gif.title}` : "Send GIF"}
+      title={gif.title || undefined}
       className="relative rounded-lg overflow-hidden aspect-square hover:ring-2 hover:ring-[var(--accent-2)] transition-all group"
     >
       <Image
@@ -59,6 +62,7 @@ export default function GifPicker({ onSelect, onClose }: GifPickerProps) {
   const [search, setSearch] = useState("");
   const [gifs, setGifs] = useState<Gif[]>([]);
   const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -81,6 +85,7 @@ export default function GifPicker({ onSelect, onClose }: GifPickerProps) {
           && !(error instanceof DOMException && error.name === "AbortError")
         ) {
           setGifs([]);
+          setFailed(true);
         }
       })
       .finally(() => {
@@ -93,18 +98,15 @@ export default function GifPicker({ onSelect, onClose }: GifPickerProps) {
     };
   }, []);
 
+  useEscape(onClose);
+
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
       if (ref.current && !ref.current.contains(e.target as Node)) onClose();
     }
-    function handleEscape(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
     document.addEventListener("mousedown", handleClickOutside);
-    document.addEventListener("keydown", handleEscape);
     return () => {
       document.removeEventListener("mousedown", handleClickOutside);
-      document.removeEventListener("keydown", handleEscape);
     };
   }, [onClose]);
 
@@ -117,6 +119,7 @@ export default function GifPicker({ onSelect, onClose }: GifPickerProps) {
       const requestId = ++requestIdRef.current;
       requestControllerRef.current = controller;
       setLoading(true);
+      setFailed(false);
       requestGifs(value, controller.signal)
         .then((results) => {
           if (requestId === requestIdRef.current) setGifs(results);
@@ -127,6 +130,7 @@ export default function GifPicker({ onSelect, onClose }: GifPickerProps) {
             && !(error instanceof DOMException && error.name === "AbortError")
           ) {
             setGifs([]);
+            setFailed(true);
           }
         })
         .finally(() => {
@@ -148,6 +152,7 @@ export default function GifPicker({ onSelect, onClose }: GifPickerProps) {
           value={search}
           onChange={(e) => handleSearchChange(e.target.value)}
           placeholder="Search GIFs..."
+          aria-label="Search GIFs"
           className="w-full px-3 py-1.5 text-sm bg-[var(--panel-2)] text-[var(--text)] border border-[var(--accent-2)]/30 rounded-lg focus:outline-none focus:border-[var(--accent-2)] placeholder:text-[var(--muted)]"
         />
       </div>
@@ -158,11 +163,14 @@ export default function GifPicker({ onSelect, onClose }: GifPickerProps) {
             Loading GIFs...
           </div>
         ) : gifs.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-8 text-[var(--muted)]">
-            <span className="text-2xl mb-2">🎬</span>
-            <span className="text-sm">
-              {search ? "No GIFs found" : "Set GIPHY_API_KEY in .env to enable GIFs"}
+          <div className="flex flex-col items-center justify-center px-4 py-8 text-center text-[var(--muted)]">
+            <span className="text-2xl mb-2" aria-hidden="true">🎬</span>
+            <span className="text-sm text-[var(--text)]">
+              {failed ? "Couldn't load GIFs right now" : search ? "No GIFs found" : "GIFs aren't set up on this server"}
             </span>
+            {!failed && !search && (
+              <span className="mt-1 text-[11px]">Server owners can turn them on with a GIPHY or Tenor API key.</span>
+            )}
           </div>
         ) : (
           <div className="grid grid-cols-2 gap-1.5">
@@ -178,9 +186,11 @@ export default function GifPicker({ onSelect, onClose }: GifPickerProps) {
         )}
       </div>
 
-      <div className="px-2 py-1 border-t border-[var(--accent-2)]/20 text-center">
-        <span className="text-[10px] text-[var(--muted)]">Powered by GIPHY</span>
-      </div>
+      {gifs.length > 0 && (
+        <div className="px-2 py-1 border-t border-[var(--accent-2)]/20 text-center">
+          <span className="text-[10px] text-[var(--muted)]">Powered by GIPHY</span>
+        </div>
+      )}
     </div>
   );
 }

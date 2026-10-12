@@ -88,7 +88,7 @@ export default function BillingPage() {
         {!policy && !error && <p className="mt-10 text-sm text-[var(--muted)]">Reading the trail map...</p>}
 
         {policy?.edition === "community" ? (
-          <section className="mt-10 rounded-2xl border border-emerald-500/35 bg-emerald-500/10 p-6">
+          <section className="mt-10 rounded-2xl border border-[var(--accent-2)]/40 bg-[var(--accent-2)]/10 p-6">
             <h2 className="text-xl font-semibold">Campfire Community</h2>
             <p className="mt-2 text-sm text-[var(--muted)]">
               All shipped code features are unlocked on this self-hosted instance. Billing is intentionally disabled.
@@ -114,30 +114,30 @@ export default function BillingPage() {
               <p className="mt-6 text-3xl font-bold">$0</p>
               <p className="text-xs text-[var(--muted)]">Managed account, no card required</p>
             </section>
-            <section className="rounded-2xl border border-amber-400/45 bg-amber-400/10 p-6">
+            <section className="rounded-2xl border border-[var(--accent)]/45 bg-[var(--accent)]/10 p-6">
               <div className="flex items-center justify-between">
                 <h2 className="text-xl font-semibold">Cloud Plus</h2>
-                {policy.tier === "premium" && <span className="rounded-full bg-emerald-500/20 px-2 py-1 text-xs text-emerald-300">Your plan</span>}
+                {policy.tier === "premium" && <span className="rounded-full bg-[var(--accent)]/20 px-2 py-1 text-xs text-[var(--accent)]">Your plan</span>}
               </div>
               <p className="mt-1 text-sm text-[var(--muted)]">Higher limits and managed extras. Prices are set in the operator&apos;s Stripe catalog.</p>
               <ul className="mt-4 space-y-1.5 text-sm">
-                {premiumFeatures.map(([key, feature]) => <li key={key}>? {feature.name}</li>)}
+                {premiumFeatures.map(([key, feature]) => <li key={key} className="flex gap-2"><span aria-hidden="true" className="text-[var(--accent)]">✓</span>{feature.name}</li>)}
               </ul>
               {policy.tier === "premium" ? (
-                <button disabled={loadingAction !== null} onClick={() => void openPortal()} className="mt-6 w-full rounded-lg bg-amber-500 px-4 py-2.5 font-semibold text-black disabled:opacity-50">
+                <button disabled={loadingAction !== null} onClick={() => void openPortal()} className="mt-6 w-full rounded-lg bg-[var(--accent)] px-4 py-2.5 font-semibold text-[var(--bg)] hover:opacity-90 disabled:opacity-50">
                   {loadingAction === "portal" ? "Opening..." : "Manage billing"}
                 </button>
               ) : policy.billingEnabled ? (
                 <div className="mt-6 grid grid-cols-2 gap-2">
-                  <button disabled={loadingAction !== null} onClick={() => void checkout("monthly")} className="rounded-lg bg-amber-500 px-3 py-2.5 text-sm font-semibold text-black disabled:opacity-50">
+                  <button disabled={loadingAction !== null} onClick={() => void checkout("monthly")} className="rounded-lg bg-[var(--accent)] px-3 py-2.5 text-sm font-semibold text-[var(--bg)] hover:opacity-90 disabled:opacity-50">
                     {loadingAction === "monthly" ? "Opening..." : "Choose monthly"}
                   </button>
-                  <button disabled={loadingAction !== null} onClick={() => void checkout("yearly")} className="rounded-lg border border-amber-400/60 px-3 py-2.5 text-sm font-semibold text-amber-200 disabled:opacity-50">
+                  <button disabled={loadingAction !== null} onClick={() => void checkout("yearly")} className="rounded-lg border border-[var(--accent)]/60 px-3 py-2.5 text-sm font-semibold text-[var(--accent)] hover:bg-[var(--accent)]/10 disabled:opacity-50">
                     {loadingAction === "yearly" ? "Opening..." : "Choose yearly"}
                   </button>
                 </div>
               ) : (
-                <p className="mt-6 rounded-lg bg-red-500/10 p-3 text-xs text-red-300">The operator has not finished configuring billing, so checkout is disabled.</p>
+                <p className="mt-6 rounded-lg bg-[var(--danger)]/10 p-3 text-xs text-[var(--danger)]">The operator has not finished configuring billing, so checkout is disabled.</p>
               )}
             </section>
           </div>
@@ -145,13 +145,13 @@ export default function BillingPage() {
 
         {policy && plannedFeatures.length > 0 && (
           <section className="mt-8">
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--muted)]">Roadmap ? not included yet</h2>
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--muted)]">Roadmap — not included yet</h2>
             <div className="mt-3 flex flex-wrap gap-2">
               {plannedFeatures.map(([key, feature]) => <span key={key} className="rounded-full border border-[var(--accent-2)]/20 px-3 py-1 text-xs text-[var(--muted)]">{feature.name}</span>)}
             </div>
           </section>
         )}
-        {error && <p role="alert" className="mt-6 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">{error}</p>}
+        {error && <p role="alert" className="mt-6 rounded-lg border border-[var(--danger)]/40 bg-[var(--danger)]/10 p-3 text-sm text-[var(--text)]">{error}</p>}
       </div>
     </main>
   );

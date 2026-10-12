@@ -22,7 +22,9 @@ export function proxy(request: NextRequest) {
 
   // Protect /chat routes
   if (pathname.startsWith("/chat") && !token) {
-    return NextResponse.redirect(new URL("/login", request.url));
+    const loginUrl = new URL("/login", request.url);
+    loginUrl.searchParams.set("redirect", pathname + request.nextUrl.search);
+    return NextResponse.redirect(loginUrl);
   }
 
   // Redirect root to chat or login

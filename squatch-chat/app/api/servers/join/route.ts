@@ -5,7 +5,10 @@ import {
   getInviteAvailability,
   inviteAvailabilityMessage,
 } from "@/lib/invites";
-import { projectVisibleServerChannels } from "@/lib/channelAccess";
+import {
+  projectVisibleServerChannels,
+  resolveChannelAccess,
+} from "@/lib/channelAccess";
 
 export async function POST(request: Request) {
   const session = await getSession();
@@ -96,19 +99,45 @@ export async function POST(request: Request) {
         data: { serverId: server.id, userId: session.userId },
       });
 
-      const generalChannel = await tx.channel.findFirst({
+      // Announce in the first text channel the newcomer can actually see.
+      const textChannels = await tx.channel.findMany({
         where: { serverId: server.id, type: "text" },
-        orderBy: { position: "asc" },
+        orderBy: [{ position: "asc" }, { createdAt: "asc" }],
+        select: { id: true },
       });
-      if (generalChannel) {
+      let generalChannelId: string | null = null;
+      for (const channel of textChannels) {
+        if ((await resolveChannelAccess(channel.id, session.userId, tx))?.canView) {
+          generalChannelId = channel.id;
+          break;
+        }
+      }
+      if (generalChannelId) {
+        const joinedAt = Date.now();
         await tx.message.create({
           data: {
-            channelId: generalChannel.id,
+            channelId: generalChannelId,
             authorId: session.userId,
             content: `${session.username} joined the server`,
             isSystem: true,
+            createdAt: new Date(joinedAt),
           },
         });
+        // The owner's configured greeting follows the join notice (1 ms later
+        // so the pair keeps its order in the createdAt-sorted timeline). It is
+        // the owner's words, so it is authored by the owner.
+        const welcomeMessage = server.welcomeMessage?.trim();
+        if (welcomeMessage) {
+          await tx.message.create({
+            data: {
+              channelId: generalChannelId,
+              authorId: server.ownerId,
+              content: welcomeMessage,
+              isSystem: true,
+              createdAt: new Date(joinedAt + 1),
+            },
+          });
+        }
       }
 
       return true;

@@ -1,6 +1,10 @@
 "use client";
 
 import { useState, useRef, useEffect, useMemo } from "react";
+import CustomEmojiImage from "./CustomEmojiImage";
+import { customEmojiToken, type CustomEmojiMap } from "@/lib/customEmoji";
+
+const SERVER_CATEGORY = "server";
 
 const CATEGORIES = [
   { id: "smileys", label: "😀", name: "Smileys" },
@@ -124,13 +128,17 @@ function addRecent(emoji: string) {
 }
 
 interface EmojiPickerProps {
+  /** Receives a unicode emoji, or `:name:` for a custom server emoji. */
   onSelect: (emoji: string) => void;
   onClose: () => void;
+  /** The current server's custom emoji; shown as a "This server" section. */
+  customEmojis?: CustomEmojiMap;
 }
 
-export default function EmojiPicker({ onSelect, onClose }: EmojiPickerProps) {
+export default function EmojiPicker({ onSelect, onClose, customEmojis }: EmojiPickerProps) {
   const [search, setSearch] = useState("");
-  const [activeCategory, setActiveCategory] = useState("smileys");
+  const [activeCategory, setActiveCategory] = useState(() =>
+    customEmojis && customEmojis.size > 0 ? SERVER_CATEGORY : "smileys");
   const [recent, setRecent] = useState<string[]>(getRecent);
   const ref = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -175,6 +183,12 @@ export default function EmojiPicker({ onSelect, onClose }: EmojiPickerProps) {
     onSelect(emoji);
   }
 
+  const serverEmojis = useMemo(() => [...(customEmojis ?? [])], [customEmojis]);
+  // Custom emoji have real names, so search filters them; they are kept out of
+  // the shared recent list because they only exist on one server.
+  const serverEmojisToShow = search.trim()
+    ? serverEmojis.filter(([name]) => name.toLowerCase().includes(search.trim().toLowerCase()))
+    : activeCategory === SERVER_CATEGORY ? serverEmojis : [];
   const emojisToShow = filtered || EMOJI_DATA[activeCategory] || [];
 
   return (
@@ -205,6 +219,16 @@ export default function EmojiPicker({ onSelect, onClose }: EmojiPickerProps) {
               title="Recently Used"
             >
               🕐
+            </button>
+          )}
+          {serverEmojis.length > 0 && (
+            <button
+              onClick={() => setActiveCategory(SERVER_CATEGORY)}
+              className={`p-1.5 rounded text-sm transition-colors ${activeCategory === SERVER_CATEGORY ? "bg-[var(--accent-2)]/20" : "hover:bg-[var(--accent-2)]/10"}`}
+              title="This server"
+              aria-label="This server's emoji"
+            >
+              <CustomEmojiImage name={serverEmojis[0][0]} url={serverEmojis[0][1]} size={16} className="h-4 w-4" />
             </button>
           )}
           {CATEGORIES.map((cat) => (
@@ -239,7 +263,24 @@ export default function EmojiPicker({ onSelect, onClose }: EmojiPickerProps) {
             </div>
           </>
         )}
-        {!search && activeCategory !== "recent" && (
+        {serverEmojisToShow.length > 0 && (
+          <>
+            <div className="text-[10px] text-[var(--muted)] uppercase font-semibold mb-1 px-1">This server</div>
+            <div className="grid grid-cols-8 gap-0.5 mb-2">
+              {serverEmojisToShow.map(([name, url]) => (
+                <button
+                  key={`server-${name}`}
+                  onClick={() => onSelect(customEmojiToken(name))}
+                  className="w-8 h-8 flex items-center justify-center rounded hover:bg-[var(--accent-2)]/20 transition-colors"
+                  aria-label={customEmojiToken(name)}
+                >
+                  <CustomEmojiImage name={name} url={url} size={24} className="h-6 w-6" />
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+        {!search && activeCategory !== "recent" && activeCategory !== SERVER_CATEGORY && (
           <div className="text-[10px] text-[var(--muted)] uppercase font-semibold mb-1 px-1">
             {CATEGORIES.find((c) => c.id === activeCategory)?.name}
           </div>

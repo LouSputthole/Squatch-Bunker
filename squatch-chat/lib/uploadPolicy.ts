@@ -1,3 +1,8 @@
+// General attachment ceilings: free tier vs the "extended_upload" feature
+// (premium, and every account on a Community/self-hosted edition).
+export const STANDARD_UPLOAD_MAX_BYTES = 10 * 1024 * 1024;
+export const EXTENDED_UPLOAD_MAX_BYTES = 100 * 1024 * 1024;
+
 export const VOICE_NOTE_MAX_BYTES = 5 * 1024 * 1024;
 export const VOICE_NOTE_MAX_DURATION_SECONDS = 120;
 export const VOICE_NOTE_LABEL = "Campfire voice note";

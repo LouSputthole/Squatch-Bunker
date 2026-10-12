@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useLayoutEffect, useRef } from "react";
 import Image from "next/image";
 import { displayName, truncateName } from "@/lib/utils";
 import Avatar from "@/components/Avatar";
@@ -10,7 +10,13 @@ import { LinkPreview } from "@/components/LinkPreview";
 import MessageContextMenu from "@/components/MessageContextMenu";
 import PollCard, { type PollData } from "@/components/PollCard";
 import BlockedMessageGate from "@/components/BlockedMessageGate";
+import ChatIcon, { type ChatIconName } from "@/components/ChatIcons";
+import PromptDialog from "@/components/PromptDialog";
+import ReportDialog from "@/components/ReportDialog";
+import CustomEmojiImage from "@/components/CustomEmojiImage";
+import { parseCustomEmojiToken, type CustomEmojiMap } from "@/lib/customEmoji";
 import { VOICE_NOTE_LABEL } from "@/lib/uploadPolicy";
+import { toast } from "@/lib/toast";
 
 function isCampfireVoiceNote(name: string): boolean {
   return name.toLowerCase().startsWith(VOICE_NOTE_LABEL.toLowerCase());
@@ -223,12 +229,13 @@ const EMOJI_DATA: { emoji: string; keywords: string }[] = [
 // Inline markdown + URL + mention combined regex
 // Groups: 1=`code`, 2=**bold**, 3=__bold__, 4=*italic*, 5=_italic_,
 //         6=~~strike~~, 7=URL, 8=@mention, 9=||spoiler||,
-//         10=[link text], 11=link url  (from [text](url) markdown)
+//         10=[link text], 11=link url  (from [text](url) markdown),
+//         12=:custom_emoji:
 const INLINE_RE =
-  /(`[^`\n]+`)|\*\*([^*\n]+)\*\*|__([^_\n]+)__|\*([^*\n]+)\*|_([^_\n]+)_|~~([^~\n]+)~~|(https?:\/\/[^\s<]+[^\s<.,;:!?'")\]])|(@\w+(?:#[a-f0-9]+)?)|(\|\|[^|\n]+\|\|)|\[([^\]\n]+)\]\(([^)\s]+)\)/g;
+  /(`[^`\n]+`)|\*\*([^*\n]+)\*\*|__([^_\n]+)__|\*([^*\n]+)\*|_([^_\n]+)_|~~([^~\n]+)~~|(https?:\/\/[^\s<]+[^\s<.,;:!?'")\]])|(@\w+(?:#[a-f0-9]+)?)|(\|\|[^|\n]+\|\|)|\[([^\]\n]+)\]\(([^)\s]+)\)|(:[A-Za-z0-9_]{1,32}:)/g;
 
 let _inlineKey = 0;
-function renderInline(text: string): React.ReactNode {
+function renderInline(text: string, emojis?: CustomEmojiMap): React.ReactNode {
   const parts: React.ReactNode[] = [];
   let last = 0;
   INLINE_RE.lastIndex = 0;
@@ -236,20 +243,36 @@ function renderInline(text: string): React.ReactNode {
   while ((m = INLINE_RE.exec(text)) !== null) {
     if (m.index > last) parts.push(text.slice(last, m.index));
     const k = _inlineKey++;
-    if (m[1]) parts.push(<code key={k} className="bg-black/30 text-green-300 px-1 py-0.5 rounded text-[11px] font-mono">{m[1].slice(1, -1)}</code>);
+    if (m[12]) {
+      // `:name:` renders as an image only for this server's own emoji (URLs
+      // from the emoji API). Otherwise keep the leading colon as text and
+      // rescan from the next character so `:no:smile:` still finds `:smile:`.
+      const name = parseCustomEmojiToken(m[12]);
+      const url = name ? emojis?.get(name) : undefined;
+      if (name && url) {
+        parts.push(<CustomEmojiImage key={k} name={name} url={url} className="h-[1.375em] w-[1.375em] align-text-bottom" />);
+        last = m.index + m[0].length;
+      } else {
+        parts.push(":");
+        last = m.index + 1;
+        INLINE_RE.lastIndex = last;
+      }
+      continue;
+    }
+    if (m[1]) parts.push(<code key={k} className="bg-black/30 text-[var(--accent)] px-1 py-0.5 rounded text-[0.85em] font-mono">{m[1].slice(1, -1)}</code>);
     else if (m[2]) parts.push(<strong key={k} className="font-bold">{m[2]}</strong>);
     else if (m[3]) parts.push(<strong key={k} className="font-bold">{m[3]}</strong>);
     else if (m[4]) parts.push(<em key={k} className="italic">{m[4]}</em>);
     else if (m[5]) parts.push(<em key={k} className="italic">{m[5]}</em>);
     else if (m[6]) parts.push(<del key={k} className="line-through opacity-60">{m[6]}</del>);
-    else if (m[7]) parts.push(<a key={k} href={m[7]} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline break-all">{m[7]}</a>);
-    else if (m[8]) parts.push(<span key={k} className="bg-blue-500/20 text-blue-300 rounded px-1 font-medium">{m[8]}</span>);
+    else if (m[7]) parts.push(<a key={k} href={m[7]} target="_blank" rel="noopener noreferrer" className="text-[var(--accent)] underline-offset-2 hover:underline break-all">{m[7]}</a>);
+    else if (m[8]) parts.push(<span key={k} className="bg-[var(--accent)]/15 text-[var(--accent)] rounded px-1 font-medium">{m[8]}</span>);
     else if (m[9]) parts.push(<SpoilerText key={k}>{m[9].slice(2, -2)}</SpoilerText>);
     else if (m[10]) {
       // [text](url) markdown — only allow safe schemes; never render javascript: etc.
       const href = m[11] ?? "";
       if (/^(https?:|mailto:)/i.test(href)) {
-        parts.push(<a key={k} href={href} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline break-all">{m[10]}</a>);
+        parts.push(<a key={k} href={href} target="_blank" rel="noopener noreferrer" className="text-[var(--accent)] underline-offset-2 hover:underline break-all">{m[10]}</a>);
       } else {
         parts.push(m[0]);
       }
@@ -260,7 +283,7 @@ function renderInline(text: string): React.ReactNode {
   return parts.length === 1 && typeof parts[0] === "string" ? parts[0] : <>{parts}</>;
 }
 
-function renderContent(text: string): React.ReactNode {
+function renderContent(text: string, emojis?: CustomEmojiMap): React.ReactNode {
   // Extract ``` code blocks first
   const CODE_BLOCK_RE = /```([^`]*)```/g;
   const segments: Array<{ isBlock: boolean; content: string }> = [];
@@ -278,7 +301,7 @@ function renderContent(text: string): React.ReactNode {
   segments.forEach((seg, si) => {
     if (seg.isBlock) {
       nodes.push(
-        <pre key={si} className="bg-black/40 border border-[var(--accent-2)]/20 rounded p-2 text-xs font-mono overflow-x-auto my-1 whitespace-pre text-green-300">
+        <pre key={si} className="bg-black/40 border border-[var(--accent-2)]/20 rounded p-2 text-xs font-mono overflow-x-auto my-1 whitespace-pre text-[var(--text)]">
           <code>{seg.content.replace(/^\n/, "").replace(/\n$/, "")}</code>
         </pre>
       );
@@ -291,11 +314,11 @@ function renderContent(text: string): React.ReactNode {
       if (line.startsWith("> ")) {
         nodes.push(
           <span key={`${si}-${li}`} className="flex border-l-[3px] border-[var(--accent-2)] pl-2 my-0.5 text-[var(--muted)] italic">
-            {renderInline(line.slice(2))}
+            {renderInline(line.slice(2), emojis)}
           </span>
         );
       } else {
-        nodes.push(<span key={`${si}-${li}`}>{renderInline(line)}</span>);
+        nodes.push(<span key={`${si}-${li}`}>{renderInline(line, emojis)}</span>);
         if (!isLastLine) nodes.push(<br key={`br-${si}-${li}`} />);
       }
     });
@@ -316,47 +339,197 @@ interface ReplySnippet {
   author: { id: string; username: string };
 }
 
+export interface MessageBubbleMessage {
+  id: string;
+  content: string;
+  attachmentUrl?: string | null;
+  attachmentName?: string | null;
+  pinned?: boolean;
+  parentMessageId?: string | null;
+  replyCount?: number;
+  createdAt: string;
+  updatedAt?: string;
+  editedAt?: string | null;
+  author: { id: string; username: string; avatar?: string | null };
+  reactions?: Record<string, ReactionGroup>;
+  replyTo?: ReplySnippet | null;
+  poll?: PollData | null;
+  isSystem?: boolean;
+  pending?: boolean;
+}
+
 interface MessageBubbleProps {
-  message: {
-    id: string;
-    content: string;
-    attachmentUrl?: string | null;
-    attachmentName?: string | null;
-    pinned?: boolean;
-    parentMessageId?: string | null;
-    replyCount?: number;
-    createdAt: string;
-    updatedAt?: string;
-    editedAt?: string | null;
-    author: { id: string; username: string; avatar?: string | null };
-    reactions?: Record<string, ReactionGroup>;
-    replyTo?: ReplySnippet | null;
-    poll?: PollData | null;
-    isSystem?: boolean;
-  };
+  message: MessageBubbleMessage;
   isOwn: boolean;
   currentUserId?: string;
   authorColor?: string | null;
+  /** Moderator+: may pin and delete other people's messages. */
   canPin?: boolean;
+  /** Continuation of the previous message's author group — no avatar/name row. */
+  compact?: boolean;
+  /** The message @mentions the viewer. */
+  mentionsMe?: boolean;
+  /**
+   * Controlled edit mode. When `onEditingChange` is passed the parent owns the
+   * editing flag (so ↑ in the composer can open the editor for a message).
+   */
+  editing?: boolean;
+  onEditingChange?: (editing: boolean) => void;
   onEdit?: (messageId: string, newContent: string) => void;
   onDelete?: (messageId: string) => void;
   onReact?: (messageId: string, emoji: string) => void;
-  onReply?: (message: MessageBubbleProps["message"]) => void;
+  onReply?: (message: MessageBubbleMessage) => void;
   onScrollToMessage?: (messageId: string) => void;
   onPin?: (messageId: string, pinned: boolean) => void;
   onThread?: (messageId: string, author: { id: string; username: string }) => void;
   onBookmark?: (messageId: string, bookmarked: boolean) => void;
   onJournal?: (messageId: string) => void;
-  onTranslate?: (messageId: string, text: string) => void;
+  onTranslate?: (messageId: string, text: string) => void | Promise<void>;
   translatedText?: string | null;
   isBookmarked?: boolean;
   highlighted?: boolean;
   blocked?: boolean;
   replyAuthorBlocked?: boolean;
+  /** This server's custom emoji (name -> URL from the emoji API). Absent in DMs. */
+  customEmojis?: CustomEmojiMap;
 }
 
-export default function MessageBubble({ message, isOwn, currentUserId, authorColor, canPin, onEdit, onDelete, onReact, onReply, onScrollToMessage, onPin, onThread, onBookmark, onJournal, onTranslate, translatedText, isBookmarked, highlighted, blocked = false, replyAuthorBlocked = false }: MessageBubbleProps) {
-  const [editing, setEditing] = useState(false);
+function formatTimestamp(iso: string): string {
+  const date = new Date(iso);
+  const time = date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  if (date.getTime() >= startOfToday) return `Today at ${time}`;
+  if (date.getTime() >= startOfToday - 24 * 60 * 60 * 1000) return `Yesterday at ${time}`;
+  return `${date.toLocaleDateString()} ${time}`;
+}
+
+interface ActionButtonProps {
+  label: string;
+  icon: ChatIconName;
+  onClick: (e: React.MouseEvent<HTMLButtonElement>) => void;
+  active?: boolean;
+  filled?: boolean;
+  danger?: boolean;
+  disabled?: boolean;
+  expanded?: boolean;
+}
+
+function ActionButton({ label, icon, onClick, active, filled, danger, disabled, expanded }: ActionButtonProps) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={label}
+      aria-label={label}
+      aria-expanded={expanded}
+      className={`flex h-8 w-8 items-center justify-center rounded transition-colors hover:bg-[var(--panel-2)] disabled:opacity-40 ${
+        active ? "text-[var(--accent)]" : "text-[var(--muted)]"
+      } ${danger ? "hover:text-[var(--danger)]" : "hover:text-[var(--text)]"}`}
+    >
+      <ChatIcon name={icon} size={18} filled={filled} />
+    </button>
+  );
+}
+
+/** Inline editor: Enter saves, Shift+Enter adds a line, Escape cancels. */
+function MessageEditor({ initial, onSave, onCancel }: { initial: string; onSave: (content: string) => void; onCancel: () => void }) {
+  const [value, setValue] = useState(initial);
+  const ref = useRef<HTMLTextAreaElement>(null);
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 320)}px`;
+  }, [value]);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.focus();
+    el.setSelectionRange(el.value.length, el.value.length);
+  }, []);
+
+  function save() {
+    const trimmed = value.trim();
+    if (!trimmed || trimmed === initial.trim()) {
+      onCancel();
+      return;
+    }
+    onSave(trimmed);
+  }
+
+  return (
+    <div className="mt-1">
+      <textarea
+        ref={ref}
+        value={value}
+        rows={1}
+        aria-label="Edit message"
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.nativeEvent.isComposing) return;
+          if (e.key === "Escape") {
+            e.preventDefault();
+            e.stopPropagation();
+            onCancel();
+          } else if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            save();
+          }
+        }}
+        className="w-full resize-none overflow-y-auto rounded-lg border border-[var(--accent-2)]/50 bg-[var(--panel)] px-3 py-2 text-sm leading-relaxed text-[var(--text)] focus:border-[var(--accent)] focus:outline-none"
+      />
+      <div className="mt-1 text-[11px] text-[var(--muted)]">
+        escape to{" "}
+        <button type="button" onClick={onCancel} className="text-[var(--accent)] hover:underline">
+          cancel
+        </button>
+        {" "}· enter to{" "}
+        <button type="button" onClick={save} className="text-[var(--accent)] hover:underline">
+          save
+        </button>
+        {" "}· shift+enter for a new line
+      </div>
+    </div>
+  );
+}
+
+export default function MessageBubble({
+  message,
+  isOwn,
+  currentUserId,
+  authorColor,
+  canPin,
+  compact = false,
+  mentionsMe = false,
+  editing: editingProp,
+  onEditingChange,
+  onEdit,
+  onDelete,
+  onReact,
+  onReply,
+  onScrollToMessage,
+  onPin,
+  onThread,
+  onBookmark,
+  onJournal,
+  onTranslate,
+  translatedText,
+  isBookmarked,
+  highlighted,
+  blocked = false,
+  replyAuthorBlocked = false,
+  customEmojis,
+}: MessageBubbleProps) {
+  const [localEditing, setLocalEditing] = useState(false);
+  const editing = onEditingChange ? Boolean(editingProp) : localEditing;
+  function setEditing(next: boolean) {
+    if (onEditingChange) onEditingChange(next);
+    else setLocalEditing(next);
+  }
   const [glowing, setGlowing] = useState(false);
 
   useEffect(() => {
@@ -370,7 +543,6 @@ export default function MessageBubble({ message, isOwn, currentUserId, authorCol
     };
   }, [highlighted]);
 
-  const [editContent, setEditContent] = useState(message.content);
   const [showActions, setShowActions] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [emojiSearch, setEmojiSearch] = useState("");
@@ -378,52 +550,51 @@ export default function MessageBubble({ message, isOwn, currentUserId, authorCol
   const [lightbox, setLightbox] = useState<{ src: string; allSrcs: string[] } | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
-  const [translated, setTranslated] = useState<string | null>(null);
+  const [reporting, setReporting] = useState(false);
   const [translating, setTranslating] = useState(false);
 
+  const isPending = Boolean(message.pending) || message.id.startsWith("pending-");
+  const canEdit = isOwn && Boolean(onEdit) && !isPending && !message.poll;
+  const canDelete = Boolean(onDelete) && (isOwn || Boolean(canPin)) && !isPending;
+  const canReport = !isOwn && !isPending && Boolean(currentUserId);
+
   async function handleTranslate() {
-    if (translated) { setTranslated(null); return; }
+    if (!onTranslate || translating) return;
     setTranslating(true);
     try {
-      const res = await fetch("/api/translate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: message.content, target: "en" }),
-      });
-      const data = await res.json();
-      if (res.ok) setTranslated(data.translatedText);
+      await onTranslate(message.id, message.content);
     } finally {
       setTranslating(false);
     }
   }
 
   const shown = truncateName(message.author.username, 20);
-
-  const time = new Date(message.createdAt).toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-
-  const wasEdited = !!(message.editedAt || (message.updatedAt && message.updatedAt !== message.createdAt));
+  const authorLabel = displayName(message.author.username);
+  const created = new Date(message.createdAt);
+  const shortTime = created.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  const fullTime = created.toLocaleString();
+  // Only a real content edit counts — pinning also bumps updatedAt.
+  const wasEdited = Boolean(message.editedAt);
   const reactions = message.reactions || {};
   const reactionEntries = Object.entries(reactions);
 
-  function handleEditSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!editContent.trim() || editContent.trim() === message.content) {
-      setEditing(false);
-      setEditContent(message.content);
-      return;
-    }
-    onEdit?.(message.id, editContent.trim());
+  function handleSaveEdit(content: string) {
+    onEdit?.(message.id, content);
     setEditing(false);
   }
 
-  function handleEditKeyDown(e: React.KeyboardEvent) {
-    if (e.key === "Escape") {
-      setEditing(false);
-      setEditContent(message.content);
+  function requestDelete(e?: React.MouseEvent) {
+    // Discord-style: Shift+click deletes without the confirmation step.
+    if (e?.shiftKey) {
+      onDelete?.(message.id);
+      return;
     }
+    setShowDeleteConfirm(true);
+  }
+
+  function openMoreMenu(e: React.MouseEvent<HTMLButtonElement>) {
+    const rect = e.currentTarget.getBoundingClientRect();
+    setContextMenu({ x: Math.max(8, rect.right - 200), y: rect.bottom + 4 });
   }
 
   function handleReact(emoji: string) {
@@ -438,11 +609,14 @@ export default function MessageBubble({ message, isOwn, currentUserId, authorCol
         emoji === emojiSearch
       )
     : EMOJI_DATA;
+  const filteredCustomEmojis = customEmojis
+    ? [...customEmojis].filter(([name]) => name.toLowerCase().includes(emojiSearch.trim().toLowerCase()))
+    : [];
 
   if (message.isSystem) {
     return (
-      <BlockedMessageGate blocked={blocked}>
-        <div className="flex items-center gap-3 py-1 px-2 my-1">
+      <BlockedMessageGate blocked={blocked} className="px-4 py-2">
+        <div className="flex items-center gap-3 py-1 px-4 my-1">
           <div className="flex-1 h-px bg-[var(--accent-2)]/20" />
           <span className="text-xs text-[var(--muted)] italic shrink-0">{message.content}</span>
           <div className="flex-1 h-px bg-[var(--accent-2)]/20" />
@@ -451,316 +625,326 @@ export default function MessageBubble({ message, isOwn, currentUserId, authorCol
     );
   }
 
-  return (
-    <BlockedMessageGate blocked={blocked}>
-      <div
-      className={`flex gap-3 py-1 group hover:bg-[var(--panel)]/30 px-1 rounded relative ${glowing ? "animate-search-highlight" : ""}`}
-      onMouseEnter={() => setShowActions(true)}
-      // Keyboard users: tabbing into the message reveals the hover-only action bar.
-      onFocus={() => setShowActions(true)}
-      onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setShowActions(false); }}
-      onMouseLeave={() => { setShowActions(false); setShowEmojiPicker(false); setEmojiSearch(""); }}
-      onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setContextMenu({ x: e.clientX, y: e.clientY }); }}
-    >
-      <Avatar
-        username={message.author.username}
-        avatarUrl={message.author.avatar}
-        size={40}
-        className="bg-[var(--accent-2)] text-[var(--text)] mt-0.5"
-      />
+  const rowBackground = mentionsMe
+    ? "bg-[var(--accent)]/10 shadow-[inset_2px_0_0_0_var(--accent)]"
+    : showActions || contextMenu
+      ? "bg-[var(--panel)]/40"
+      : "hover:bg-[var(--panel)]/40";
 
-      <div className="flex-1 min-w-0">
-        <div className="flex items-baseline gap-2">
-          <button
-            type="button"
-            onClick={(e) => setProfileCard({ x: e.clientX, y: e.clientY })}
-            className={`font-semibold text-sm hover:underline cursor-pointer ${isOwn ? "text-[var(--accent)]" : "text-[var(--text)]"}`}
-            style={authorColor ? { color: authorColor } : undefined}
-            title={displayName(message.author.username)}
-          >
-            {shown}
-          </button>
-          <span className="group/ts relative cursor-default">
-            <span className="text-xs text-[var(--muted)]">{time}</span>
-            <span className="absolute bottom-full left-0 mb-1 px-2 py-1 text-xs bg-black/90 text-white rounded whitespace-nowrap opacity-0 group-hover/ts:opacity-100 transition-opacity pointer-events-none z-10">
-              {new Date(message.createdAt).toLocaleString()}
-              {wasEdited && ` (edited at ${new Date(message.updatedAt!).toLocaleString()})`}
-            </span>
-          </span>
-          {wasEdited && <span className="text-xs text-[var(--muted)] italic">(edited)</span>}
+  return (
+    <BlockedMessageGate blocked={blocked} className="px-4 py-2">
+      <div
+        className={`group relative flex gap-4 px-4 transition-colors ${compact ? "py-0.5" : "mt-3 pt-1 pb-0.5"} ${rowBackground} ${isPending ? "opacity-60" : ""} ${glowing ? "animate-search-highlight" : ""}`}
+        onMouseEnter={() => setShowActions(true)}
+        // Keyboard users: tabbing into the message reveals the hover-only action bar.
+        onFocus={() => setShowActions(true)}
+        onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setShowActions(false); }}
+        onMouseLeave={() => { setShowActions(false); setShowEmojiPicker(false); setEmojiSearch(""); }}
+        onContextMenu={(e) => {
+          if (isPending) return;
+          e.preventDefault();
+          e.stopPropagation();
+          setContextMenu({ x: e.clientX, y: e.clientY });
+        }}
+      >
+        {/* Gutter: avatar on the first message of a group, hover time on the rest */}
+        <div className="w-10 shrink-0">
+          {compact ? (
+            <time
+              dateTime={message.createdAt}
+              title={fullTime}
+              className={`block select-none pt-0.5 text-right text-[10px] leading-5 text-[var(--muted)] transition-opacity ${showActions ? "opacity-100" : "opacity-0"}`}
+            >
+              {shortTime}
+            </time>
+          ) : (
+            <button
+              type="button"
+              tabIndex={-1}
+              onClick={(e) => setProfileCard({ x: e.clientX, y: e.clientY })}
+              className="mt-0.5 block rounded-full"
+              aria-label={`View ${authorLabel}'s profile`}
+            >
+              <Avatar
+                username={message.author.username}
+                avatarUrl={message.author.avatar}
+                size={40}
+                className="bg-[var(--accent-2)] text-[var(--text)]"
+              />
+            </button>
+          )}
         </div>
 
-        {/* Reply quote */}
-        {message.replyTo && (
-          <button
-            onClick={() => onScrollToMessage?.(message.replyTo!.id)}
-            className="flex items-start gap-1.5 mb-1 pl-2 border-l-2 border-[var(--accent-2)] text-left hover:border-[var(--accent)] transition-colors group/reply"
+        <div className="flex-1 min-w-0">
+          {!compact && (
+            <div className="flex items-baseline gap-2 leading-snug">
+              <button
+                type="button"
+                onClick={(e) => setProfileCard({ x: e.clientX, y: e.clientY })}
+                className={`font-semibold text-sm hover:underline cursor-pointer ${isOwn ? "text-[var(--accent)]" : "text-[var(--text)]"}`}
+                style={authorColor ? { color: authorColor } : undefined}
+                title={authorLabel}
+              >
+                {shown}
+              </button>
+              <time dateTime={message.createdAt} title={fullTime} className="text-xs text-[var(--muted)]">
+                {formatTimestamp(message.createdAt)}
+              </time>
+              {message.pinned && (
+                <span className="self-center text-[var(--accent)]" title="Pinned message">
+                  <ChatIcon name="pin" size={12} />
+                  <span className="sr-only">Pinned</span>
+                </span>
+              )}
+            </div>
+          )}
+
+          {/* Reply quote */}
+          {message.replyTo && (
+            <button
+              type="button"
+              onClick={() => onScrollToMessage?.(message.replyTo!.id)}
+              className="flex items-start gap-1.5 mb-1 pl-2 border-l-2 border-[var(--accent-2)] text-left hover:border-[var(--accent)] transition-colors group/reply"
+            >
+              <span className="text-xs text-[var(--muted)] group-hover/reply:text-[var(--text)] transition-colors truncate max-w-[320px]">
+                {replyAuthorBlocked ? (
+                  <span className="italic">Blocked message</span>
+                ) : (
+                  <>
+                    <span className="font-medium text-[var(--accent-2)] group-hover/reply:text-[var(--accent)]">
+                      {displayName(message.replyTo.author.username)}
+                    </span>
+                    {" "}
+                    {message.replyTo.content ? message.replyTo.content.slice(0, 80) + (message.replyTo.content.length > 80 ? "…" : "") : "attachment"}
+                  </>
+                )}
+              </span>
+            </button>
+          )}
+
+          {editing ? (
+            <MessageEditor initial={message.content} onSave={handleSaveEdit} onCancel={() => setEditing(false)} />
+          ) : (
+            <>
+              {message.content && (
+                <div className="text-[var(--text)] text-sm leading-relaxed break-words">
+                  {renderContent(message.content, customEmojis)}
+                  {wasEdited && (
+                    <span
+                      className="ml-1 select-none text-[10px] text-[var(--muted)]"
+                      title={`Edited ${new Date(message.editedAt!).toLocaleString()}`}
+                    >
+                      (edited)
+                    </span>
+                  )}
+                  {compact && message.pinned && (
+                    <span className="ml-1 inline-block align-middle text-[var(--accent)]" title="Pinned message">
+                      <ChatIcon name="pin" size={11} />
+                      <span className="sr-only">Pinned</span>
+                    </span>
+                  )}
+                </div>
+              )}
+              {translatedText && (
+                <div className="mt-1 px-2 py-1 bg-[var(--accent-2)]/10 border-l-2 border-[var(--accent-2)] rounded-r text-sm text-[var(--text)] italic">
+                  <span className="text-[10px] text-[var(--muted)] uppercase font-semibold block mb-0.5 not-italic">Translation</span>
+                  {translatedText}
+                </div>
+              )}
+              {message.content && extractUrls(message.content).map((url) => (
+                <LinkPreview key={url} url={url} />
+              ))}
+              {message.attachmentUrl && (
+                <AttachmentPreview
+                  url={message.attachmentUrl}
+                  name={message.attachmentName}
+                  onOpenLightbox={(src) => {
+                    const all = Array.from(document.querySelectorAll<HTMLImageElement>("[data-lightbox-src]"))
+                      .map((el) => el.getAttribute("data-lightbox-src")!)
+                      .filter(Boolean);
+                    setLightbox({ src, allSrcs: all.length > 0 ? all : [src] });
+                  }}
+                />
+              )}
+              {message.poll && (
+                <PollCard
+                  initialPoll={message.poll}
+                  currentUserId={currentUserId}
+                  canClose={isOwn || canPin}
+                />
+              )}
+            </>
+          )}
+
+          {/* Thread reply count */}
+          {!message.parentMessageId && (message.replyCount ?? 0) > 0 && onThread && (
+            <button
+              type="button"
+              onClick={() => onThread(message.id, message.author)}
+              className="mt-1 inline-flex items-center gap-1.5 rounded px-1.5 py-0.5 text-xs font-medium text-[var(--accent)] transition-colors hover:bg-[var(--accent)]/10"
+            >
+              <ChatIcon name="thread" size={12} />
+              {message.replyCount} {message.replyCount === 1 ? "reply" : "replies"}
+            </button>
+          )}
+
+          {/* Reaction badges */}
+          {reactionEntries.length > 0 && (
+            <div className="flex flex-wrap gap-1 mt-1">
+              {reactionEntries.map(([emoji, data]) => {
+                const iMine = currentUserId ? data.userIds.includes(currentUserId) : false;
+                return (
+                  <button
+                    key={emoji}
+                    type="button"
+                    onClick={() => handleReact(emoji)}
+                    className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-xs transition-colors ${
+                      iMine
+                        ? "bg-[var(--accent)]/20 border border-[var(--accent)]/50 text-[var(--text)]"
+                        : "bg-[var(--panel-2)] border border-[var(--accent-2)]/30 text-[var(--muted)] hover:border-[var(--accent-2)]"
+                    }`}
+                    title={data.users.map((u) => displayName(u)).join(", ")}
+                    aria-label={`${emoji} ${data.count} ${data.count === 1 ? "reaction" : "reactions"}`}
+                    aria-pressed={iMine}
+                  >
+                    <ReactionEmoji emoji={emoji} customEmojis={customEmojis} />
+                    <span className="font-medium">{data.count}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Hover action bar — top-right of the hovered row */}
+        {showActions && !editing && !isPending && (
+          <div
+            role="toolbar"
+            aria-label="Message actions"
+            className="absolute right-4 -top-4 z-10 flex items-center rounded-md border border-[var(--accent-2)]/30 bg-[var(--panel)] p-0.5 shadow-lg"
           >
-            <span className="text-xs text-[var(--muted)] group-hover/reply:text-[var(--text)] transition-colors truncate max-w-[320px]">
-              {replyAuthorBlocked ? (
-                <span className="italic">Blocked message</span>
-              ) : (
+            {onReact && (
+              <ActionButton
+                label="Add reaction"
+                icon="smile"
+                active={showEmojiPicker}
+                expanded={showEmojiPicker}
+                onClick={() => setShowEmojiPicker((open) => !open)}
+              />
+            )}
+            {onReply && <ActionButton label="Reply" icon="reply" onClick={() => onReply(message)} />}
+            {!message.parentMessageId && onThread && (
+              <ActionButton
+                label={(message.replyCount ?? 0) > 0 ? "Open thread" : "Start thread"}
+                icon="thread"
+                onClick={() => onThread(message.id, message.author)}
+              />
+            )}
+            {canEdit && <ActionButton label="Edit" icon="edit" onClick={() => setEditing(true)} />}
+            {onBookmark && (
+              <ActionButton
+                label={isBookmarked ? "Remove from Saved" : "Save message"}
+                icon="bookmark"
+                active={isBookmarked}
+                filled={isBookmarked}
+                onClick={() => onBookmark(message.id, !isBookmarked)}
+              />
+            )}
+            {canDelete && (
+              <ActionButton
+                label={isOwn ? "Delete" : "Delete (moderator)"}
+                icon="trash"
+                danger
+                onClick={requestDelete}
+              />
+            )}
+            <ActionButton label="More actions" icon="more" active={Boolean(contextMenu)} onClick={openMoreMenu} />
+          </div>
+        )}
+
+        {/* Searchable emoji picker */}
+        {showEmojiPicker && (
+          <div
+            className="absolute right-4 top-6 bg-[var(--panel)] border border-[var(--accent-2)]/30 rounded-lg shadow-xl z-20 flex flex-col"
+            style={{ width: 272 }}
+            onMouseLeave={(e) => e.stopPropagation()}
+          >
+            <div className="px-2 pt-2 pb-1">
+              <input
+                type="text"
+                value={emojiSearch}
+                onChange={(e) => setEmojiSearch(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); setShowEmojiPicker(false); } }}
+                placeholder="Search emoji..."
+                aria-label="Search emoji"
+                autoFocus
+                className="w-full text-xs px-2 py-1 bg-[var(--panel-2)] text-[var(--text)] border border-[var(--accent-2)]/50 rounded focus:outline-none focus:border-[var(--accent-2)]"
+                onMouseDown={(e) => e.stopPropagation()}
+              />
+            </div>
+            <div className="overflow-y-auto px-1 pb-1.5" style={{ maxHeight: 200 }}>
+              {filteredCustomEmojis.length > 0 && (
                 <>
-                  <span className="font-medium text-[var(--accent-2)] group-hover/reply:text-[var(--accent)]">
-                    {displayName(message.replyTo.author.username)}
-                  </span>
-                  {" "}
-                  {message.replyTo.content ? message.replyTo.content.slice(0, 80) + (message.replyTo.content.length > 80 ? "…" : "") : "attachment"}
+                  <p className="px-1 pb-0.5 text-[10px] font-semibold uppercase text-[var(--muted)]">This server</p>
+                  <div className="grid grid-cols-8 gap-0.5 mb-1">
+                    {filteredCustomEmojis.map(([name, url]) => (
+                      <button
+                        key={name}
+                        type="button"
+                        onClick={() => handleReact(`:${name}:`)}
+                        className="flex items-center justify-center p-1 rounded hover:bg-[var(--panel-2)] transition-colors"
+                        aria-label={`:${name}:`}
+                      >
+                        <CustomEmojiImage name={name} url={url} size={22} className="h-[22px] w-[22px]" />
+                      </button>
+                    ))}
+                  </div>
                 </>
               )}
-            </span>
-          </button>
-        )}
-
-        {editing ? (
-          <form onSubmit={handleEditSubmit} className="mt-1">
-            <input
-              type="text"
-              value={editContent}
-              onChange={(e) => setEditContent(e.target.value)}
-              onKeyDown={handleEditKeyDown}
-              className="w-full px-2 py-1 bg-[var(--panel)] text-[var(--text)] border border-[var(--accent-2)] rounded text-sm focus:outline-none"
-              autoFocus
-            />
-            <div className="flex gap-2 mt-1 text-xs text-[var(--muted)]">
-              <span>Esc to cancel</span>
-              <span>Enter to save</span>
+              {filteredEmojis.length === 0 && filteredCustomEmojis.length === 0 ? (
+                <p className="text-xs text-[var(--muted)] text-center py-3">No results</p>
+              ) : (
+                <div className="grid grid-cols-8 gap-0.5">
+                  {filteredEmojis.map(({ emoji }) => (
+                    <button
+                      key={emoji}
+                      type="button"
+                      onClick={() => handleReact(emoji)}
+                      className="text-lg p-1 rounded hover:bg-[var(--panel-2)] transition-colors leading-none"
+                      title={emoji}
+                    >
+                      {emoji}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
-          </form>
-        ) : (
-          <>
-            {message.content && (
-              <div className="text-[var(--text)] text-sm break-words">{renderContent(message.content)}</div>
-            )}
-            {translatedText && (
-              <div className="mt-1 px-2 py-1 bg-[var(--accent-2)]/10 border-l-2 border-[var(--accent-2)] rounded-r text-sm text-[var(--text)] italic">
-                <span className="text-[10px] text-[var(--muted)] uppercase font-semibold block mb-0.5">🌐 Translation</span>
-                {translatedText}
-              </div>
-            )}
-            {message.content && extractUrls(message.content).map((url) => (
-              <LinkPreview key={url} url={url} />
-            ))}
-            {message.attachmentUrl && (
-              <AttachmentPreview
-                url={message.attachmentUrl}
-                name={message.attachmentName}
-                onOpenLightbox={(src) => {
-                  const all = Array.from(document.querySelectorAll<HTMLImageElement>("[data-lightbox-src]"))
-                    .map((el) => el.getAttribute("data-lightbox-src")!)
-                    .filter(Boolean);
-                  setLightbox({ src, allSrcs: all.length > 0 ? all : [src] });
-                }}
-              />
-            )}
-            {message.poll && (
-              <PollCard
-                initialPoll={message.poll}
-                currentUserId={currentUserId}
-                canClose={isOwn || canPin}
-              />
-            )}
-            {translated && (
-              <div className="mt-1 pt-1 border-t border-[var(--accent-2)]/20">
-                <div className="text-xs text-[var(--muted)] mb-0.5">Translation:</div>
-                <div className="text-sm text-[var(--text)] opacity-80 italic">{translated}</div>
-              </div>
-            )}
-          </>
-        )}
-
-        {/* Thread reply count */}
-        {!message.parentMessageId && (message.replyCount ?? 0) > 0 && (
-          <button
-            onClick={() => onThread?.(message.id, message.author)}
-            className="mt-1 text-xs text-[var(--accent-2)] hover:text-[var(--accent)] hover:underline"
-          >
-            {message.replyCount} {message.replyCount === 1 ? "reply" : "replies"}
-          </button>
-        )}
-
-        {/* Reaction badges */}
-        {reactionEntries.length > 0 && (
-          <div className="flex flex-wrap gap-1 mt-1">
-            {reactionEntries.map(([emoji, data]) => {
-              const iMine = currentUserId ? data.userIds.includes(currentUserId) : false;
-              return (
-                <button
-                  key={emoji}
-                  onClick={() => handleReact(emoji)}
-                  className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-xs transition-colors ${
-                    iMine
-                      ? "bg-[var(--accent)]/20 border border-[var(--accent)]/50 text-[var(--text)]"
-                      : "bg-[var(--panel-2)] border border-[var(--accent-2)]/30 text-[var(--muted)] hover:border-[var(--accent-2)]"
-                  }`}
-                  title={data.users.map((u) => displayName(u)).join(", ")}
-                  aria-label={`${emoji} ${data.count} ${data.count === 1 ? "reaction" : "reactions"}`}
-                  aria-pressed={iMine}
-                >
-                  <span>{emoji}</span>
-                  <span className="font-medium">{data.count}</span>
-                </button>
-              );
-            })}
           </div>
         )}
       </div>
 
-      {/* Pinned indicator */}
-      {message.pinned && (
-        <div className="absolute left-1 top-0 text-yellow-400 text-xs px-1 py-0.5 opacity-70" title="Pinned message">📌</div>
-      )}
-
-      {/* Action buttons — show on hover */}
-      {showActions && !editing && (
-        <div className="absolute right-1 top-0 flex gap-0.5 bg-[var(--panel)] border border-[var(--accent-2)]/30 rounded px-0.5 py-0.5 shadow-lg z-10">
-          <button
-            onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-            className="text-xs text-[var(--muted)] hover:text-[var(--text)] px-1.5 py-0.5"
-            title="React"
-            aria-label="Add reaction"
-            aria-expanded={showEmojiPicker}
-          >
-            😀
-          </button>
-          <button
-            onClick={() => onReply?.(message)}
-            className="text-xs text-[var(--muted)] hover:text-[var(--text)] px-1.5 py-0.5"
-            title="Reply"
-            aria-label="Reply"
-          >
-            ↩
-          </button>
-          {message.content && (
-            <button
-              onClick={handleTranslate}
-              disabled={translating}
-              title={translated ? "Hide translation" : "Translate to English"}
-              aria-label={translated ? "Hide translation" : "Translate to English"}
-              className="text-xs text-[var(--muted)] hover:text-[var(--text)] px-1.5 py-0.5 disabled:opacity-50"
-            >
-              {translating ? "..." : "🌐"}
-            </button>
-          )}
-          {canPin && (
-            <button
-              onClick={() => onPin?.(message.id, !message.pinned)}
-              className={`text-xs px-1.5 py-0.5 ${message.pinned ? "text-yellow-400 hover:text-[var(--muted)]" : "text-[var(--muted)] hover:text-yellow-400"}`}
-              title={message.pinned ? "Unpin" : "Pin"}
-              aria-label={message.pinned ? "Unpin message" : "Pin message"}
-            >
-              📌
-            </button>
-          )}
-          {!message.parentMessageId && onThread && (
-            <button
-              onClick={() => onThread(message.id, message.author)}
-              className="text-xs text-[var(--muted)] hover:text-[var(--text)] px-1.5 py-0.5"
-              title="Start Thread"
-            >
-              Thread
-            </button>
-          )}
-          {onBookmark && (
-            <button
-              onClick={() => onBookmark(message.id, !isBookmarked)}
-              className={`text-xs px-1.5 py-0.5 ${isBookmarked ? "text-yellow-400" : "text-[var(--muted)] hover:text-yellow-400"}`}
-              title={isBookmarked ? "Remove bookmark" : "Bookmark"}
-              aria-label={isBookmarked ? "Remove bookmark" : "Bookmark message"}
-            >
-              ★
-            </button>
-          )}
-          {isOwn && (
-            <>
-              <button
-                onClick={() => { setEditing(true); setEditContent(message.content); }}
-                className="text-xs text-[var(--muted)] hover:text-[var(--text)] px-1.5 py-0.5"
-                title="Edit"
-              >
-                Edit
-              </button>
-              <button
-                onClick={() => setShowDeleteConfirm(true)}
-                className="text-xs text-[var(--muted)] hover:text-[var(--danger)] px-1.5 py-0.5"
-                title="Delete"
-              >
-                Delete
-              </button>
-            </>
-          )}
-        </div>
-      )}
-
-      {/* Delete confirmation dialog */}
       {showDeleteConfirm && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center" onClick={() => setShowDeleteConfirm(false)}>
-          <div
-            className="bg-[var(--panel)] border border-[var(--danger)]/40 rounded-lg shadow-2xl p-5 w-80 flex flex-col gap-3"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <p className="font-semibold text-[var(--text)]">Delete Message</p>
-            <p className="text-sm text-[var(--muted)]">Are you sure you want to delete this message? This cannot be undone.</p>
-            {message.content && (
-              <p className="text-xs text-[var(--muted)] italic bg-[var(--panel-2)] rounded px-2 py-1.5 border-l-2 border-[var(--danger)] truncate">
-                {message.content.slice(0, 100)}
-              </p>
-            )}
-            <div className="flex gap-2 justify-end">
-              <button
-                onClick={() => setShowDeleteConfirm(false)}
-                className="px-4 py-1.5 text-sm text-[var(--text)] bg-[var(--panel-2)] rounded hover:bg-[var(--accent-2)]/30 transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => { onDelete?.(message.id); setShowDeleteConfirm(false); }}
-                className="px-4 py-1.5 text-sm text-white bg-[var(--danger)] rounded hover:opacity-90 transition-opacity font-semibold"
-              >
-                Delete
-              </button>
-            </div>
-          </div>
-        </div>
+        <PromptDialog
+          mode="confirm"
+          destructive
+          title="Delete message"
+          message={`${isOwn ? "Delete this message?" : `Delete this message from ${authorLabel}?`} This can't be undone. Tip: hold Shift when clicking delete to skip this step.`}
+          confirmLabel="Delete"
+          onConfirm={() => {
+            setShowDeleteConfirm(false);
+            onDelete?.(message.id);
+          }}
+          onCancel={() => setShowDeleteConfirm(false)}
+        />
       )}
 
-      {/* Searchable emoji picker */}
-      {showEmojiPicker && (
-        <div
-          className="absolute right-1 top-7 bg-[var(--panel)] border border-[var(--accent-2)]/30 rounded-lg shadow-xl z-20 flex flex-col"
-          style={{ width: 272 }}
-          onMouseLeave={(e) => e.stopPropagation()}
-        >
-          <div className="px-2 pt-2 pb-1">
-            <input
-              type="text"
-              value={emojiSearch}
-              onChange={(e) => setEmojiSearch(e.target.value)}
-              placeholder="Search emoji..."
-              autoFocus
-              className="w-full text-xs px-2 py-1 bg-[var(--panel-2)] text-[var(--text)] border border-[var(--accent-2)]/50 rounded focus:outline-none focus:border-[var(--accent-2)]"
-              onMouseDown={(e) => e.stopPropagation()}
-            />
-          </div>
-          <div className="overflow-y-auto px-1 pb-1.5" style={{ maxHeight: 200 }}>
-            {filteredEmojis.length === 0 ? (
-              <p className="text-xs text-[var(--muted)] text-center py-3">No results</p>
-            ) : (
-              <div className="grid grid-cols-8 gap-0.5">
-                {filteredEmojis.map(({ emoji }) => (
-                  <button
-                    key={emoji}
-                    onClick={() => handleReact(emoji)}
-                    className="text-lg p-1 rounded hover:bg-[var(--panel-2)] transition-colors leading-none"
-                    title={emoji}
-                  >
-                    {emoji}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
+      {reporting && (
+        <ReportDialog
+          targetUserId={message.author.id}
+          targetName={authorLabel}
+          messageId={message.id}
+          onClose={() => setReporting(false)}
+        />
       )}
 
       {contextMenu && (
@@ -769,16 +953,24 @@ export default function MessageBubble({ message, isOwn, currentUserId, authorCol
           y={contextMenu.y}
           message={message}
           currentUserId={currentUserId ?? ""}
-          canPin={canPin}
+          canPin={Boolean(canPin && onPin)}
           onReply={() => onReply?.(message)}
-          onEdit={isOwn ? () => { setEditing(true); setEditContent(message.content); } : undefined}
-          onDelete={isOwn ? () => setShowDeleteConfirm(true) : undefined}
+          onEdit={canEdit ? () => setEditing(true) : undefined}
+          onDelete={canDelete ? () => setShowDeleteConfirm(true) : undefined}
           onPin={(pinned) => onPin?.(message.id, pinned)}
           onReact={(emoji) => onReact?.(message.id, emoji)}
-          onCopyText={() => { navigator.clipboard.writeText(message.content).catch(() => {}); }}
+          onCopyText={() => {
+            navigator.clipboard.writeText(message.content).then(
+              () => toast("Copied to clipboard", "success"),
+              () => toast("Couldn't copy to the clipboard", "error"),
+            );
+          }}
           onBookmark={() => onBookmark?.(message.id, !isBookmarked)}
+          isBookmarked={isBookmarked}
           onJournal={onJournal ? () => onJournal(message.id) : undefined}
-          onTranslate={onTranslate ? () => onTranslate(message.id, message.content) : undefined}
+          onTranslate={onTranslate ? () => { void handleTranslate(); } : undefined}
+          onReport={canReport ? () => setReporting(true) : undefined}
+          customEmojis={customEmojis}
           onClose={() => setContextMenu(null)}
         />
       )}
@@ -800,12 +992,19 @@ export default function MessageBubble({ message, isOwn, currentUserId, authorCol
           onNavigate={(src) => setLightbox((prev) => prev ? { ...prev, src } : null)}
         />
       )}
-      </div>
     </BlockedMessageGate>
   );
 }
 
-function AttachmentPreview({ url, name, onOpenLightbox }: { url: string; name?: string | null; onOpenLightbox: (src: string) => void }) {
+/** A reaction key: a custom `:name:` emoji renders as its image, anything else as text. */
+function ReactionEmoji({ emoji, customEmojis }: { emoji: string; customEmojis?: CustomEmojiMap }) {
+  const name = parseCustomEmojiToken(emoji);
+  const url = name ? customEmojis?.get(name) : undefined;
+  if (name && url) return <CustomEmojiImage name={name} url={url} size={16} className="h-4 w-4" />;
+  return <span>{emoji}</span>;
+}
+
+export function AttachmentPreview({ url, name, onOpenLightbox }: { url: string; name?: string | null; onOpenLightbox: (src: string) => void }) {
   const fileName = name || url.split("/").pop() || "file";
   const fileType = getFileType(fileName);
 

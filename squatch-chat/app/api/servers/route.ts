@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { projectVisibleServerChannels } from "@/lib/channelAccess";
+import { parseServerName } from "@/lib/inputLimits";
+import { resolveServerTemplate, templateChannelRows } from "@/lib/serverTemplates";
 
 export async function GET() {
   const session = await getSession();
@@ -42,45 +44,35 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
 
-  const { name } = await request.json();
-  if (!name || !name.trim()) {
-    return NextResponse.json(
-      { error: "Server name is required" },
-      { status: 400 }
-    );
+  const body: unknown = await request.json().catch(() => null);
+  const fields = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
+  const name = parseServerName(fields.name);
+  if (!name.ok) {
+    return NextResponse.json({ error: name.error }, { status: 400 });
+  }
+  const template = resolveServerTemplate(fields.templateId);
+  if (!template.ok) {
+    return NextResponse.json({ error: "Unknown server template" }, { status: 400 });
   }
 
   try {
     const { prisma } = await import("@/lib/db");
     const server = await prisma.server.create({
       data: {
-        name: name.trim(),
+        name: name.value,
         ownerId: session.userId,
         members: {
           create: { userId: session.userId, role: "owner" },
         },
         channels: {
-          create: { name: "campfire", type: "text" },
+          create: templateChannelRows(template.template),
         },
       },
       include: {
-        channels: true,
+        channels: { orderBy: { position: "asc" } },
         _count: { select: { members: true } },
       },
     });
-
-    // Post welcome system message to the default channel
-    const defaultChannel = server.channels[0];
-    if (defaultChannel) {
-      await prisma.message.create({
-        data: {
-          channelId: defaultChannel.id,
-          authorId: session.userId,
-          content: `Welcome to #${defaultChannel.name}!`,
-          isSystem: true,
-        },
-      });
-    }
 
     return NextResponse.json({ server }, { status: 201 });
   } catch (err) {

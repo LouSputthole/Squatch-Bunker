@@ -108,7 +108,6 @@ describe("hosted deployment safety", () => {
       "RATE_LIMIT_REQUESTS",
       "RATE_LIMIT_WINDOW_MS",
       "GIPHY_API_KEY",
-      "TENOR_API_KEY",
       "LIBRETRANSLATE_URL",
       "LIBRETRANSLATE_KEY",
       "SCHEDULER_SECRET",

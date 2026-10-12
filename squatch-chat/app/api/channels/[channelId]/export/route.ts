@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { assertFeature } from "@/lib/features";
+import { resolveChannelAccess } from "@/lib/channelAccess";
+import { memberHasPermission } from "@/lib/serverRoles";
 
 export async function GET(
   _req: NextRequest,
@@ -18,14 +20,20 @@ export async function GET(
 
     const channel = await prisma.channel.findUnique({
       where: { id: channelId },
-      include: { server: { select: { ownerId: true } } },
+      select: { id: true, name: true, serverId: true },
     });
 
     if (!channel) {
       return NextResponse.json({ error: "Channel not found" }, { status: 404 });
     }
 
-    if (channel.server.ownerId !== session.userId) {
+    // Manage Channels (owner included) may export, but only channels they
+    // can read: a hidden channel's history stays hidden from its exporter.
+    const access = await resolveChannelAccess(channelId, session.userId);
+    if (
+      !access?.canView
+      || !(await memberHasPermission(channel.serverId, session.userId, "MANAGE_CHANNELS"))
+    ) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 

@@ -1,7 +1,9 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import { notifyServerEmojisChanged } from "@/hooks/useServerEmojis";
 import Image from "next/image";
+import { toast, toastResponseError } from "@/lib/toast";
 
 interface CustomEmoji {
   id: string;
@@ -67,12 +69,20 @@ export default function CustomEmojiManager({ serverId, open, onClose }: CustomEm
       setUploadError("Name can only contain letters, numbers, and underscores.");
       return;
     }
+    // Checked before uploading so a taken name doesn't strand the image.
+    if (emojis.some((emoji) => emoji.name === trimmed)) {
+      setUploadError(`:${trimmed}: already exists.`);
+      return;
+    }
     setUploading(true);
     try {
       const form = new FormData();
       form.append("file", file);
       const uploadRes = await fetch("/api/upload", { method: "POST", body: form });
-      if (!uploadRes.ok) throw new Error("Upload failed");
+      if (!uploadRes.ok) {
+        await toastResponseError(uploadRes, "Image upload failed");
+        return;
+      }
       const { url } = await uploadRes.json();
 
       const postRes = await fetch(`/api/servers/${serverId}/emoji`, {
@@ -80,13 +90,17 @@ export default function CustomEmojiManager({ serverId, open, onClose }: CustomEm
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: trimmed, url }),
       });
-      if (!postRes.ok) throw new Error("Failed to save emoji");
+      if (!postRes.ok) {
+        await toastResponseError(postRes, "Failed to save emoji");
+        return;
+      }
       const { emoji } = await postRes.json();
       setEmojis((prev) => [...prev, emoji]);
+      notifyServerEmojisChanged(serverId);
       setNewName("");
       if (fileRef.current) fileRef.current.value = "";
-    } catch (err: unknown) {
-      setUploadError(err instanceof Error ? err.message : "Something went wrong.");
+    } catch {
+      setUploadError("Something went wrong. Check your connection and try again.");
     } finally {
       setUploading(false);
     }
@@ -95,13 +109,18 @@ export default function CustomEmojiManager({ serverId, open, onClose }: CustomEm
   async function handleDelete(emojiId: string) {
     setDeletingId(emojiId);
     try {
-      const res = await fetch(`/api/servers/${serverId}/emoji/${emojiId}`, {
-        method: "DELETE",
-      });
-      if (!res.ok) throw new Error("Delete failed");
+      const res = await fetch(
+        `/api/servers/${serverId}/emoji?id=${encodeURIComponent(emojiId)}`,
+        { method: "DELETE" },
+      );
+      if (!res.ok) {
+        await toastResponseError(res, "Failed to delete emoji");
+        return;
+      }
       setEmojis((prev) => prev.filter((e) => e.id !== emojiId));
+      notifyServerEmojisChanged(serverId);
     } catch {
-      // silently leave the emoji in place; could surface error here
+      toast("Failed to delete emoji. Check your connection and try again.", "error");
     } finally {
       setDeletingId(null);
     }

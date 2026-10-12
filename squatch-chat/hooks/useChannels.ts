@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 import { getSocket } from "@/lib/socket";
 import type { Channel, Server } from "@/types/chat";
@@ -85,38 +85,72 @@ export function useChannels(activeServer: Server | null) {
     }
   }, [activeServer, activeChannel, updateUrl]);
 
-  // Unread tracking
+  // Unread tracking. Subscriptions are diffed by channel id, so a channel
+  // create/rename/reorder (which recreates the server object) or switching the
+  // active channel no longer leaves and rejoins every channel room.
+  const activeChannelIdRef = useRef(activeChannelId);
+  const subscriptionsRef = useRef(new Map<string, () => void>());
+  const textChannelKey = (activeServer?.channels ?? [])
+    .filter((c) => !c.type || c.type === "text")
+    .map((c) => c.id)
+    .join(",");
+
   useEffect(() => {
-    if (!activeServer || activeServer.channels.length === 0) return;
     const socket = getSocket();
-    const textChannelIds = activeServer.channels
-      .filter((c) => !c.type || c.type === "text")
-      .map((c) => c.id);
-
-    textChannelIds.forEach((id) => socket.emit("channel:join", id));
-
-    function handleMessage(channelId: string) {
-      return () => {
-        if (channelId === activeChannelId) return;
+    const subscriptions = subscriptionsRef.current;
+    const wanted = new Set(textChannelKey ? textChannelKey.split(",") : []);
+    for (const [id, handler] of subscriptions) {
+      if (wanted.has(id)) continue;
+      socket.off(`message:channel:${id}`, handler);
+      socket.emit("channel:leave", id);
+      subscriptions.delete(id);
+    }
+    for (const id of wanted) {
+      if (subscriptions.has(id)) continue;
+      const handler = () => {
+        if (id === activeChannelIdRef.current) return;
         setUnreadCounts((prev) => {
           const next = new Map(prev);
-          next.set(channelId, (next.get(channelId) || 0) + 1);
+          next.set(id, (next.get(id) || 0) + 1);
           return next;
         });
       };
+      socket.on(`message:channel:${id}`, handler);
+      socket.emit("channel:join", id);
+      subscriptions.set(id, handler);
     }
+  }, [textChannelKey]);
 
-    const handlers = textChannelIds.map((id) => ({
-      event: `message:channel:${id}`,
-      handler: handleMessage(id),
-    }));
-    handlers.forEach(({ event, handler }) => socket.on(event, handler));
-
+  // Leave everything on unmount; rejoin everything after a reconnect (the new
+  // server-side socket starts out in no channel rooms).
+  useEffect(() => {
+    const socket = getSocket();
+    const subscriptions = subscriptionsRef.current;
+    function rejoin() {
+      for (const id of subscriptions.keys()) socket.emit("channel:join", id);
+    }
+    socket.on("connect", rejoin);
     return () => {
-      handlers.forEach(({ event, handler }) => socket.off(event, handler));
-      textChannelIds.forEach((id) => socket.emit("channel:leave", id));
+      socket.off("connect", rejoin);
+      for (const [id, handler] of subscriptions) {
+        socket.off(`message:channel:${id}`, handler);
+        socket.emit("channel:leave", id);
+      }
+      subscriptions.clear();
     };
-  }, [activeServer, activeChannelId]);
+  }, []);
+
+  // ChatPanel leaves its channel room when it switches away; the unread
+  // subscription for that channel still needs the room, so take it back.
+  const previousActiveChannelIdRef = useRef(activeChannelId);
+  useEffect(() => {
+    activeChannelIdRef.current = activeChannelId;
+    const previous = previousActiveChannelIdRef.current;
+    previousActiveChannelIdRef.current = activeChannelId;
+    if (previous && previous !== activeChannelId && subscriptionsRef.current.has(previous)) {
+      getSocket().emit("channel:join", previous);
+    }
+  }, [activeChannelId]);
 
   const markChannelRead = useCallback((channelId: string) => {
     clearChannelUnread(channelId);
