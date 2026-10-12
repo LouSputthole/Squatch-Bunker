@@ -7,6 +7,7 @@ import CircleView, { DEFAULT_SEATS } from "@/components/CircleView";
 import EmberReactions from "@/components/EmberReactions";
 import { getSocket } from "@/lib/socket";
 import { voiceRoomModeLabel } from "@/lib/voiceRoomConfig";
+import { CAMPFIRE_SCENES_URL } from "@/lib/sceneEmbed";
 import AmbientSounds from "@/components/AmbientSounds";
 import SoundBoard from "@/components/SoundBoard";
 import FiresideStage, { type StageState } from "@/components/FiresideStage";
@@ -385,6 +386,30 @@ export default function VoiceRoom({
     currentUserRole === "mod";
   const otherVoiceChannels = voiceChannels?.filter((c) => c.id !== channelId && c.type === "voice") || [];
   const roomTheme = ROOM_THEMES.find((t) => t.id === roomThemeId) || ROOM_THEMES[0];
+  // Live 3D scene behind the seats (lib/sceneEmbed.ts). Per-device preference; the
+  // painted scene is always there underneath.
+  const [scene3d, setScene3d] = useState(true);
+  useEffect(() => {
+    // Read the saved preference after mount (SSR renders the default; storage may be blocked).
+    const timer = window.setTimeout(() => {
+      try {
+        if (localStorage.getItem("campfire:scene3d") === "0") setScene3d(false);
+      } catch {
+        /* keep the default */
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+  const toggleScene3d = () => {
+    setScene3d((on) => {
+      try {
+        localStorage.setItem("campfire:scene3d", on ? "0" : "1");
+      } catch {
+        /* ignore */
+      }
+      return !on;
+    });
+  };
   const activeLantern = lantern?.channelId === channelId && lantern.active ? lantern : null;
   const lanternHolder = participants.find((participant) => participant.userId === activeLantern?.holderId);
   const isLanternHolder = activeLantern?.holderId === currentUserId;
@@ -604,6 +629,16 @@ export default function VoiceRoom({
                 </>
               )}
             </div>
+          )}
+          {viewMode === "campfire" && CAMPFIRE_SCENES_URL && (
+            <button
+              onClick={toggleScene3d}
+              aria-pressed={scene3d}
+              className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-md bg-[var(--panel-2)] transition-colors ${scene3d ? "text-amber-200" : "text-[var(--muted)] hover:text-amber-200"}`}
+              title={scene3d ? "Live 3D scene on (click for the painted scene)" : "Painted scene (click for the live 3D scene)"}
+            >
+              <span aria-hidden="true">✦</span> {scene3d ? "3D" : "Painted"}
+            </button>
           )}
           {/* View toggle: campfire circle <-> standard grid */}
           <button
@@ -853,6 +888,8 @@ export default function VoiceRoom({
               participants={stagedParticipants}
               currentUserId={currentUserId}
               image={roomTheme.img}
+              sceneId={roomThemeId}
+              scene3d={scene3d && !!CAMPFIRE_SCENES_URL}
               seats={SEATS_BY_THEME[roomThemeId] || DEFAULT_SEATS}
               cameraOn={cameraOn}
               localCameraStream={localCameraStream}

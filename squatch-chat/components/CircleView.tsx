@@ -1,7 +1,8 @@
 "use client";
 
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, useState } from "react";
 import { displayName } from "@/lib/utils";
+import { SCENE_EMBED_MESSAGE_TYPE, roomSceneEmbedUrl, sceneEmbedOrigin } from "@/lib/sceneEmbed";
 import Avatar from "@/components/Avatar";
 import ConnectionQualityIcon from "@/components/ConnectionQualityIcon";
 
@@ -21,6 +22,10 @@ interface CircleViewProps {
   participants: Participant[];
   currentUserId: string;
   image?: string; // room background (per theme)
+  /** Scene id for the live 3D backdrop (lib/sceneEmbed.ts); the PNG stays underneath. */
+  sceneId?: string;
+  /** Show the live 3D backdrop (user toggle; off = painted scene only). */
+  scene3d?: boolean;
   seats?: { x: number; y: number }[]; // seat coords for this theme's art
   cameraOn?: boolean;
   localCameraStream?: MediaStream | null;
@@ -42,6 +47,56 @@ function SeatVideo({ stream, mirror }: { stream: MediaStream; mirror?: boolean }
       muted={mirror}
       className="w-full h-full object-cover"
       style={{ transform: mirror ? "scaleX(-1)" : undefined }}
+    />
+  );
+}
+
+/**
+ * Live 3D backdrop: the marketing site's clearing parked on this scene, framed behind the
+ * seats. The frame is loaded once and told about scene changes by postMessage, so a
+ * scene swap plays the site's own flare wipe instead of reloading. It fades in only once
+ * it has loaded, never takes pointer events, and is skipped while offline so a failed
+ * navigation never paints a browser error page over the painted scene.
+ */
+function SceneEmbed({ sceneId }: { sceneId: string }) {
+  const ref = useRef<HTMLIFrameElement>(null);
+  const [loaded, setLoaded] = useState(false);
+  const [online, setOnline] = useState(() => typeof navigator === "undefined" || navigator.onLine);
+  // The URL is fixed to the first scene; later scenes go through postMessage.
+  const [src] = useState(() => roomSceneEmbedUrl(sceneId));
+  const origin = sceneEmbedOrigin();
+
+  useEffect(() => {
+    const up = () => setOnline(true);
+    const down = () => setOnline(false);
+    window.addEventListener("online", up);
+    window.addEventListener("offline", down);
+    return () => {
+      window.removeEventListener("online", up);
+      window.removeEventListener("offline", down);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!loaded || !origin) return;
+    ref.current?.contentWindow?.postMessage({ type: SCENE_EMBED_MESSAGE_TYPE, room: sceneId }, origin);
+  }, [loaded, sceneId, origin]);
+
+  if (!src || !online) return null;
+  return (
+    <iframe
+      ref={ref}
+      src={src}
+      title="Live 3D room scene"
+      aria-hidden="true"
+      tabIndex={-1}
+      loading="lazy"
+      referrerPolicy="no-referrer"
+      sandbox="allow-scripts allow-same-origin"
+      allow=""
+      onLoad={() => setLoaded(true)}
+      className="absolute inset-0 w-full h-full border-0 pointer-events-none"
+      style={{ opacity: loaded ? 1 : 0, transition: "opacity 700ms ease" }}
     />
   );
 }
@@ -69,6 +124,8 @@ export default function CircleView({
   participants,
   currentUserId,
   image = "/rooms/campfire.png",
+  sceneId,
+  scene3d = false,
   seats = DEFAULT_SEATS,
   cameraOn,
   localCameraStream,
@@ -98,6 +155,8 @@ export default function CircleView({
           100% { transform: translate(-50%, -50%) scale(1.7); opacity: 0; }
         }
       `}</style>
+
+      {scene3d && sceneId && <SceneEmbed sceneId={sceneId} />}
 
       {/* Vignette scrim — keeps the fire glowing center, darkens edges so seats read */}
       <div
