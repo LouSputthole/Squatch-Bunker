@@ -3,7 +3,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 
-const DESKTOP_SCHEMA_VERSION = 6;
+const DESKTOP_SCHEMA_VERSION = 7;
 
 const TABLES = [
   [
@@ -122,6 +122,23 @@ const TABLES = [
     CONSTRAINT "GatheringRsvp_gatheringId_fkey" FOREIGN KEY ("gatheringId") REFERENCES "Gathering" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
     CONSTRAINT "GatheringRsvp_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
   )`,
+  // Ember Inbox (schema v7): the upgrader had skipped this wave, so a 0.0.3
+  // install upgraded in place lacked the table the inbox reads.
+  `CREATE TABLE IF NOT EXISTS "Notification" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "userId" TEXT NOT NULL,
+    "type" TEXT NOT NULL,
+    "title" TEXT NOT NULL,
+    "body" TEXT NOT NULL,
+    "serverId" TEXT,
+    "channelId" TEXT,
+    "conversationId" TEXT,
+    "messageId" TEXT,
+    "actorId" TEXT,
+    "readAt" DATETIME,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "Notification_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+  )`,
   `CREATE TABLE IF NOT EXISTS "ReportEvent" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "reportId" TEXT NOT NULL,
@@ -215,6 +232,8 @@ const INDEXES = [
   'CREATE UNIQUE INDEX IF NOT EXISTS "User_stripeCustomerId_key" ON "User"("stripeCustomerId")',
   'CREATE UNIQUE INDEX IF NOT EXISTS "User_stripeSubscriptionId_key" ON "User"("stripeSubscriptionId")',
   'CREATE INDEX IF NOT EXISTS "User_billingCheckoutPendingAt_idx" ON "User"("billingCheckoutPendingAt")',
+  'CREATE INDEX IF NOT EXISTS "Notification_userId_readAt_idx" ON "Notification"("userId", "readAt")',
+  'CREATE INDEX IF NOT EXISTS "Notification_userId_createdAt_idx" ON "Notification"("userId", "createdAt")',
 ];
 
 function quoteIdentifier(identifier) {
@@ -319,7 +338,7 @@ function assertIntegrity(database) {
 
 function assertCurrentSchema(database) {
   const requiredColumns = {
-    User: ["billingCheckoutPendingAt", "billingEventAt"],
+    User: ["billingCheckoutPendingAt", "billingEventAt", "quietHoursStart", "quietHoursEnd"],
     Server: [
       "inviteExpiresAt",
       "inviteMaxUses",
@@ -335,6 +354,7 @@ function assertCurrentSchema(database) {
       "status",
       ...REPORT_CASE_COLUMNS.map(([column]) => column),
     ],
+    Notification: ["id", "userId", "type", "title", "body", "serverId", "channelId", "conversationId", "messageId", "actorId", "readAt", "createdAt"],
     ReportEvent: ["id", "reportId", "actorId", "type", "detail", "createdAt"],
     ReportAppeal: ["id", "reportId", "appellantId", "reason", "status", "decidedById", "decisionNote", "createdAt", "decidedAt"],
     Channel: ["roomMode", "roomScene", "retentionDays"],
@@ -374,6 +394,7 @@ function assertCurrentSchema(database) {
   assertForeignKey(database, "Report", "targetUserId", "User", "CASCADE");
   assertForeignKey(database, "Report", "serverId", "Server", "SET NULL");
   assertForeignKey(database, "Report", "assigneeId", "User", "SET NULL");
+  assertForeignKey(database, "Notification", "userId", "User", "CASCADE");
   assertForeignKey(database, "ReportEvent", "reportId", "Report", "CASCADE");
   assertForeignKey(database, "ReportAppeal", "reportId", "Report", "CASCADE");
   assertForeignKey(database, "ReportAppeal", "appellantId", "User", "CASCADE");
@@ -455,6 +476,8 @@ function upgradeDesktopDatabase({
       addColumn(database, "Channel", "retentionDays", "INTEGER");
       addColumn(database, "User", "billingCheckoutPendingAt", "DATETIME");
       addColumn(database, "User", "billingEventAt", "DATETIME");
+      addColumn(database, "User", "quietHoursStart", "INTEGER");
+      addColumn(database, "User", "quietHoursEnd", "INTEGER");
 
       for (const sql of TABLES) database.exec(sql);
       addColumn(

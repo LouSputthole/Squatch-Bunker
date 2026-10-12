@@ -7,6 +7,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -19,6 +20,7 @@ import { importLegacyDesktopState } from "@/desktop/legacy-state.cjs";
 
 const Database = createRequire(import.meta.url)("better-sqlite3");
 const temporaryDirectories: string[] = [];
+const temporaryFiles: string[] = [];
 
 function createV003DesktopState(root: string) {
   const databasePath = join(root, "campfire.db");
@@ -125,6 +127,9 @@ function createLegacyDatabase({ duplicateStripe = false } = {}) {
 afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) {
     rmSync(directory, { recursive: true, force: true });
+  }
+  for (const file of temporaryFiles.splice(0)) {
+    rmSync(file, { force: true });
   }
 });
 
@@ -366,6 +371,7 @@ describe("desktop database upgrades", () => {
       "PollVote",
       "Gathering",
       "GatheringRsvp",
+      "Notification",
     ]) {
       expect(
         database
@@ -486,6 +492,54 @@ describe("desktop database upgrades", () => {
       upgradeDesktopDatabase({ databasePath, Database, log: () => undefined }),
     ).toEqual({ upgraded: false, backupPath: null });
     expect(readdirSync(join(directory, "backups"))).toHaveLength(backupsAfterUpgrade);
+  });
+
+  it("upgrades a real v0.0.3 database to exactly the current Prisma schema", () => {
+    const root = mkdtempSync(join(tmpdir(), "campfire-v003-drift-"));
+    temporaryDirectories.push(root);
+    const databasePath = createV003DesktopState(root);
+    expect(upgradeDesktopDatabase({ databasePath, Database, log: () => undefined }).upgraded).toBe(true);
+
+    // The upgrader keeps a hand-written DDL list; Prisma is the referee. Any
+    // table, column, index, or foreign key the schema has and the upgraded
+    // database lacks shows up here as SQL — and would 500 at runtime.
+    // The config must live inside the project so `prisma/config` resolves.
+    mkdirSync(join(process.cwd(), "tests", ".tmp"), { recursive: true });
+    const configPath = join(process.cwd(), "tests", ".tmp", `drift-${Date.now()}.config.ts`);
+    temporaryFiles.push(configPath);
+    writeFileSync(
+      configPath,
+      [
+        'import { defineConfig } from "prisma/config";',
+        "export default defineConfig({",
+        `  schema: ${JSON.stringify(resolve(process.cwd(), "prisma", "schema.prisma"))},`,
+        `  datasource: { url: ${JSON.stringify(`file:${databasePath.replaceAll("\\", "/")}`)} },`,
+        "});",
+      ].join("\n"),
+    );
+    const drift = execFileSync(
+      process.execPath,
+      [
+        resolve(process.cwd(), "node_modules", "prisma", "build", "index.js"),
+        "migrate",
+        "diff",
+        "--config",
+        configPath,
+        "--from-config-datasource",
+        "--to-schema",
+        resolve(process.cwd(), "prisma", "schema.prisma"),
+        "--script",
+      ],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+    );
+    // The 0.0.3 app's own migration ledger is the one table the schema does
+    // not know; everything else must already match.
+    const statements = drift
+      .replace(/^\s*--.*$/gm, "")
+      .split(";")
+      .map((statement) => statement.trim())
+      .filter((statement) => statement && !/^PRAGMA foreign_keys=(?:off|on)$/i.test(statement));
+    expect(statements).toEqual(['DROP TABLE "_campfire_migrations"']);
   });
 
   it("backfills pre-desk reports with their community, evidence, and filed event", () => {
