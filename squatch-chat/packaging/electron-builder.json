@@ -13,8 +13,15 @@
     "main.cjs",
     "database.cjs",
     "legacy-state.cjs",
-    "package.json",
-    "!node_modules{,/**/*}"
+    "launcher-core.cjs",
+    "package.json"
+  ],
+  "publish": [
+    {
+      "provider": "github",
+      "owner": "LouSputthole",
+      "repo": "Squatch-Bunker"
+    }
   ],
   "extraResources": [
     {

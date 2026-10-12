@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 const COOKIE_NAME = process.env.COOKIE_NAME || "squatch-token";
-const PUBLIC_PATHS = ["/login", "/register", "/forgot-password", "/reset-password", "/api/auth/login", "/api/auth/register", "/api/auth/guest", "/join", "/explore", "/setup"];
+const PUBLIC_PATHS = ["/login", "/register", "/forgot-password", "/reset-password", "/api/auth/login", "/api/auth/register", "/api/auth/guest", "/join", "/explore", "/setup", "/download"];
 
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -39,5 +39,7 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  // The install-ping collector needs nothing here, and skipping the proxy keeps
+  // Next from buffering its unauthenticated bodies (up to 10 MB) before the route's 2 KB cap.
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|api/telemetry).*)"],
 };

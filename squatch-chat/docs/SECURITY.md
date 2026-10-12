@@ -57,6 +57,19 @@ the database, public media, and private attachments as secrets when backing up.
 - **Encrypted database at rest** (SQLCipher). Full-disk encryption on the
   host covers the same threat with zero app complexity.
 
+## Anonymous usage ping
+
+Production servers and the Windows app send one small anonymous ping a day
+(plus one when the app launches) to Campfire Online so the project can count
+installs. It carries a random or HMAC-derived install ID, the app version,
+edition or desktop mode, platform, and, from servers only, two aggregate
+counts (registered accounts, accounts active in the last 7 days). It never
+carries IPs, usernames, emails, hostnames, server or channel names, or message
+content, and the collector stores no IP addresses. Turn it off with
+`CAMPFIRE_TELEMETRY=off` or `DO_NOT_TRACK=1`, or the Windows tray's
+**Send anonymous usage ping** toggle. Field-by-field details:
+[TELEMETRY.md](./TELEMETRY.md).
+
 ## Operator hardening checklist
 
 - [ ] HTTPS in front of anything not on a trusted LAN (DEPLOY.md)

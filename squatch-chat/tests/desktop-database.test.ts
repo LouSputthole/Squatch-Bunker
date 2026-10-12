@@ -17,6 +17,7 @@ import {
   upgradeDesktopDatabase,
 } from "@/desktop/database.cjs";
 import { importLegacyDesktopState } from "@/desktop/legacy-state.cjs";
+import { TEST_DB_FILE } from "./db-path";
 
 const Database = createRequire(import.meta.url)("better-sqlite3");
 const temporaryDirectories: string[] = [];
@@ -174,6 +175,51 @@ describe("desktop database upgrades", () => {
       ).toBeTruthy();
     }
     imported.close();
+  });
+
+  it("brings v0.0.3 and version-5 databases up to the full Prisma schema", async () => {
+    // Every table, column and index the app's Prisma schema expects (the
+    // suite's db-pushed test database), so a new model can't skip the desktop upgrade again.
+    const schemaShape = (databasePath: string) => {
+      const database = new Database(databasePath, { readonly: true });
+      const tables = (database
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '\\_%' ESCAPE '\\'")
+        .all() as Array<{ name: string }>).map(({ name }) => name);
+      const shape = {
+        columns: tables.flatMap((table) =>
+          (database.prepare(`PRAGMA table_info("${table}")`).all() as Array<{ name: string }>)
+            .map(({ name }) => `${table}.${name}`),
+        ).sort(),
+        indexes: (database
+          .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name NOT LIKE 'sqlite_%'")
+          .all() as Array<{ name: string }>).map(({ name }) => name).sort(),
+      };
+      database.close();
+      return shape;
+    };
+    const expected = schemaShape(TEST_DB_FILE);
+
+    const root = mkdtempSync(join(tmpdir(), "campfire-v003-schema-"));
+    temporaryDirectories.push(root);
+    createV003DesktopState(root);
+    await importLegacyDesktopState({
+      userDataPath: root,
+      portableDirectory: null,
+      Database,
+      log: () => undefined,
+    });
+    const databasePath = join(root, "data", "campfire.db");
+    expect(schemaShape(databasePath)).toEqual(expected);
+
+    // A version-5 database from before the Ember Inbox reached the desktop upgrade.
+    const versionFive = new Database(databasePath);
+    versionFive.exec(
+      'DROP TABLE "Notification"; ALTER TABLE "User" DROP COLUMN "quietHoursStart"; ALTER TABLE "User" DROP COLUMN "quietHoursEnd";',
+    );
+    versionFive.pragma("user_version = 5");
+    versionFive.close();
+    expect(upgradeDesktopDatabase({ databasePath, Database, log: () => undefined }).upgraded).toBe(true);
+    expect(schemaShape(databasePath)).toEqual(expected);
   });
 
   it("imports committed WAL pages without rewriting the legacy database", async () => {

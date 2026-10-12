@@ -8,11 +8,12 @@ import {
 const mocks = vi.hoisted(() => ({
   getSession: vi.fn(),
   community: { value: false },
+  billing: { value: true },
 }));
 vi.mock("@/lib/auth", () => ({ getSession: mocks.getSession }));
 vi.mock("@/lib/sfu", () => ({ sfuConfigured: () => false }));
 vi.mock("@/lib/edition", () => ({
-  billingConfiguration: () => ({ enabled: false }),
+  billingConfiguration: () => ({ enabled: !mocks.community.value && mocks.billing.value }),
   getEdition: () => (mocks.community.value ? "community" : "cloud"),
   isCommunityEdition: () => mocks.community.value,
 }));
@@ -50,6 +51,7 @@ afterEach(() => {
   vi.unstubAllEnvs();
   mocks.getSession.mockReset();
   mocks.community.value = false;
+  mocks.billing.value = true;
 });
 
 afterAll(async () => {
@@ -95,6 +97,19 @@ describe("GET /api/config capabilities", () => {
     // Community editions unlock extended uploads for everyone.
     mocks.community.value = true;
     mocks.getSession.mockResolvedValue(null);
+    expect((await config()).maxUploadBytes).toBe(EXTENDED_UPLOAD_MAX_BYTES);
+  });
+
+  it("unlocks extended uploads for everyone while Cloud billing is off", async () => {
+    mocks.billing.value = false;
+
+    mocks.getSession.mockResolvedValue(null);
+    await expect(config()).resolves.toMatchObject({
+      billingEnabled: false,
+      maxUploadBytes: EXTENDED_UPLOAD_MAX_BYTES,
+    });
+
+    mocks.getSession.mockResolvedValue({ userId: freeUserId, username: "config_free" });
     expect((await config()).maxUploadBytes).toBe(EXTENDED_UPLOAD_MAX_BYTES);
   });
 });

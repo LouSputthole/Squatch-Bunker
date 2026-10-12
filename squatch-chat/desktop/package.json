@@ -5,5 +5,9 @@
   "description": "Campfire desktop application",
   "author": "Squatch Bunker",
   "license": "AGPL-3.0-only",
-  "main": "main.cjs"
+  "main": "main.cjs",
+  "campfireCloudUrl": "",
+  "dependencies": {
+    "electron-updater": "6.8.9"
+  }
 }

@@ -3,7 +3,11 @@
 const fs = require("node:fs");
 const path = require("node:path");
 
-const DESKTOP_SCHEMA_VERSION = 8;
+// 6: everything version 5 databases (including every upgraded v0.0.3 install)
+// never received — Ember Inbox (Notification, User quiet hours), telemetry
+// (TelemetryInstall), Ranger Desk (Report case columns, ReportEvent,
+// ReportAppeal) and Trail Boards (BoardTopic).
+const DESKTOP_SCHEMA_VERSION = 6;
 
 const TABLES = [
   [
@@ -122,8 +126,8 @@ const TABLES = [
     CONSTRAINT "GatheringRsvp_gatheringId_fkey" FOREIGN KEY ("gatheringId") REFERENCES "Gathering" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
     CONSTRAINT "GatheringRsvp_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
   )`,
-  // Ember Inbox (schema v7): the upgrader had skipped this wave, so a 0.0.3
-  // install upgraded in place lacked the table the inbox reads.
+  // Ember Inbox: the upgrader had skipped this wave, so a 0.0.3 install
+  // upgraded in place lacked the table the inbox reads.
   `CREATE TABLE IF NOT EXISTS "Notification" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "userId" TEXT NOT NULL,
@@ -139,7 +143,19 @@ const TABLES = [
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT "Notification_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
   )`,
-  // Trail Boards (schema v8).
+  `CREATE TABLE IF NOT EXISTS "TelemetryInstall" (
+    "installId" TEXT NOT NULL PRIMARY KEY,
+    "kind" TEXT NOT NULL,
+    "mode" TEXT,
+    "version" TEXT NOT NULL,
+    "edition" TEXT,
+    "platform" TEXT,
+    "users" INTEGER,
+    "activeUsers" INTEGER,
+    "firstSeenAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "lastSeenAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+  // Trail Boards.
   `CREATE TABLE IF NOT EXISTS "BoardTopic" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "channelId" TEXT NOT NULL,
@@ -182,7 +198,7 @@ const TABLES = [
   )`,
 ];
 
-// Ranger Desk (schema v6): message reports filed before the desk learn their
+// Ranger Desk: message reports filed before the desk learn their
 // community and evidence from the message where it still exists, and every
 // report gets its "filed" case event. Same statements as the PostgreSQL
 // migration 20261012000000_ranger_desk.
@@ -253,6 +269,8 @@ const INDEXES = [
   'CREATE INDEX IF NOT EXISTS "User_billingCheckoutPendingAt_idx" ON "User"("billingCheckoutPendingAt")',
   'CREATE INDEX IF NOT EXISTS "Notification_userId_readAt_idx" ON "Notification"("userId", "readAt")',
   'CREATE INDEX IF NOT EXISTS "Notification_userId_createdAt_idx" ON "Notification"("userId", "createdAt")',
+  'CREATE INDEX IF NOT EXISTS "TelemetryInstall_lastSeenAt_idx" ON "TelemetryInstall"("lastSeenAt")',
+  'CREATE INDEX IF NOT EXISTS "TelemetryInstall_firstSeenAt_idx" ON "TelemetryInstall"("firstSeenAt")',
   'CREATE UNIQUE INDEX IF NOT EXISTS "BoardTopic_rootMessageId_key" ON "BoardTopic"("rootMessageId")',
   'CREATE INDEX IF NOT EXISTS "BoardTopic_channelId_status_lastActivityAt_idx" ON "BoardTopic"("channelId", "status", "lastActivityAt")',
   'CREATE INDEX IF NOT EXISTS "BoardTopic_channelId_pinned_lastActivityAt_idx" ON "BoardTopic"("channelId", "pinned", "lastActivityAt")',
@@ -377,6 +395,7 @@ function assertCurrentSchema(database) {
       ...REPORT_CASE_COLUMNS.map(([column]) => column),
     ],
     Notification: ["id", "userId", "type", "title", "body", "serverId", "channelId", "conversationId", "messageId", "actorId", "readAt", "createdAt"],
+    TelemetryInstall: ["installId", "kind", "mode", "version", "edition", "platform", "users", "activeUsers", "firstSeenAt", "lastSeenAt"],
     BoardTopic: ["id", "channelId", "rootMessageId", "ownerId", "title", "tags", "status", "pinned", "lastActivityAt", "resolvedAt", "archivedAt", "createdAt", "updatedAt"],
     ReportEvent: ["id", "reportId", "actorId", "type", "detail", "createdAt"],
     ReportAppeal: ["id", "reportId", "appellantId", "reason", "status", "decidedById", "decisionNote", "createdAt", "decidedAt"],

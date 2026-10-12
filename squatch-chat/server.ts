@@ -22,6 +22,8 @@ import {
 import { assertEditionConfig } from "./lib/edition";
 import { assertBetaAccessConfig } from "./lib/betaAccess";
 import { assertTurnConfiguration } from "./lib/turnCredentials";
+import { startTelemetryReporter } from "./lib/telemetry";
+import { isTelemetryCollector, pruneStaleInstalls } from "./lib/telemetryCollector";
 import {
   resolveUserMediaPath,
   userMediaCacheControl,
@@ -149,6 +151,7 @@ async function main() {
     const [retention, abandoned] = await Promise.all([
       sweepExpiredMessages(),
       sweepAbandonedPrivateUploads(),
+      isTelemetryCollector() ? pruneStaleInstalls() : 0,
     ]);
     // After retention, so guests whose last messages just expired can go.
     const guests = await sweepExpiredGuests();
@@ -189,14 +192,24 @@ async function main() {
       });
     }
     await prisma.$disconnect();
-    process.exitCode = 0;
+    // Explicit: the launcher's IPC channel (and dev-mode file watchers) would keep us alive.
+    process.exit(0);
   }
 
-  process.once("SIGINT", () => {
+  // `on`, not `once`: one stop can deliver a signal more than once (systemd signals every
+  // process in the unit while npm, host-prod and tsx relay it again), and tsx exits at once,
+  // mid-drain, when a signal finds no listener. Repeats are no-ops in shutdown().
+  // ponytail: so a drain that hangs needs SIGKILL; systemd and Docker send one after their stop timeout.
+  process.on("SIGINT", () => {
     void shutdown("SIGINT");
   });
-  process.once("SIGTERM", () => {
+  process.on("SIGTERM", () => {
     void shutdown("SIGTERM");
+  });
+  // Windows has no SIGTERM (the launcher's child.kill() is TerminateProcess), so the desktop
+  // launcher asks over IPC instead; desktop/main.cjs stopServer().
+  process.on("message", (message) => {
+    if (message === "shutdown") void shutdown("launcher");
   });
 
   // Desktop: the Electron launcher passes its pid. If it is force-killed it can't stop us,
@@ -226,6 +239,7 @@ async function main() {
     console.log("  ║  Share the Network URL with others!      ║");
     console.log("  ╚══════════════════════════════════════════╝");
     console.log("");
+    startTelemetryReporter();
   });
 }
 

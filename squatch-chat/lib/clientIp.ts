@@ -37,6 +37,23 @@ function configuredProxyHops(): number {
 }
 
 /**
+ * Limiter key for a clientIp() result: IPv4 as is, IPv6 by its /64, because a
+ * single host routinely holds a whole /64 and can rotate through 2^64 addresses.
+ */
+export function clientNetwork(ip: string): string {
+  if (isIP(ip) !== 6) return ip;
+  const [head, tail] = ip.split("::");
+  const left = head ? head.split(":") : [];
+  const right = tail ? tail.split(":") : [];
+  // An embedded IPv4 tail ("::a.b.c.d") is two groups wide.
+  const width = (groups: string[]) => groups.reduce((n, group) => n + (group.includes(".") ? 2 : 1), 0);
+  const groups = tail === undefined
+    ? left
+    : [...left, ...Array(8 - width(left) - width(right)).fill("0"), ...right];
+  return `${groups.slice(0, 4).map((group) => parseInt(group, 16).toString(16)).join(":")}::/64`;
+}
+
+/**
  * Resolve a limiter key without trusting caller-controlled forwarding headers.
  *
  * CAMPFIRE_TRUST_PROXY_HOPS is intentionally opt-in. When set, the deployment

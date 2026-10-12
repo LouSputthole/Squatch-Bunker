@@ -9,7 +9,7 @@ This page describes product intent, not a service-level agreement or legal advic
 | | Free self-hosted | Managed hosted |
 |---|---|---|
 | License | AGPL-3.0 source | Same AGPL-3.0 application code |
-| Price | No Campfire software fee | Recurring fee for hosting and operations |
+| Price | No Campfire software fee | Recurring fee for hosting and operations once billing is configured; free until then |
 | Explicit mode | `CAMPFIRE_EDITION=community` (also the safe default) | `CAMPFIRE_EDITION=cloud` |
 | Operator | You or your organization | Campfire service operator |
 | Core features | All shipped features in `CAMPFIRE_EDITION=community` or legacy `SELF_HOSTED=true`; Stripe presence is irrelevant | Same core product; plans may cover resource and support levels |
@@ -31,7 +31,7 @@ This page describes product intent, not a service-level agreement or legal advic
 - Docker and manual VPS deployment paths.
 - The open-source Electron/electron-builder packaging layer for portable and installer candidates; artifact readiness is tracked separately below.
 
-There is no feature paywall in Community. Adding Stripe variables never silently changes the edition; they are ignored in Community mode. `SELF_HOSTED=true` remains a compatibility override that forces Community, but production operators should prefer the explicit `CAMPFIRE_EDITION=community` setting.
+There is no feature paywall in Community. Adding Stripe variables never silently changes the edition; they are ignored in Community mode. `SELF_HOSTED=true` remains a compatibility override that forces Community, but production operators should prefer the explicit `CAMPFIRE_EDITION=community` setting. Production servers send a small anonymous usage ping by default; [TELEMETRY.md](./TELEMETRY.md) lists exactly what it contains and how to turn it off.
 
 ### What the self-host operator owns
 
@@ -49,7 +49,11 @@ The repository is licensed under AGPL-3.0. If you modify Campfire and provide it
 
 ## Managed hosted edition
 
-The hosted product is convenience and operational confidence, not a closed-source fork. It uses `CAMPFIRE_EDITION=cloud`; production configuration validates PostgreSQL, an HTTPS application URL, a strong JWT secret, strict CORS, and `RESEND_API_KEY` plus `CAMPFIRE_EMAIL_FROM` for account recovery. Billing is enabled only when the Stripe secret, webhook secret, and both configured price IDs are present. Its value proposition is:
+The hosted product is convenience and operational confidence, not a closed-source fork. It uses `CAMPFIRE_EDITION=cloud`; production configuration validates PostgreSQL, an HTTPS application URL, a strong JWT secret, strict CORS, and `RESEND_API_KEY` plus `CAMPFIRE_EMAIL_FROM` for account recovery. Billing is enabled only when the Stripe secret, webhook secret, and both configured price IDs are present.
+
+**Free for now:** a Cloud instance whose billing is not configured has nothing to sell, so it locks nothing: every account gets every shipped feature, exactly as in Community. Configuring the four Stripe settings is the switch that turns the paid tiers on; no code change is involved. The launch runbook is [LAUNCH.md](./LAUNCH.md).
+
+Its value proposition is:
 
 - zero-setup provisioning;
 - managed PostgreSQL, TLS, TURN, secrets, upgrades, and rollback;
@@ -73,7 +77,14 @@ The production Compose path is PostgreSQL-only. It supplies persistent database,
 
 ### Windows portable and installer candidates
 
-Desktop packaging is an Electron/electron-builder layer around the same custom Campfire server. The intended outputs are:
+Desktop packaging is an Electron/electron-builder layer around the same custom Campfire server. The app has two modes:
+
+- **Campfire Online** (the default for fresh installs): a desktop client for the hosted Cloud instance, so desktop and browser users share one community. A build with no Campfire Online URL configured offers only the other mode.
+- **Host on this PC:** runs the bundled Community server locally, with optional LAN sharing, as earlier desktop builds did. Upgrades that find an existing local database start here. Everything in this section about local state applies to this mode.
+
+Users switch modes from the tray menu.
+
+The intended outputs are:
 
 - a portable Windows executable;
 - an NSIS setup executable.

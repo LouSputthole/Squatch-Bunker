@@ -211,6 +211,20 @@ describe("POST /api/channels/:channelId/scheduled", () => {
     expect((await schedule({ content: "x".repeat(4001), sendAt: later })).status).toBe(400);
     expect((await schedule({ content: "hi", sendAt: later })).status).toBe(200);
   });
+
+  it("caps how many messages one author can have waiting", async () => {
+    const sendAt = new Date(Date.now() + 60 * 60_000);
+    const pending = await prisma.scheduledMessage.count({ where: { authorId, sent: false } });
+    const filler = await prisma.scheduledMessage.createManyAndReturn({
+      data: Array.from({ length: 25 - pending }, (_, i) => ({ channelId, authorId, content: `queued ${i}`, sendAt })),
+      select: { id: true },
+    });
+    try {
+      expect((await schedule({ content: "one more", sendAt: sendAt.toISOString() })).status).toBe(429);
+    } finally {
+      await prisma.scheduledMessage.deleteMany({ where: { id: { in: filler.map((row) => row.id) } } });
+    }
+  });
 });
 
 describe("POST /api/scheduled-messages/process", () => {

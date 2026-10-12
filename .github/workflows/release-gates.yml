@@ -7,6 +7,11 @@ on:
 permissions:
   contents: read
 
+# These jobs run production servers (and the Compose stack, which forwards it);
+# keep them from pinging Campfire Online once OFFICIAL_CLOUD_URL is set.
+env:
+  CAMPFIRE_TELEMETRY: "off"
+
 jobs:
   postgresql-upgrade:
     runs-on: ubuntu-latest

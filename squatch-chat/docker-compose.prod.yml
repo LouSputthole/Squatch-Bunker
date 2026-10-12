@@ -72,6 +72,13 @@ services:
       TURN_CREDENTIAL: "${TURN_CREDENTIAL:-}"
       RESEND_API_KEY: "${RESEND_API_KEY:-}"
       CAMPFIRE_EMAIL_FROM: "${CAMPFIRE_EMAIL_FROM:-}"
+      # Anonymous usage ping (docs/TELEMETRY.md): the opt-outs must reach the container.
+      CAMPFIRE_TELEMETRY: "${CAMPFIRE_TELEMETRY:-}"
+      DO_NOT_TRACK: "${DO_NOT_TRACK:-}"
+      CAMPFIRE_CLOUD_URL: "${CAMPFIRE_CLOUD_URL:-}"
+      CAMPFIRE_TELEMETRY_URL: "${CAMPFIRE_TELEMETRY_URL:-}"
+      # This instance's broadcast banner (.env.example); single-quote the JSON in .env.
+      CAMPFIRE_NOTICE: "${CAMPFIRE_NOTICE:-}"
       PORT: 3000
     volumes:
       - campfire-uploads:/app/media/uploads

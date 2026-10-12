@@ -3,6 +3,11 @@ import { getSession } from "@/lib/auth";
 import { assertFeature } from "@/lib/features";
 import { resolveChannelAccess } from "@/lib/channelAccess";
 import { memberHasPermission } from "@/lib/serverRoles";
+import { checkWeightedLimit } from "@/lib/rateLimit";
+
+const EXPORT_MAX_MESSAGES = 50_000;
+const EXPORTS_PER_HOUR = 5;
+const HOUR_MS = 60 * 60 * 1000;
 
 export async function GET(
   _req: NextRequest,
@@ -42,15 +47,24 @@ export async function GET(
       return NextResponse.json({ error: "Upgrade required" }, { status: 403 });
     }
 
-    const messages = await prisma.message.findMany({
+    if (!checkWeightedLimit(`export:${session.userId}`, 1, EXPORTS_PER_HOUR, HOUR_MS).allowed) {
+      return NextResponse.json({ error: "Too many exports. Try again later." }, { status: 429 });
+    }
+
+    // ponytail: one response holds the export, so only the newest
+    // EXPORT_MAX_MESSAGES; page it if real channels outgrow that.
+    const newest = await prisma.message.findMany({
       where: { channelId },
       include: { author: { select: { username: true, id: true } } },
-      orderBy: { createdAt: "asc" },
+      orderBy: { createdAt: "desc" },
+      take: EXPORT_MAX_MESSAGES + 1,
     });
+    const truncated = newest.length > EXPORT_MAX_MESSAGES;
 
     return NextResponse.json({
       channel: { id: channel.id, name: channel.name },
-      messages,
+      messages: newest.slice(0, EXPORT_MAX_MESSAGES).reverse(),
+      truncated,
     });
   } catch (err) {
     console.error("[Campfire] Failed to export channel messages:", err);

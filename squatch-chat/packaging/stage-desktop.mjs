@@ -20,6 +20,7 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const Database = require("better-sqlite3");
 const { DESKTOP_SCHEMA_VERSION } = require("../desktop/database.cjs");
+const { parseCloudOrigin } = require("../desktop/launcher-core.cjs");
 
 const packagingDirectory = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(packagingDirectory, "..");
@@ -37,9 +38,9 @@ function assertInside(parent, child) {
   }
 }
 
-function run(command, args, environment = process.env) {
+function run(command, args, environment = process.env, cwd = projectRoot) {
   const result = spawnSync(command, args, {
-    cwd: projectRoot,
+    cwd,
     env: environment,
     stdio: "inherit",
     shell: false,
@@ -135,6 +136,30 @@ async function main() {
     throw new Error(
       `Desktop version ${desktopPackage.version} must match application version ${rootPackage.version}`,
     );
+  }
+
+  // Campfire Online origin the .exe connects to by default: CAMPFIRE_CLOUD_URL at
+  // stage time, else desktop/package.json "campfireCloudUrl". Blank = host-only build.
+  // Checked before the slow Next build so a typo fails fast.
+  const cloudUrl = process.env.CAMPFIRE_CLOUD_URL || desktopPackage.campfireCloudUrl || "";
+  const cloudOrigin = parseCloudOrigin(cloudUrl);
+  if (cloudUrl && !cloudOrigin) {
+    throw new Error(`Campfire Online URL must be https:// (http:// only for localhost): ${cloudUrl}`);
+  }
+
+  // The launcher's own runtime deps (electron-updater) ship inside app.asar. electron-builder
+  // collects them from desktop/node_modules; were it empty, it would fall back to collecting
+  // the whole web app's dependency tree. So install exactly the lockfile, every stage.
+  const npmCli = process.env.npm_execpath;
+  if (!npmCli || !/\.c?js$/.test(npmCli)) {
+    throw new Error("Run desktop staging through npm (npm run desktop:stage) so it can install desktop dependencies");
+  }
+  run(process.execPath, [npmCli, "ci", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund"], process.env, desktopRoot);
+  const updaterPackage = JSON.parse(
+    readFileSync(join(desktopRoot, "node_modules", "electron-updater", "package.json"), "utf8"),
+  );
+  if (updaterPackage.version !== desktopPackage.dependencies?.["electron-updater"]) {
+    throw new Error(`desktop/node_modules has electron-updater ${updaterPackage.version}; expected ${desktopPackage.dependencies?.["electron-updater"]}`);
   }
 
   if (!skipNextBuild) {
@@ -257,6 +282,13 @@ async function main() {
     ].join("\n"),
   );
 
+  // Read by desktop/main.cjs (loadCloudOrigin); ships with the server resources.
+  writeFileSync(
+    join(stageRoot, "desktop-launcher.json"),
+    `${JSON.stringify({ cloudUrl: cloudOrigin ?? "" }, null, 2)}\n`,
+  );
+  console.log(`[Campfire] Campfire Online: ${cloudOrigin ?? "none (host-only build)"}`);
+
   createDatabaseTemplate();
 
   const installedBetterSqlite3 = join(projectRoot, "node_modules", "better-sqlite3");
@@ -334,6 +366,7 @@ async function main() {
     join(stageRoot, "campfire-server.mjs"),
     join(stageRoot, "campfire-server.bundle.mjs"),
     join(stageRoot, "campfire-template.db"),
+    join(stageRoot, "desktop-launcher.json"),
     join(stageRoot, ".next", "BUILD_ID"),
     join(stageRoot, ".next", "required-server-files.json"),
     join(stageRoot, "node_modules", "next", "package.json"),

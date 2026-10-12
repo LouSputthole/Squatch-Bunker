@@ -13,7 +13,7 @@ const {
   shell,
 } = require("electron");
 const { spawn } = require("node:child_process");
-const { randomBytes } = require("node:crypto");
+const { randomBytes, randomUUID } = require("node:crypto");
 const fs = require("node:fs");
 const http = require("node:http");
 const https = require("node:https");
@@ -22,13 +22,37 @@ const os = require("node:os");
 const path = require("node:path");
 const { upgradeDesktopDatabase } = require("./database.cjs");
 const { importLegacyDesktopState } = require("./legacy-state.cjs");
+const {
+  buildDesktopPing,
+  defaultMode,
+  isPrerelease,
+  noticeFromPingResponse,
+  parseCloudOrigin,
+  rememberNotice,
+  sameVersion,
+  shouldShowNotice,
+  telemetryEnabled,
+  telemetryTarget,
+  updateFeedOverride,
+  updateMode,
+} = require("./launcher-core.cjs");
 
 const APP_NAME = "Campfire";
 const STARTUP_TIMEOUT_MS = 45_000;
 // Fixed port while sharing on the LAN so the link friends saved keeps working.
 const LAN_PORT = 3939;
+// Same repo as "publish" in packaging/electron-builder.json (desktop:verify checks).
 const UPDATE_REPO = "LouSputthole/Squatch-Bunker";
+const UPDATE_FIRST_CHECK_MS = 15_000;
+const UPDATE_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const TELEMETRY_FIRST_PING_MS = 20_000;
+// First launch only: time to read the notice and opt out before anything is sent.
+const TELEMETRY_NOTICE_GRACE_MS = 5 * 60 * 1000;
+const TELEMETRY_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
+// Campfire Online; null means a host-only build (no mode switch, no ping).
+let cloudOrigin = null;
+let cloudPromptOpen = false;
 let appOrigin = null;
 let mainWindow = null;
 let tray = null;
@@ -40,6 +64,11 @@ let quitting = false;
 let restarting = false;
 let settings = {};
 let launch = null;
+// electron-updater on installed builds; null = prompt-to-download (portable, dev, or it failed to load).
+let autoUpdater = null;
+// Downloaded and waiting for a restart (installs on quit otherwise).
+let readyUpdateVersion = null;
+let updatePromptOpen = false;
 
 function configureUserDataPath() {
   const portableDirectory = process.env.PORTABLE_EXECUTABLE_DIR;
@@ -77,7 +106,30 @@ function logDesktop(message) {
   console.log(message);
 }
 
-// ─── Desktop preferences (tray behaviour, LAN sharing, skipped update) ───
+/** Campfire Online origin: CAMPFIRE_CLOUD_URL (dev override), else the URL
+ * packaging/stage-desktop.mjs baked into the staged server resources. */
+function loadCloudOrigin() {
+  let raw = process.env.CAMPFIRE_CLOUD_URL;
+  if (!raw) {
+    try {
+      raw = JSON.parse(
+        fs.readFileSync(path.join(getServerRoot(), "desktop-launcher.json"), "utf8"),
+      ).cloudUrl;
+    } catch {
+      raw = ""; // unstaged dev run: host only
+    }
+  }
+  const origin = parseCloudOrigin(raw);
+  if (raw && !origin) logDesktop(`[desktop] ignoring invalid Campfire Online URL: ${raw}`);
+  return origin;
+}
+
+/** "cloud" = window on Campfire Online; "host" = bundled server on this PC (the only mode without a cloud URL). */
+function currentMode() {
+  return cloudOrigin && settings.mode === "cloud" ? "cloud" : "host";
+}
+
+// ─── Desktop preferences (tray behaviour, LAN sharing, mode, skipped update) ───
 
 function settingsPath() {
   return path.join(app.getPath("userData"), "desktop-settings.json");
@@ -283,46 +335,63 @@ async function startServer() {
     CAMPFIRE_PARENT_PID: String(process.pid),
     JWT_SECRET: launch.desktopConfig.jwtSecret,
     __NEXT_PRIVATE_STANDALONE_CONFIG: launch.standaloneConfig,
+    // The launcher's own ping already counts this install; don't double-count it as a server.
+    CAMPFIRE_TELEMETRY: "off",
   };
 
   const child = spawn(process.execPath, [launch.serverEntry], {
     cwd: launch.serverRoot,
     env: environment,
     windowsHide: true,
-    stdio: ["ignore", "pipe", "pipe"],
+    // "ipc": stopServer() asks the server to drain; Windows has no SIGTERM.
+    stdio: ["ignore", "pipe", "pipe", "ipc"],
   });
   serverProcess = child;
   const log = serverLog;
   child.stdout.pipe(log, { end: false });
   child.stderr.pipe(log, { end: false });
   child.once("error", (error) => log.write(`[desktop] ${error.stack || error}\n`));
+  // Until it is ready, a failed start is startServer's caller's to report.
+  let ready = false;
   child.once("exit", (code, signal) => {
     log.write(`[desktop] server exited code=${code} signal=${signal}\n`);
-    if (!quitting && !restarting && child === serverProcess) {
-      void dialog.showErrorBox(
+    if (ready && !quitting && !restarting && child === serverProcess) {
+      void offerCloudInstead(
         "Campfire server stopped",
         `The local server exited unexpectedly. See ${launch.logPath} for details.`,
       );
-      app.quit();
     }
   });
 
   serverPort = port;
   appOrigin = `http://127.0.0.1:${port}`;
   await waitForServer(appOrigin);
+  ready = true;
 }
 
+/** Resolves true when the child exits within `ms`. */
+function waitForExit(child, ms) {
+  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => resolve(false), ms);
+    child.once("exit", () => {
+      clearTimeout(timeout);
+      resolve(true);
+    });
+  });
+}
+
+/** Graceful first: on Windows child.kill() is TerminateProcess, which skips the server's drain
+ * (sockets, HTTP, Prisma/SQLite). It asks over IPC and force-kills only if that hangs. */
 async function stopServer() {
   const child = serverProcess;
-  if (child && child.exitCode === null) {
-    child.kill();
-    await new Promise((resolve) => {
-      const timeout = setTimeout(resolve, 3_000);
-      child.once("exit", () => {
-        clearTimeout(timeout);
-        resolve();
-      });
-    });
+  if (child && child.exitCode === null && child.signalCode === null) {
+    // The callback keeps a failed send from becoming an "error" event; kill() below covers it.
+    if (child.connected) child.send("shutdown", () => {});
+    if (!child.connected || !(await waitForExit(child, 3_000))) {
+      child.kill();
+      await waitForExit(child, 3_000);
+    }
   }
   serverLog?.end();
 }
@@ -349,8 +418,7 @@ async function applyLanSetting(next) {
       await stopServer();
       await startServer();
     } catch (recoveryError) {
-      dialog.showErrorBox("Campfire could not restart", recoveryError.message);
-      app.quit();
+      await offerCloudInstead("Campfire could not restart", recoveryError.message);
       return false;
     }
     void dialog.showMessageBox(mainWindow ?? undefined, {
@@ -365,7 +433,7 @@ async function applyLanSetting(next) {
   } finally {
     restarting = false;
     refreshTrayMenu();
-    if (mainWindow && appOrigin) void mainWindow.loadURL(appOrigin);
+    loadApp();
   }
 }
 
@@ -391,7 +459,344 @@ function toggleLanSharing() {
   });
 }
 
+// ─── Mode: Campfire Online vs. host on this PC ───
+
+async function useCloud() {
+  await stopServer();
+  // Forget the stopped server so a late exit isn't reported as a crash.
+  serverProcess = null;
+  serverPort = null;
+  appOrigin = cloudOrigin;
+}
+
+/** Switch modes. Saved only once the switch works; if hosting can't start,
+ * the app stays on Campfire Online (same contract as applyLanSetting). */
+async function switchMode(next) {
+  if (restarting || currentMode() === next) return;
+  restarting = true;
+  refreshTrayMenu();
+  try {
+    if (next === "host") {
+      launch = launch || (await prepareLaunch());
+      await startServer();
+    } else {
+      await useCloud();
+    }
+    settings.mode = next;
+    saveSettings();
+  } catch (error) {
+    // Only entering host mode can fail; tear down any half-started server.
+    logDesktop(`[desktop] switching to ${next} mode failed: ${error.message}`);
+    await useCloud();
+    void dialog.showMessageBox(mainWindow ?? undefined, {
+      type: "warning",
+      title: APP_NAME,
+      message: "Couldn't start Campfire on this PC.",
+      detail: `${error.message}\n\nCampfire is still using Campfire Online.`,
+      buttons: ["OK"],
+      noLink: true,
+    });
+  } finally {
+    restarting = false;
+    refreshTrayMenu();
+    loadApp();
+  }
+}
+
+/** Hosting failed to start or the local server died. Offer Campfire Online (when
+ * this build has it) rather than quitting, so a broken local camp can never
+ * lock the app on every launch. Returns true once the app is on Campfire Online. */
+async function offerCloudInstead(message, detail) {
+  if (!cloudOrigin) {
+    dialog.showErrorBox(message, detail);
+    app.quit();
+    return false;
+  }
+  const { response } = await dialog.showMessageBox({
+    type: "error",
+    title: APP_NAME,
+    message,
+    detail: `${detail}\n\nYou can use Campfire Online for now; your local camp stays on this PC. Switch back with "Host on this PC" in the tray menu.`,
+    buttons: ["Use Campfire Online", "Quit"],
+    defaultId: 0,
+    cancelId: 1,
+    noLink: true,
+  });
+  if (response !== 0) {
+    app.quit();
+    return false;
+  }
+  await useCloud();
+  settings.mode = "cloud";
+  saveSettings();
+  refreshTrayMenu();
+  loadApp();
+  return true;
+}
+
+/** Main-frame load of Campfire Online failed (offline, outage). No parent window: it may still be hidden. */
+async function promptCloudUnreachable(reason) {
+  if (cloudPromptOpen) return;
+  cloudPromptOpen = true;
+  try {
+    const { response } = await dialog.showMessageBox({
+      type: "warning",
+      title: APP_NAME,
+      message: "Can't reach Campfire Online",
+      detail: `${reason}\n\nCheck your internet connection, or run Campfire on this PC instead.`,
+      buttons: ["Retry", "Host on this PC instead", "Quit"],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+    });
+    if (response === 0) loadApp();
+    else if (response === 1) await switchMode("host");
+    else app.quit();
+  } finally {
+    cloudPromptOpen = false;
+  }
+}
+
+// ─── Anonymous usage ping (contract: lib/telemetryProtocol.ts, docs/TELEMETRY.md) ───
+
+function sendTelemetryPing() {
+  const target = telemetryTarget(process.env, cloudOrigin);
+  if (!target || !telemetryEnabled({ setting: settings.telemetry, env: process.env, isPackaged: app.isPackaged })) {
+    return;
+  }
+  if (typeof settings.installId !== "string") {
+    settings.installId = randomUUID();
+    saveSettings();
+  }
+  const body = JSON.stringify(
+    buildDesktopPing({
+      installId: settings.installId,
+      mode: currentMode(),
+      version: app.getVersion(),
+      platform: process.platform,
+      arch: process.arch,
+    }),
+  );
+  const url = new URL(target);
+  const request = (url.protocol === "https:" ? https : http).request(
+    url,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Content-Length": Buffer.byteLength(body),
+        "User-Agent": APP_NAME,
+      },
+      timeout: 10_000,
+    },
+    (response) => {
+      if (response.statusCode >= 300) logDesktop(`[desktop] usage ping: collector responded ${response.statusCode}`);
+      let reply = "";
+      response.setEncoding("utf8");
+      response.on("data", (chunk) => {
+        if (reply.length <= 8192) reply += chunk; // oversized = not a notice; keep draining
+      });
+      response.on("end", () => void showNotice(noticeFromPingResponse(response.statusCode, reply)));
+      response.on("error", (error) => logDesktop(`[desktop] usage ping reply failed: ${error.message}`));
+    },
+  );
+  request.on("timeout", () => request.destroy(new Error("timed out")));
+  request.on("error", (error) => logDesktop(`[desktop] usage ping failed: ${error.message}`));
+  request.end(body);
+}
+
+/** "A better version is out" etc. from the collector. Remembered before it opens, so it shows once. */
+async function showNotice(notice) {
+  if (!shouldShowNotice({ notice, mode: currentMode(), dismissedIds: settings.dismissedNoticeIds })) return;
+  settings.dismissedNoticeIds = rememberNotice(settings.dismissedNoticeIds, notice.id);
+  saveSettings();
+  logDesktop(`[desktop] showing notice ${notice.id}`);
+  const { response } = await dialog.showMessageBox({
+    type: "info",
+    title: APP_NAME,
+    message: notice.text,
+    buttons: notice.url ? [notice.urlLabel || "Learn more", "Dismiss"] : ["OK"],
+    defaultId: 0,
+    cancelId: notice.url ? 1 : 0,
+    noLink: true,
+  });
+  if (notice.url && response === 0) openExternal(notice.url);
+}
+
+/** Opt-outs are re-checked on every send, so the tray toggle applies without a restart. */
+function scheduleTelemetry() {
+  if (!telemetryTarget(process.env, cloudOrigin)) return;
+  let firstPingMs = TELEMETRY_FIRST_PING_MS;
+  // Say so once, with the way out, and give the user time to use it before the first ping.
+  if (
+    tray &&
+    !settings.telemetryNoticeShown &&
+    telemetryEnabled({ setting: settings.telemetry, env: process.env, isPackaged: app.isPackaged })
+  ) {
+    settings.telemetryNoticeShown = true;
+    saveSettings();
+    tray.displayBalloon?.({
+      title: APP_NAME,
+      content:
+        "Campfire sends a small anonymous usage ping once a day (app version and mode, nothing personal). " +
+        "Turn it off from this tray icon's menu.",
+    });
+    firstPingMs = TELEMETRY_NOTICE_GRACE_MS;
+  }
+  setTimeout(() => {
+    sendTelemetryPing();
+    setInterval(sendTelemetryPing, TELEMETRY_INTERVAL_MS).unref();
+  }, firstPingMs).unref();
+}
+
 // ─── Updates ───
+// Installed (NSIS) builds update themselves: electron-updater reads latest.yml from the newest
+// GitHub release (docs/RELEASE_CHECKLIST.md §7), downloads in the background, and installs on
+// "Restart now" or on the next quit. Portable builds, and a failed interactive check, use the
+// prompt-to-download flow (checkForUpdates).
+
+/** electron-updater for an installed build, or null to keep the download prompt. */
+function createAutoUpdater() {
+  try {
+    const updater = require("electron-updater").autoUpdater;
+    // Its own "error" listener logs through this; a failed check or download never throws at us.
+    updater.logger = {
+      info: (message) => logDesktop(`[updater] ${message}`),
+      warn: (message) => logDesktop(`[updater] warning: ${message}`),
+      error: (message) => logDesktop(`[updater] error: ${message}`),
+    };
+    updater.allowPrerelease = isPrerelease(app.getVersion());
+    updater.autoDownload = true;
+    updater.autoInstallOnAppQuit = true;
+    updater.disableWebInstaller = true;
+    // electron-updater sends a random per-install id (%APPDATA%\Campfire\.updaterId) as a header
+    // on every feed and download request, even with the usage ping off; requestHeaders override
+    // it so update checks stay anonymous. Staged rollouts still work: they read the local file.
+    updater.requestHeaders = { "x-user-staging-id": "00000000-0000-0000-0000-000000000000" };
+    // Unsigned builds: electron-updater verifies the downloaded installer's Authenticode signature
+    // only when resources/app-update.yml names a publisherName, and electron-builder writes one only
+    // for signed builds — so unsigned updates install, protected by HTTPS to GitHub plus latest.yml's
+    // sha512 (which whoever can publish a release also controls). ponytail: code signing is the real
+    // fix; once releases are signed, an unsigned update is refused (RELEASE_CHECKLIST.md §7).
+    const feed = updateFeedOverride(process.env);
+    if (feed) {
+      updater.setFeedURL(feed);
+      logDesktop(`[desktop] update feed override: ${feed.url}`);
+    } else if (process.env.CAMPFIRE_UPDATE_FEED_URL) {
+      logDesktop("[desktop] ignoring invalid CAMPFIRE_UPDATE_FEED_URL (https, or http on localhost)");
+    }
+    updater.on("update-downloaded", (info) => onUpdateDownloaded(info.version));
+    return updater;
+  } catch (error) {
+    logDesktop(`[desktop] auto-update unavailable, using download prompts: ${error.message}`);
+    return null;
+  }
+}
+
+function onUpdateDownloaded(version) {
+  // Every later check re-announces the cached download; prompt once per version.
+  if (readyUpdateVersion === version) return;
+  readyUpdateVersion = version;
+  refreshTrayMenu();
+  if (!sameVersion(settings.skipUpdateVersion, version)) void promptRestartToUpdate();
+}
+
+/** One prompt at a time, parented to nothing so the call window stays usable. */
+async function promptRestartToUpdate() {
+  if (updatePromptOpen || !readyUpdateVersion) return;
+  updatePromptOpen = true;
+  try {
+    const { response } = await dialog.showMessageBox({
+      type: "info",
+      title: APP_NAME,
+      message: `Campfire v${readyUpdateVersion} is ready`,
+      detail: "Restart now to finish updating, or choose Later and it installs the next time Campfire quits. Your messages and settings are kept.",
+      buttons: ["Restart now", "Later"],
+      // Later is the default so a stray Enter mid-call can't restart the app.
+      defaultId: 1,
+      cancelId: 1,
+      noLink: true,
+    });
+    if (response === 0) void restartToUpdate();
+  } finally {
+    updatePromptOpen = false;
+  }
+}
+
+/** Silent install, then relaunch. The local server drains first: quitAndInstall() starts the
+ * installer before it calls app.quit(), and the installer force-kills every Campfire.exe within
+ * about 2 s, the bundled server included (it runs on process.execPath), so before-quit's own
+ * stopServer() would be cut off mid-drain. */
+async function restartToUpdate() {
+  if (!autoUpdater || quitting) return;
+  // From here the server's exit is expected, and before-quit skips its own stopServer().
+  quitting = true;
+  try {
+    await stopServer();
+  } catch (error) {
+    logDesktop(`[desktop] stopping the server before updating failed: ${error.message}`);
+  }
+  autoUpdater.quitAndInstall(true, true);
+  // quitAndInstall quits by itself once the installer starts. If it refused, quit anyway (the
+  // server is already gone); the install-on-quit handler then retries.
+  setImmediate(() => app.quit());
+}
+
+function checkForUpdatesInBackground() {
+  if (!autoUpdater) return void checkForUpdates(false);
+  autoUpdater
+    .checkForUpdates()
+    .then((result) => result?.downloadPromise)
+    .catch(() => {}); // already logged by the updater's "error" listener
+}
+
+/** Tray "Check for updates…". Any updater failure falls back to the download prompt. */
+async function checkForUpdatesNow() {
+  if (!autoUpdater) return checkForUpdates(true);
+  if (readyUpdateVersion) return promptRestartToUpdate();
+  try {
+    const result = await autoUpdater.checkForUpdates();
+    if (!result) throw new Error("updater inactive");
+    if (!result.isUpdateAvailable) {
+      void dialog.showMessageBox(mainWindow ?? undefined, {
+        type: "info",
+        title: APP_NAME,
+        message: "You're up to date.",
+        detail: `Campfire ${app.getVersion()} is the latest version.`,
+        buttons: ["OK"],
+        noLink: true,
+      });
+      return;
+    }
+    void dialog.showMessageBox(mainWindow ?? undefined, {
+      type: "info",
+      title: APP_NAME,
+      message: `Downloading Campfire v${result.updateInfo.version}…`,
+      detail: "Keep using Campfire; you'll be asked to restart when it's ready.",
+      buttons: ["OK"],
+      noLink: true,
+    });
+    await result.downloadPromise;
+    void promptRestartToUpdate(); // even for a skipped version: the user asked
+  } catch {
+    void checkForUpdates(true);
+  }
+}
+
+function scheduleUpdateChecks() {
+  const mode = updateMode({
+    isPackaged: app.isPackaged,
+    platform: process.platform,
+    portableDirectory: process.env.PORTABLE_EXECUTABLE_DIR || null,
+  });
+  if (mode === "off") return;
+  if (mode === "auto") autoUpdater = createAutoUpdater();
+  setTimeout(() => {
+    checkForUpdatesInBackground();
+    // The download prompt asks once per launch; the silent updater keeps checking.
+    if (autoUpdater) setInterval(checkForUpdatesInBackground, UPDATE_INTERVAL_MS).unref();
+  }, UPDATE_FIRST_CHECK_MS).unref();
+}
 
 function fetchLatestRelease() {
   return new Promise((resolve, reject) => {
@@ -511,18 +916,43 @@ function createTray() {
 
 function refreshTrayMenu() {
   if (!tray) return;
-  const items = [
-    { label: "Open Campfire", click: showMainWindow },
-    { type: "separator" },
-    {
+  const hosting = currentMode() === "host";
+  const items = [{ label: "Open Campfire", click: showMainWindow }];
+  if (readyUpdateVersion) {
+    items.push({ label: `Restart to update to v${readyUpdateVersion}`, click: () => void restartToUpdate() });
+  }
+  items.push({ type: "separator" });
+  if (cloudOrigin) {
+    items.push(
+      {
+        label: "Campfire Online",
+        type: "radio",
+        checked: !hosting,
+        enabled: !restarting,
+        click: () => void switchMode("cloud"),
+      },
+      {
+        label: "Host on this PC",
+        type: "radio",
+        checked: hosting,
+        enabled: !restarting,
+        click: () => void switchMode("host"),
+      },
+      hosting
+        ? { type: "separator" }
+        : { label: "Open in browser", click: () => openExternal(cloudOrigin) },
+    );
+  }
+  if (hosting) {
+    items.push({
       label: "Share on this network",
       type: "checkbox",
       checked: settings.lanSharing === true,
       enabled: !restarting,
       click: toggleLanSharing,
-    },
-  ];
-  if (settings.lanSharing === true) {
+    });
+  }
+  if (hosting && settings.lanSharing === true) {
     const url = lanUrl();
     items.push({
       label: url ? `Copy LAN link  (${url})` : "LAN link unavailable (no network)",
@@ -535,7 +965,21 @@ function refreshTrayMenu() {
   }
   items.push(
     { type: "separator" },
-    { label: "Check for updates…", click: () => void checkForUpdates(true) },
+    { label: "Check for updates…", click: () => void checkForUpdatesNow() },
+  );
+  if (telemetryTarget(process.env, cloudOrigin)) {
+    items.push({
+      label: "Send anonymous usage ping",
+      type: "checkbox",
+      checked: settings.telemetry !== false,
+      click: (item) => {
+        settings.telemetry = item.checked;
+        saveSettings();
+        refreshTrayMenu();
+      },
+    });
+  }
+  items.push(
     {
       label: "Close button quits",
       type: "checkbox",
@@ -619,6 +1063,28 @@ function openExternal(rawUrl) {
   }
 }
 
+// Every window (the main one and any same-origin child it opens, like an
+// attachment in a new tab) stays on the trusted origin. This fires for each new
+// webContents, popups of popups included, so a link inside one (/download's
+// GitHub button) still leaves for the browser instead of browsing or
+// downloading inside Electron. Anything off-origin opens in the system browser,
+// server redirects included: an OAuth hop to github.com must not strand the
+// chrome-less window.
+app.on("web-contents-created", (_event, contents) => {
+  contents.setWindowOpenHandler(({ url }) => {
+    if (isTrustedUrl(url)) return { action: "allow" };
+    openExternal(url);
+    return { action: "deny" };
+  });
+  const stayOnTrustedOrigin = (event) => {
+    if (!event.isMainFrame || isTrustedUrl(event.url)) return;
+    event.preventDefault();
+    openExternal(event.url);
+  };
+  contents.on("will-navigate", stayOnTrustedOrigin);
+  contents.on("will-redirect", stayOnTrustedOrigin);
+});
+
 function showMainWindow() {
   if (!mainWindow) {
     if (appOrigin) createWindow();
@@ -648,15 +1114,11 @@ function createWindow() {
     },
   });
 
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (isTrustedUrl(url)) return { action: "allow" };
-    openExternal(url);
-    return { action: "deny" };
-  });
-  mainWindow.webContents.on("will-navigate", (event, url) => {
-    if (isTrustedUrl(url)) return;
-    event.preventDefault();
-    openExternal(url);
+  // Navigation guards: app.on("web-contents-created") above.
+  mainWindow.webContents.on("did-fail-load", (_event, errorCode, errorDescription, _url, isMainFrame) => {
+    // -3 (ERR_ABORTED) is a superseded navigation, not an outage.
+    if (!isMainFrame || errorCode === -3 || currentMode() !== "cloud") return;
+    void promptCloudUnreachable(errorDescription);
   });
   mainWindow.once("ready-to-show", () => mainWindow?.show());
   // Close hides to the tray (calls keep running) unless the user opted out or there is no tray.
@@ -677,19 +1139,52 @@ function createWindow() {
     mainWindow = null;
   });
 
-  void mainWindow.loadURL(appOrigin);
+  loadApp();
+}
+
+function loadApp() {
+  // A failed load already reaches did-fail-load; the rejected promise adds nothing.
+  if (mainWindow && appOrigin) mainWindow.loadURL(appOrigin).catch(() => {});
 }
 
 app.whenReady().then(async () => {
   try {
     Menu.setApplicationMenu(null);
     settings = loadSettings();
-    launch = await prepareLaunch();
-    await startServer();
+    cloudOrigin = loadCloudOrigin();
+    if (cloudOrigin && settings.mode !== "cloud" && settings.mode !== "host") {
+      // First run with a cloud build: existing 0.0.x/beta users keep their local communities.
+      let Database = null;
+      try {
+        Database = require(path.join(getServerRoot(), "node_modules", "better-sqlite3"));
+      } catch {
+        // Unstaged dev run: any local database file then counts as local communities.
+      }
+      settings.mode = defaultMode({
+        cloudOrigin,
+        userDataPath: app.getPath("userData"),
+        portableDirectory: process.env.PORTABLE_EXECUTABLE_DIR || null,
+        Database,
+      });
+      saveSettings();
+    }
+    if (currentMode() === "cloud") {
+      appOrigin = cloudOrigin; // no local server, database or migrations
+    } else {
+      try {
+        launch = await prepareLaunch();
+        await startServer();
+      } catch (error) {
+        const detail = error instanceof Error ? error.stack || error.message : String(error);
+        logDesktop(`[desktop] hosting on this PC failed to start: ${detail}`);
+        if (!(await offerCloudInstead("Campfire could not start", detail))) return;
+      }
+    }
     configurePermissions();
     createWindow();
     createTray();
-    if (app.isPackaged) setTimeout(() => void checkForUpdates(false), 15_000).unref?.();
+    scheduleUpdateChecks();
+    scheduleTelemetry();
   } catch (error) {
     const message = error instanceof Error ? error.stack || error.message : String(error);
     dialog.showErrorBox("Campfire could not start", message);

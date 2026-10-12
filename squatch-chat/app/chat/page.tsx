@@ -45,6 +45,7 @@ import { useOfflineQueue } from "@/hooks/useOfflineQueue";
 import EmberInbox, { type InboxNotification } from "@/components/EmberInbox";
 import GatheringsPanel from "@/components/GatheringsPanel";
 import GuestUpgradeBanner from "@/components/GuestUpgradeBanner";
+import NoticeBanner from "@/components/NoticeBanner";
 import { useDmUnread } from "@/hooks/useDmUnread";
 
 import type { Channel, Server } from "@/types/chat";
@@ -465,6 +466,7 @@ function ChatPageInner() {
           }}
         />
       )}
+      {auth.user && <NoticeBanner stacked={!!auth.user.isGuest} />}
 
       {/* Server rail — desktop only; on mobile it lives inside the Channels drawer */}
       <div className="hidden md:flex">{serverRail}</div>

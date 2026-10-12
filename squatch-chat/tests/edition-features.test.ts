@@ -10,6 +10,15 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
+function stubCloud({ billing }: { billing: boolean }) {
+  vi.stubEnv("CAMPFIRE_EDITION", "cloud");
+  vi.stubEnv("SELF_HOSTED", "false");
+  vi.stubEnv("STRIPE_SECRET_KEY", billing ? "sk_test_value" : "");
+  vi.stubEnv("STRIPE_WEBHOOK_SECRET", billing ? "whsec_value" : "");
+  vi.stubEnv("STRIPE_PRICE_MONTHLY", billing ? "price_monthly" : "");
+  vi.stubEnv("STRIPE_PRICE_YEARLY", billing ? "price_yearly" : "");
+}
+
 describe("Campfire edition policy", () => {
   it("defaults safely to Community and rejects unknown editions", () => {
     expect(getEdition({})).toBe("community");
@@ -103,10 +112,25 @@ describe("edition-aware feature gates", () => {
     expect(getTier({ tier: "premium" })).toBe("self-hosted");
   });
 
-  it("enforces free and premium tiers in Cloud", () => {
-    vi.stubEnv("CAMPFIRE_EDITION", "cloud");
-    vi.stubEnv("SELF_HOSTED", "false");
+  it("is free for now: Cloud without Stripe billing locks nothing", () => {
+    stubCloud({ billing: false });
 
+    for (const user of [null, { tier: "free" }, { tier: "premium", tierExpiresAt: new Date(Date.now() - 1_000) }]) {
+      expect(getTier(user)).toBe("self-hosted");
+    }
+    expect(hasFeature(getTier(null), "custom_emoji")).toBe(true);
+    expect(hasFeature(getTier({ tier: "free" }), "extended_upload")).toBe(true);
+    expect(hasFeature(getTier({ tier: "free" }), "two_factor_auth")).toBe(false);
+  });
+
+  it("enforces free and premium tiers in Cloud once billing is configured", () => {
+    stubCloud({ billing: true });
+
+    expect(getTier(null)).toBe("free");
+    expect(getTier({ tier: "free" })).toBe("free");
+    expect(getTier({ tier: "premium" })).toBe("premium");
+    expect(hasFeature(getTier({ tier: "free" }), "custom_emoji")).toBe(false);
+    expect(hasFeature(getTier({ tier: "premium" }), "custom_emoji")).toBe(true);
     expect(hasFeature("free", "core_chat")).toBe(true);
     expect(hasFeature("free", "custom_emoji")).toBe(false);
     expect(hasFeature("premium", "custom_emoji")).toBe(true);
@@ -116,8 +140,7 @@ describe("edition-aware feature gates", () => {
   });
 
   it("downgrades expired Cloud subscriptions at read time", () => {
-    vi.stubEnv("CAMPFIRE_EDITION", "cloud");
-    vi.stubEnv("SELF_HOSTED", "false");
+    stubCloud({ billing: true });
 
     expect(
       getTier({ tier: "premium", tierExpiresAt: new Date(Date.now() - 1_000) }),
