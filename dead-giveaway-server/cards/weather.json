@@ -1,0 +1,22 @@
+{
+  "id": "weather",
+  "category": "Weather",
+  "words": [
+    "Rain",
+    "Snow",
+    "Hail",
+    "Fog",
+    "Thunder",
+    "Lightning",
+    "Tornado",
+    "Hurricane",
+    "Drizzle",
+    "Sleet",
+    "Heatwave",
+    "Blizzard",
+    "Rainbow",
+    "Frost",
+    "Wind",
+    "Humidity"
+  ]
+}

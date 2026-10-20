@@ -1,0 +1,22 @@
+{
+  "id": "fruit",
+  "category": "Fruit",
+  "words": [
+    "Apple",
+    "Banana",
+    "Orange",
+    "Grape",
+    "Strawberry",
+    "Watermelon",
+    "Pineapple",
+    "Mango",
+    "Peach",
+    "Pear",
+    "Cherry",
+    "Lemon",
+    "Coconut",
+    "Kiwi",
+    "Plum",
+    "Blueberry"
+  ]
+}
