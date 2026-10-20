@@ -81,7 +81,7 @@ Fire-and-forget (no ack), rate limited server-side:
 | event | payload | relayed as | limit |
 |---|---|---|---|
 | `pose` | `{yaw, pitch}` radians (finite, abs ≤ 1000) | `pose {playerId, yaw, pitch}` (volatile, to room minus sender) | 15/s |
-| `act` | `{kind}` kind ∈ `drink smoke spit point lean shake raise nod` | `act {playerId, kind, ts}` to room minus sender | 2/s |
+| `act` | `{kind, target?}` kind ∈ `drink smoke spit point lean shake raise nod finger`; `target` (optional) is the playerId the gesture is aimed at (a spit that lands on somebody) | `act {playerId, kind, ts, target?}` to room minus sender; `target` is relayed only when it is another player at this table, otherwise dropped (the act still plays) | 2/s |
 | `chat` | `{text}` 1..200 chars after trim | `chat {playerId, name, text, ts}` to the whole room **including the sender** (text trimmed, control chars stripped) | 3/s |
 | `media:state` | `{mic:boolean, cam:boolean}` (both required) | stored on player, state broadcast if changed | 5/s |
 | `media:speaking` | `{speaking:boolean}` | `media:speaking {playerId, speaking}` to room minus sender | 10/s |
