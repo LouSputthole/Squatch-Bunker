@@ -3,7 +3,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { io as connect } from 'socket.io-client';
-import { startServer } from '../src/server.js';
+import { startServer, envTimings } from '../src/server.js';
 
 let srv;
 let url;
@@ -268,4 +268,13 @@ test('fire-and-forget floods are rate limited, not relayed', async () => {
   assert.equal((await limited).code, 'rate_limited');
   await new Promise((r) => setTimeout(r, 200));
   assert.ok(acts >= 1 && acts <= 3, `relayed ${acts} of 20 acts`);
+});
+
+test('DG_TIMINGS overrides phase clocks by name; junk is dropped, bad JSON ignored', () => {
+  assert.deepEqual(envTimings('{"CLUE":300000,"LAST_WORD":120000}'), { CLUE: 300000, LAST_WORD: 120000 });
+  assert.deepEqual(envTimings('{"CLUE":-5,"NOPE":10,"VOTE":"90"}'), {});
+  const said = [];
+  assert.deepEqual(envTimings('{not json', (m) => said.push(m)), {});
+  assert.match(said[0], /DG_TIMINGS/);
+  assert.deepEqual(envTimings(undefined), {});
 });

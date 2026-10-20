@@ -75,6 +75,29 @@ function intEnv(value, fallback) {
   return Number.isFinite(n) ? n : fallback;
 }
 
+/**
+ * DG_TIMINGS: a JSON object of phase clocks in ms over rules.TIMINGS, e.g.
+ * {"CLUE":300000,"LAST_WORD":300000}. For slow automated runs: the
+ * three-browser verifier drives a software rasteriser where one screenshot
+ * outlasted both the 40 s clue clock and the 60 s Last Word. Unknown keys and
+ * non-positive values are dropped; bad JSON is logged and ignored.
+ */
+export function envTimings(raw, log = () => {}) {
+  if (!raw) return {};
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    log('DG_TIMINGS is not JSON; using the default timings');
+    return {};
+  }
+  const out = {};
+  for (const [key, value] of Object.entries(parsed && typeof parsed === 'object' ? parsed : {})) {
+    if (key in rules.TIMINGS && Number.isFinite(value) && value > 0) out[key] = value;
+  }
+  return out;
+}
+
 // ─── static files ─────────────────────────────────────────────────────────
 
 /** Resolve a request path inside `root`, or null. Rejects traversal, NULs and dotfiles. */
@@ -174,15 +197,12 @@ export async function startServer(options = {}) {
   for (const e of deckResult.errors) log(`cards: skipped ${e.source}${e.id ? ` (${e.id})` : ''}: ${e.errors.join('; ')}`);
   if (!deckResult.cards.length) throw new Error('No valid cards loaded; refusing to start.');
 
-  /* DG_CLUE_MS: the per-turn clue clock. The three-browser verifier runs on a
-   * software rasteriser where one screenshot can outlast the 40 s default. */
-  const clueMs = intEnv(env.DG_CLUE_MS, 0);
   const registry = createRegistry({
     deck: deckResult.cards,
     graceMs,
     maxRooms,
     random: options.random,
-    timings: clueMs > 0 ? { CLUE: clueMs, ...options.timings } : options.timings,
+    timings: { ...envTimings(env.DG_TIMINGS, log), ...options.timings },
     settings: options.settings,
   });
   const limiter = createLimiter();
