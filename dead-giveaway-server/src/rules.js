@@ -31,9 +31,17 @@ export const PHASE = Object.freeze({
 // Milliseconds. PROTOCOL.md "Phases".
 export const TIMINGS = Object.freeze({
   DEAL: 3_000,
+  /* Owner, first playtest: "Lets also time each turn. Like 40 seconds to
+   * write a word for each person. Enters blank if no choice." */
+  CLUE: 40_000,
   VOTE: 90_000,
   VOTE_RESULT: 5_000,
-  ROLE_REVEAL: 6_000,
+  /* The reveal goes one head at a time, the Family first and the Rat last
+   * (owner: "The reveal should go one player at a time over their head").
+   * ROLE_REVEAL is the Rat's own beat; REVEAL_STEP is added per Family
+   * member, so eight seats run 7 × 1.5 + 4 = 14.5 s and three run 7 s. */
+  ROLE_REVEAL: 4_000,
+  REVEAL_STEP: 1_500,
   LAST_WORD: 60_000,
   PAYBACK: 60_000,
   RESOLVE: 30_000,
@@ -43,7 +51,8 @@ export const DEFAULT_SETTINGS = Object.freeze({
   lives: 3,
   maxPlayers: 8,
   minPlayers: 3,
-  clueMaxLen: 60,
+  /* Owner: "Limit answers to like 50 characters." */
+  clueMaxLen: 50,
 });
 
 export const NAME_MAX_LEN = 20;
@@ -455,6 +464,7 @@ function advanceTurn(room, now) {
     return;
   }
   room.turnSeat = findPlayer(room, s.turnOrder[idx]).seat;
+  room.phaseEndsAt = now + room.timings.CLUE; // every turn gets its own clock
 }
 
 function currentTurnPlayer(room) {
@@ -693,12 +703,21 @@ export function due(room, now) {
     case PHASE.DEAL:
       beginClues(room, now);
       return true;
+    case PHASE.CLUES: {
+      // Out of time: the turn is recorded as silence, exactly like a skip.
+      const current = currentTurnPlayer(room);
+      if (current) recordClue(room, current, null);
+      advanceTurn(room, now);
+      return true;
+    }
     case PHASE.VOTE:
       closeVote(room, now); // non-voters abstain
       return true;
-    case PHASE.VOTE_RESULT:
-      setPhase(room, PHASE.ROLE_REVEAL, now, room.timings.ROLE_REVEAL);
+    case PHASE.VOTE_RESULT: {
+      const family = Object.values(room.result.roles).filter((r) => r === 'family').length;
+      setPhase(room, PHASE.ROLE_REVEAL, now, room.timings.ROLE_REVEAL + family * room.timings.REVEAL_STEP);
       return true;
+    }
     case PHASE.ROLE_REVEAL:
       if (room.result.caught) setPhase(room, PHASE.LAST_WORD, now, room.timings.LAST_WORD);
       else setPhase(room, PHASE.PAYBACK, now, room.timings.PAYBACK);

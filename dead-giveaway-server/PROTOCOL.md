@@ -62,7 +62,7 @@ Client → server (all with ack):
 | `player:character` | `{character}` | LOBBY only |
 | `player:seat` | `{seat}` | LOBBY only, seat 0..7 must be free |
 | `game:start` | `{}` | host, LOBBY, ≥3 connected players (disconnected players still inside their grace are dealt in too) |
-| `game:clue` | `{text}` | CLUES, your turn; 1..60 chars after trim |
+| `game:clue` | `{text}` | CLUES, your turn; 1..50 chars after trim (`settings.clueMaxLen`) |
 | `game:skipTurn` | `{}` | host, CLUES; skips the current (usually disconnected) seat |
 | `game:readyToVote` | `{ready:boolean}` | DISCUSS; when every alive connected player is ready → VOTE |
 | `game:callVote` | `{}` | host, DISCUSS → VOTE immediately |
@@ -121,7 +121,7 @@ Server → client:
   startSeat: 0,                  // seat that gives the first clue this round
   turnSeat: null,                // CLUES only: whose turn
   phaseEndsAt: null,             // epoch ms for server-timed phases, else null
-  settings: { lives: 3, maxPlayers: 8, minPlayers: 3, clueMaxLen: 60 },
+  settings: { lives: 3, maxPlayers: 8, minPlayers: 3, clueMaxLen: 50 },
   players: [{
     id: 'p_…', name: 'Lou', character: 'lou', seat: 0, joinSeq: 3,
     connected: true, isHost: true,
@@ -167,15 +167,19 @@ DEAL         3 s. Rat chosen uniformly among alive players; card drawn (no repea
              exhausted); targetIndex uniform 0..15; startSeat = alive seat after last round's
              startSeat (round 1: lowest seat). `me` is private per socket.
 CLUES        turn walks alive seats from startSeat in seat order; each player submits one clue.
-             Disconnected player's turn: host may game:skipTurn (their clue = null, shown as
-             "— said nothing —"). No clue timer in v1.
+             Each turn has 40 s (phaseEndsAt, restarted for every writer). Out of time → their
+             clue = null, shown as "— said nothing —", and the turn passes. The host may also
+             game:skipTurn a disconnected player's turn early (same null clue).
 DISCUSS      no timer. Ends when all alive connected players readyToVote, or host callVote.
 VOTE         each alive connected player votes once (cannot change). Ends when all have voted,
              or after 90 s (phaseEndsAt) — non-voters count as abstain.
 VOTE_RESULT  5 s. tally + votes + accusedId (plurality; TIE → accusedId null, caught false —
              but `caught` is sent as null until ROLE_REVEAL so the result cannot name the Rat).
-ROLE_REVEAL  6 s. Every player's role is revealed, Rat named. Both caught and escaped paths
-             pass through here — the reveal happens BEFORE the Rat's guess.
+ROLE_REVEAL  4 s + 1.5 s per Family member dealt in (3 seats: 7 s; 8 seats: 14.5 s). Every
+             player's role is in the snapshot from the first frame; clients play it out one head
+             at a time, the Family in seat order first and the Rat last, so the length leaves room
+             for that. Both caught and escaped paths pass through here — the reveal happens
+             BEFORE the Rat's guess.
 LAST_WORD    only if caught. Rat picks index; 60 s timeout → counts as wrong.
              correct → nobody loses a life. wrong → Rat loses 1.
 PAYBACK      only if not caught (including ties). Rat picks an alive non-Rat player; 60 s
@@ -203,8 +207,8 @@ How the server reads those rules (exactly what it does):
   life (`lifeLoss` null) because there is nobody to take it from.
 - DISCUSS completes when every alive *connected* player is ready, and VOTE when every alive
   *connected* player has voted; a disconnect can complete either. A disconnected player's
-  CLUES turn waits for the host's `game:skipTurn`; a player who leaves or is abandoned is
-  skipped automatically (no clue entry).
+  CLUES turn runs out its 40 s (or the host's `game:skipTurn` ends it sooner); a player who
+  leaves or is abandoned is skipped automatically (no clue entry).
 - A vote cast for a player who then leaves is handed back: that voter's `hasVoted` returns to
   false and they vote again.
 - Abandoned players (grace expired mid-match) are `out:true` with lives kept; at

@@ -111,6 +111,59 @@ test('no votes at all (VOTE timeout) is a tie: everyone abstained', () => {
   assert.deepEqual(room.result.tally, {});
 });
 
+describe('the clue clock', () => {
+  test('every turn gets CLUE ms; running out records silence and passes the turn', () => {
+    const room = dealt(4, { seed: 21 });
+    const first = room.turnSeat;
+    const { DEAL, CLUE } = rules.TIMINGS;
+    assert.equal(room.phaseEndsAt, DEAL + CLUE, 'the first turn starts its clock when the deal ends');
+    assert.equal(rules.due(room, room.phaseEndsAt - 1), false);
+    expire(room);
+    const blank = room.players.find((p) => p.seat === first);
+    assert.equal(blank.clue, null);
+    assert.deepEqual(room.clues.map((c) => [c.seat, c.text]), [[first, null]]);
+    assert.notEqual(room.turnSeat, first);
+    assert.equal(room.phaseEndsAt, DEAL + 2 * CLUE, 'the next turn gets a fresh 40 s from the timeout');
+  });
+
+  test('a clue given early restarts the clock for the next writer', () => {
+    const room = dealt(3, { seed: 22 });
+    const p = room.players.find((x) => x.seat === room.turnSeat);
+    must(rules.clue(room, p.id, { text: 'felt' }, 5_000));
+    assert.equal(room.phaseEndsAt, 5_000 + rules.TIMINGS.CLUE);
+  });
+
+  test('the last timeout ends the clues: DISCUSS has no clock', () => {
+    const room = dealt(3, { seed: 23 });
+    for (let i = 0; i < 3; i++) expire(room);
+    assert.equal(room.phase, PHASE.DISCUSS);
+    assert.equal(room.phaseEndsAt, null);
+    assert.equal(room.clues.length, 3);
+    assert.ok(room.clues.every((c) => c.text === null));
+  });
+
+  test('a clue is 1-50 characters by default', () => {
+    const room = dealt(3, { seed: 24 });
+    const p = room.players.find((x) => x.seat === room.turnSeat);
+    assert.equal(room.settings.clueMaxLen, 50);
+    assert.equal(rules.clue(room, p.id, { text: 'x'.repeat(51) }).error, 'bad_clue');
+    must(rules.clue(room, p.id, { text: 'x'.repeat(50) }));
+  });
+});
+
+test('the reveal is long enough to go one head at a time: ROLE_REVEAL + REVEAL_STEP per Family member', () => {
+  for (const n of [3, 8]) {
+    const room = dealt(n, { seed: 30 + n });
+    const rat = ratOf(room);
+    toVote(room, 0);
+    voteAll(room, (voter) => (voter === rat ? familyOf(room)[0] : rat));
+    const at = room.phaseEndsAt;
+    expire(room);
+    assert.equal(room.phase, PHASE.ROLE_REVEAL);
+    assert.equal(room.phaseEndsAt - at, rules.TIMINGS.ROLE_REVEAL + (n - 1) * rules.TIMINGS.REVEAL_STEP);
+  }
+});
+
 describe('Last Word', () => {
   function caught(seed) {
     const room = dealt(4, { seed });

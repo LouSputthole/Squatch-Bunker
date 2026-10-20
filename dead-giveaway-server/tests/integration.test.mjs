@@ -16,7 +16,7 @@ before(async () => {
     env: {}, // no TURN, no stray DG_* from the shell
     log: () => {},
     tickMs: 20,
-    timings: { DEAL: 40, VOTE_RESULT: 40, ROLE_REVEAL: 40 },
+    timings: { DEAL: 40, VOTE_RESULT: 40, ROLE_REVEAL: 40, REVEAL_STEP: 10 },
   });
   url = `http://127.0.0.1:${srv.port}`;
 });
