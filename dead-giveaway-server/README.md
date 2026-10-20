@@ -46,6 +46,7 @@ the origin as secure.
 | `DG_CORS_ORIGINS` | `*` | comma list of allowed page origins. When set it is enforced on the WebSocket upgrade too; same-origin pages always pass |
 | `DG_DISCONNECT_GRACE_MS` | `90000` | how long a dropped player keeps their seat before removal (lobby) or `out` (match). An empty room is reaped after the same time |
 | `DG_MAX_ROOMS` | `500` | `room:create` answers `invalid` past this |
+| `DG_CLUE_MS` | `40000` | each CLUES turn's clock; out of time records a blank clue. Raise it for slow automated runs only |
 | `DG_CARDS_DIR` | `./cards` | category cards to load |
 | `TURN_URLS` | unset | JSON array of `turn:`/`turns:` URLs (same as Campfire) |
 | `TURN_URL` | unset | a single TURN URL, used only when `TURN_URLS` is unset |

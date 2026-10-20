@@ -174,12 +174,15 @@ export async function startServer(options = {}) {
   for (const e of deckResult.errors) log(`cards: skipped ${e.source}${e.id ? ` (${e.id})` : ''}: ${e.errors.join('; ')}`);
   if (!deckResult.cards.length) throw new Error('No valid cards loaded; refusing to start.');
 
+  /* DG_CLUE_MS: the per-turn clue clock. The three-browser verifier runs on a
+   * software rasteriser where one screenshot can outlast the 40 s default. */
+  const clueMs = intEnv(env.DG_CLUE_MS, 0);
   const registry = createRegistry({
     deck: deckResult.cards,
     graceMs,
     maxRooms,
     random: options.random,
-    timings: options.timings,
+    timings: clueMs > 0 ? { CLUE: clueMs, ...options.timings } : options.timings,
     settings: options.settings,
   });
   const limiter = createLimiter();
