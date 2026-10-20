@@ -415,6 +415,7 @@ describe('guards and edges', () => {
     const room = dealt(3, { seed: 4 });
     const turn = room.players.find((p) => p.seat === room.turnSeat);
     rules.disconnectPlayer(room, turn.id, 0);
+    rules.sweepHost(room, rules.HOST_HANDOVER_MS); // if the turn player was host, it passes now
     const hostId = room.hostId;
     assert.notEqual(hostId, turn.id);
     const other = room.players.find((p) => p.id !== hostId && p.connected);
@@ -506,8 +507,12 @@ describe('guards and edges', () => {
   test('host passes to the lowest joinSeq connected player', () => {
     const room = lobby(4);
     rules.disconnectPlayer(room, 'p0', 0);
+    assert.equal(room.hostId, 'p0', 'a dropped socket keeps the chair for the handover window');
+    assert.equal(rules.sweepHost(room, rules.HOST_HANDOVER_MS - 1), false);
+    assert.equal(room.hostId, 'p0');
+    assert.equal(rules.sweepHost(room, rules.HOST_HANDOVER_MS), true);
     assert.equal(room.hostId, 'p1');
-    rules.reconnectPlayer(room, 'p0', 0);
+    rules.reconnectPlayer(room, 'p0', rules.HOST_HANDOVER_MS);
     assert.equal(room.hostId, 'p1', 'the old host does not take it back');
     rules.removePlayer(room, 'p1', 0);
     assert.equal(room.hostId, 'p2');

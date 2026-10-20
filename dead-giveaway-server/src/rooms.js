@@ -171,6 +171,7 @@ export function createRegistry({
         expired.push(pid);
         changed = true;
       }
+      if (rules.sweepHost(entry.game, now)) changed = true;
       if (rules.due(entry.game, now)) changed = true;
 
       // Anyone the rules dropped (lobby removal, abandoned players cleared on

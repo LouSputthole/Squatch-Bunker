@@ -134,13 +134,19 @@ test('rejoining inside the grace cancels the expiry', () => {
 });
 
 test('host handover on disconnect and on leave', () => {
-  const reg = make();
+  // A grace longer than the handover window, or the lobby removal would move
+  // the host first and prove nothing about the window.
+  const reg = make({ graceMs: rules.HOST_HANDOVER_MS * 6 });
   const t = tableOf(reg, 3);
   const [h, a, b] = t.seats.map((s) => s.playerId);
   assert.equal(t.game.hostId, h);
   reg.disconnect(t.code, h, 's0', 0);
-  assert.equal(t.game.hostId, a);
-  reg.leave(t.code, a, 1);
+  assert.equal(t.game.hostId, h, 'a dropped socket does not move the host at once');
+  reg.tick(rules.HOST_HANDOVER_MS - 1);
+  assert.equal(t.game.hostId, h, 'still the host inside the handover window');
+  reg.tick(rules.HOST_HANDOVER_MS);
+  assert.equal(t.game.hostId, a, 'passes to the lowest joinSeq connected player after the window');
+  reg.leave(t.code, a, rules.HOST_HANDOVER_MS + 1);
   assert.equal(t.game.hostId, b);
   assert.equal(rules.findPlayer(t.game, a), null);
 });

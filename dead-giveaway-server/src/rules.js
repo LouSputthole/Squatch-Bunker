@@ -47,6 +47,13 @@ export const DEFAULT_SETTINGS = Object.freeze({
 });
 
 export const NAME_MAX_LEN = 20;
+/* A host whose socket merely hiccups keeps the chair. The first full-round
+ * verifier run lost the host inside the lobby: three Chromium contexts on a
+ * software rasteriser stalled one tab past engine.io's ping timeout, the host
+ * passed to seat 2 in the same instant, and the Deal button vanished for the
+ * player who had opened the room. Ten seconds covers a reconnect; a host who is
+ * really gone still hands over long before the 90 s grace. */
+export const HOST_HANDOVER_MS = 10000;
 export const CHAT_MAX_LEN = 200;
 export const ACT_KINDS = Object.freeze(['drink', 'smoke', 'spit', 'point', 'lean', 'shake', 'raise', 'nod']);
 
@@ -215,6 +222,7 @@ export function reconnectPlayer(room, playerId, now = 0) {
   const p = findPlayer(room, playerId);
   if (!p) return fail('room_not_found', 'Player is no longer at this table.');
   p.connected = true;
+  p.disconnectedAt = null;
   p.abandoned = false; // still out for the rest of the match if they were abandoned
   p.joinSeq = ++room.joinCounter;
   reassignHostIfNeeded(room);
@@ -227,9 +235,24 @@ export function disconnectPlayer(room, playerId, now = 0) {
   const p = findPlayer(room, playerId);
   if (!p) return fail('room_not_found');
   p.connected = false;
-  reassignHostIfNeeded(room);
+  p.disconnectedAt = now;
+  // The host keeps the chair for HOST_HANDOVER_MS; sweepHost() passes it on.
+  if (room.hostId !== playerId) reassignHostIfNeeded(room);
   settleProgress(room, now);
   return ok();
+}
+
+/**
+ * Timer-driven: pass the host on once the host has been offline for
+ * HOST_HANDOVER_MS. Returns true when the host changed.
+ */
+export function sweepHost(room, now = 0) {
+  const current = findPlayer(room, room.hostId);
+  if (!current || current.connected) return false;
+  if (now - (current.disconnectedAt ?? now) < HOST_HANDOVER_MS) return false;
+  const before = room.hostId;
+  reassignHostIfNeeded(room);
+  return room.hostId !== before;
 }
 
 /**

@@ -189,6 +189,9 @@ export async function startServer(options = {}) {
     path: SOCKET_PATH,
     serveClient: false,
     maxHttpBufferSize: MAX_PACKET_BYTES,
+    // A tab rendering a 3D room on a slow GPU can stall its event loop past
+    // engine.io's 20 s default; a seat is worth a minute of patience.
+    pingTimeout: 60000,
     cors: corsAny ? { origin: '*' } : { origin: corsList },
     // CORS headers do not cover WebSocket upgrades, so enforce the list here
     // too. No Origin (a native client) and same-origin pages always pass.

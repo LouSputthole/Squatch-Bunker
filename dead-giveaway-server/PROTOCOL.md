@@ -41,9 +41,10 @@ everyone else is **the Family**. Never "impostor", "spy", "civilian".
 - A player whose socket drops stays in the room with `connected:false` for
   **`DG_DISCONNECT_GRACE_MS` (default 90000)**; then they are removed (in LOBBY) or marked
   `out:true` with their lives kept at whatever they were (in a match). The host role passes
-  to the lowest `joinSeq` connected player if the host leaves **or disconnects** (immediately,
-  so a host-only action is never stuck behind a dropped socket); a returning former host does
-  not take it back. Players abandoned mid-match are removed when the room returns to LOBBY.
+  to the lowest `joinSeq` connected player if the host leaves, or once the host's socket has
+  been down for **10 s** (`HOST_HANDOVER_MS`, so a brief hiccup keeps the chair and a host-only
+  action is never stuck for long behind a dropped socket); a former host who returns after the
+  handover does not take it back. Players abandoned mid-match are removed when the room returns to LOBBY.
 - Joining mid-match (not a token rejoin) is allowed while seats remain: the newcomer sits
   `out:true` with `lives:0`, is not dealt in (`me.role` null), and plays from the next match.
 - Every player has `joinSeq` (monotonic per room, bumps on every (re)join). It decides
