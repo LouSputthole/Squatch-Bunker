@@ -64,7 +64,7 @@ export const NAME_MAX_LEN = 20;
  * really gone still hands over long before the 90 s grace. */
 export const HOST_HANDOVER_MS = 10000;
 export const CHAT_MAX_LEN = 200;
-export const ACT_KINDS = Object.freeze(['drink', 'smoke', 'spit', 'point', 'lean', 'shake', 'raise', 'nod']);
+export const ACT_KINDS = Object.freeze(['drink', 'smoke', 'spit', 'point', 'lean', 'shake', 'raise', 'nod', 'finger']);
 
 const CHARACTER_PATTERN = /^[A-Za-z0-9_-]{1,32}$/;
 

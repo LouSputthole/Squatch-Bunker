@@ -428,7 +428,14 @@ export async function startServer(options = {}) {
 
     fire('act', (p, here) => {
       if (!rules.ACT_KINDS.includes(p.kind)) return softError('act', 'invalid', 'Unknown action.');
-      socket.to(roomKey(here.code)).emit('act', { playerId: here.playerId, kind: p.kind, ts: Date.now() });
+      const out = { playerId: here.playerId, kind: p.kind, ts: Date.now() };
+      /* An aimed gesture (a spit that lands on somebody) names its target. A
+       * target that is not another player at this table is dropped, never
+       * refused: the gesture still plays, just at nobody. */
+      if (typeof p.target === 'string' && p.target !== here.playerId && rules.findPlayer(here.entry.game, p.target)) {
+        out.target = p.target;
+      }
+      socket.to(roomKey(here.code)).emit('act', out);
     });
 
     fire('chat', (p, here) => {

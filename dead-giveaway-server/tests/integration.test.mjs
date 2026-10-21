@@ -278,3 +278,32 @@ test('DG_TIMINGS overrides phase clocks by name; junk is dropped, bad JSON ignor
   assert.match(said[0], /DG_TIMINGS/);
   assert.deepEqual(envTimings(undefined), {});
 });
+
+test('an aimed act carries its target only when it names another player at the table', async () => {
+  const [x, y, z] = await Promise.all([client(), client(), client()]);
+  const made = await request(x, 'room:create', { clientId: randomUUID(), name: 'Gratin', character: 'gratin' });
+  const joined = await request(y, 'room:join', { clientId: randomUUID(), code: made.code, name: 'Seff', character: 'seff' });
+  await request(z, 'room:join', { clientId: randomUUID(), code: made.code, name: 'Margo', character: 'margo' });
+
+  let got = nextEvent(z, 'act');
+  x.emit('act', { kind: 'spit', target: joined.playerId });
+  assert.deepEqual(
+    (({ playerId, kind, target }) => ({ playerId, kind, target }))(await got),
+    { playerId: made.playerId, kind: 'spit', target: joined.playerId },
+    'a spit at Seff names Seff',
+  );
+
+  got = nextEvent(z, 'act');
+  x.emit('act', { kind: 'finger', target: 'p_nobody' });
+  const stray = await got;
+  assert.equal(stray.kind, 'finger', 'the middle finger is a gesture the table relays');
+  assert.equal('target' in stray, false, 'a target who is not at the table is dropped, the act still plays');
+
+  await new Promise((r) => setTimeout(r, 1100)); // act is 2/s
+  got = nextEvent(z, 'act');
+  x.emit('act', { kind: 'spit', target: made.playerId });
+  assert.equal('target' in (await got), false, 'nobody spits on himself');
+  got = nextEvent(z, 'act');
+  x.emit('act', { kind: 'point', target: 42 });
+  assert.equal('target' in (await got), false, 'a non-string target is dropped');
+});
