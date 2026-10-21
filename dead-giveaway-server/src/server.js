@@ -350,7 +350,10 @@ export async function startServer(options = {}) {
     }
 
     function leaveCurrent(why) {
-      const here = current();
+      leaveRoom(current(), why);
+    }
+
+    function leaveRoom(here, why) {
       if (!here) return;
       const result = registry.leave(here.code, here.playerId, Date.now());
       socket.leave(roomKey(here.code));
@@ -369,9 +372,13 @@ export async function startServer(options = {}) {
 
     withAck('room:create', 'room:create', (p) => {
       if (!clientIdOk(p.clientId)) return fail('invalid', 'Bad clientId.');
-      leaveCurrent('switching tables');
+      /* Open the new table first and leave the old one only once it exists:
+       * a create the registry refuses (bad name, too many rooms) must not
+       * cost the player the seat they already had. */
+      const here = current();
       const res = registry.create({ name: p.name, character: p.character }, Date.now());
       if (!res.ok) return res;
+      leaveRoom(here, 'switching tables');
       bind(res);
       log(`${res.code} create by ${res.playerId} "${res.player.name}" seat ${res.player.seat}`);
       broadcastState(res.code);
@@ -385,9 +392,15 @@ export async function startServer(options = {}) {
       if (!code || !registry.get(code)) return fail('room_not_found', 'No table with that code.');
       const here = current();
       const sameSeat = here && here.code === code && p.token && here.entry.tokens.get(here.playerId) === p.token;
-      if (here && !sameSeat) leaveCurrent('switching tables');
+      /* A new seat at the SAME table has to give up the old one first (it may
+       * be the seat the join needs). A different table is joined first and
+       * the old seat left only once the join succeeds: a table that turns
+       * the player away (full, a bad name) must not cost the seat they had.
+       * Codex review on Squatch-Bunker #18. */
+      if (here && !sameSeat && here.code === code) leaveCurrent('switching seats');
       const res = registry.join({ code, name: p.name, character: p.character, token: p.token || null }, Date.now());
       if (!res.ok) return res;
+      if (here && !sameSeat && here.code !== code) leaveRoom(here, 'switching tables');
       bind(res);
       log(`${res.code} ${res.rejoined ? 'rejoin' : 'join'} ${res.playerId} "${res.player.name}" seat ${res.player.seat}`);
       broadcastState(res.code);

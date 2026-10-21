@@ -572,6 +572,16 @@ describe('guards and edges', () => {
     assert.ok(rules.findPlayer(room, 'p0').joinSeq > rules.findPlayer(room, 'p3').joinSeq, 'rejoin bumps joinSeq');
   });
 
+  test('a newcomer does not take the chair from a host who is only reconnecting', () => {
+    const room = lobby(1);
+    rules.disconnectPlayer(room, 'p0', 0);
+    must(rules.addPlayer(room, { id: 'p1', name: 'One', character: 'lou' }, rules.HOST_HANDOVER_MS - 1));
+    assert.equal(room.hostId, 'p0', 'inside the handover window the host keeps it');
+    rules.removePlayer(room, 'p1', 0);
+    must(rules.addPlayer(room, { id: 'p2', name: 'Two', character: 'lou' }, rules.HOST_HANDOVER_MS));
+    assert.equal(room.hostId, 'p2', 'past the window, the man actually at the table takes it');
+  });
+
   test('joining mid-match sits out until the next match', () => {
     const room = dealt(3, { seed: 17 });
     must(rules.addPlayer(room, { id: 'late', name: 'Late', character: 'margo' }));

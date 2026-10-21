@@ -307,3 +307,18 @@ test('an aimed act carries its target only when it names another player at the t
   x.emit('act', { kind: 'point', target: 42 });
   assert.equal('target' in (await got), false, 'a non-string target is dropped');
 });
+
+test('a table that turns a seated player away does not cost him the seat he had', async () => {
+  const [x, y] = await Promise.all([client(), client()]);
+  const home = await request(x, 'room:create', { name: 'Home', character: 'lou' });
+  assert.equal(home.ok, true);
+  const other = await request(y, 'room:create', { name: 'Away', character: 'lou' });
+  assert.equal(other.ok, true);
+  const refused = await request(x, 'room:join', { code: other.code, name: '', character: 'lou' });
+  assert.equal(refused.ok, false, 'a blank name is refused');
+  const badCreate = await request(x, 'room:create', { name: '', character: 'lou' });
+  assert.equal(badCreate.ok, false);
+  /* Still seated at home: an intent there is answered as a player, not as nobody. */
+  const still = await request(x, 'player:seat', { seat: 5 });
+  assert.equal(still.ok, true, JSON.stringify(still));
+});

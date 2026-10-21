@@ -215,8 +215,12 @@ export function addPlayer(room, { id, name, character }, now = 0) {
     readyToVote: false,
   };
   room.players.push(player);
-  if (!room.hostId || !findPlayer(room, room.hostId)?.connected) room.hostId = id;
-  void now;
+  /* A host who is only reconnecting keeps the chair for HOST_HANDOVER_MS
+   * even when somebody new sits down meanwhile; past that the newcomer may
+   * take it (sweepHost would hand it over on the next tick anyway). Codex
+   * review on Squatch-Bunker #18: a join inside the window took the chair. */
+  const current = findPlayer(room, room.hostId);
+  if (!current || (!current.connected && now - (current.disconnectedAt ?? now) >= HOST_HANDOVER_MS)) room.hostId = id;
   return ok({ player });
 }
 
