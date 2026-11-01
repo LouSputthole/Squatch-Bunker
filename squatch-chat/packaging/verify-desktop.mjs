@@ -53,6 +53,7 @@ for (const sourcePath of [
   "desktop/main.cjs",
   "desktop/database.cjs",
   "desktop/legacy-state.cjs",
+  "desktop/health.cjs",
   "desktop/package-lock.json",
   "packaging/stage-desktop.mjs",
   "packaging/verify-desktop.mjs",
@@ -62,7 +63,7 @@ for (const sourcePath of [
   assert(existsSync(join(projectRoot, sourcePath)), `Missing ${sourcePath}`);
 }
 
-for (const sourcePath of ["desktop/main.cjs", "desktop/database.cjs", "desktop/legacy-state.cjs", "packaging/stage-desktop.mjs", "packaging/verify-desktop.mjs"]) {
+for (const sourcePath of ["desktop/main.cjs", "desktop/database.cjs", "desktop/legacy-state.cjs", "desktop/health.cjs", "packaging/stage-desktop.mjs", "packaging/verify-desktop.mjs"]) {
   const result = spawnSync(process.execPath, ["--check", join(projectRoot, sourcePath)], {
     cwd: projectRoot,
     stdio: "inherit",
@@ -98,6 +99,7 @@ assert(
   "Desktop legacy-state importer must be packaged with the Electron main process",
 );
 const stagedServerRoot = join(projectRoot, "desktop", ".stage", "server");
+assert(builder.files?.includes("health.cjs"), "Desktop health probe must be packaged with the launcher");
 if (requireStage || existsSync(stagedServerRoot)) {
   const bootstrapPath = join(stagedServerRoot, "campfire-server.mjs");
   const bundlePath = join(stagedServerRoot, "campfire-server.bundle.mjs");

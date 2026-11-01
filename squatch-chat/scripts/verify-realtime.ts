@@ -1,5 +1,6 @@
 #!/usr/bin/env -S npx tsx
 
+import "dotenv/config";
 import { randomUUID } from "node:crypto";
 import { io, type Socket } from "socket.io-client";
 import { createToken } from "../lib/auth";
