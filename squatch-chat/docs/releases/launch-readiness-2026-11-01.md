@@ -23,6 +23,7 @@ Verified GitHub results for the **base SHA**, not the modified candidate:
 - Compatible lockfile updates for fast-uri, hono, undici, vite, zod, and related dependencies.
 - Release audit covers Electron regardless of npm's dev flag. A regression test failed before the change (exit 0 for a high Electron advisory) and passes after it (exit 1).
 - Desktop waits for the real database health response, with a bounded body and total timeout. The helper is explicitly included in installer/portable packaging.
+- Packaged smoke testing found a missing `next/headers` dependency closure. Staging now traces/copies that closure with Next's bundled file tracer, and staging/verification require the real module. The added gate failed on the old stage and passed after the fix.
 - Stale roadmap handoff corrected: the completion work is already merged.
 - Build script forwards Next CLI flags, preserving Prisma setup for the documented `npm run build -- --webpack` alternative. The realtime verifier now loads `.env` like the unified server.
 
@@ -41,8 +42,10 @@ Windows x64, Node 24.14.1, npm 11.11.0. Full supported Node 22 CI remains requir
 | Production build | Next.js 16.4.3 Webpack production build passed; Turbopack CSS worker exits early on this Windows host with both Node 22 and 24 |
 | Running application / browser smoke | Guest login, create camp, send message, reload, full server restart/session/message persistence passed; no browser console errors observed |
 | Authenticated realtime / Origin isolation | Passed against the production unified server on loopback |
-| Desktop stage / native module / stage validation | Passed with Electron 43.8.6 and a SQLite query under Electron's actual ABI |
-| Current desktop artifacts | Packaging in progress; artifact smoke/signing still pending |
+| Desktop stage / native module / stage validation | Passed with Electron 43.8.6, a SQLite query under Electron's actual ABI, and a real next/headers import |
+| Packaged runtime smoke | Corrected win-unpacked app: database health and login HTTP 200; guest creation and authenticated browser realtime passed; no browser errors observed |
+| Packaged parent watchdog | Force-stopped the identified test parent; its child server exited within 8 seconds |
+| Current desktop artifacts | Portable/installer being rebuilt with the packaging fix; unsigned; installer lifecycle and full artifact acceptance remain open |
 
 The initial local install failed because the agent environment inherited `RUST_LOG=warn`. Fresh SQLite creation failed with that value on Node 24 and 22, and succeeded with `RUST_LOG=info` or with the variable removed. This matches [Prisma issue 29355](https://github.com/prisma/prisma/issues/29355). Validation uses a process-local environment correction; no user/system setting or schema was changed. Vitest also requires unsandboxed execution here because Windows sandbox temp-file renames return EPERM.
 
@@ -57,6 +60,8 @@ node node_modules/electron-builder/cli.js --config packaging/electron-builder.js
 ```
 
 The regular build keeps Next's default bundler. A passing Webpack build does not imply the local Turbopack failure is fixed. Candidate Linux CI must test the normal build, and Windows artifacts must retain the selected bundler in their provenance.
+
+The initial executable build passed but the portable runtime crashed with `Cannot find module './dist/server/request/cookies'`. Those initial files are superseded. The corrected unpacked runtime passed the checks above; an unpacked pass alone is not portable or installer lifecycle sign-off. Do not publish an artifact based only on electron-builder's successful exit or its "signing" log lines: Authenticode status must be checked separately.
 
 ## Remaining dependency review
 

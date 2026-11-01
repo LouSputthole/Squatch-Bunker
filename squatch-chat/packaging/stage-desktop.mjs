@@ -19,6 +19,7 @@ import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
 const Database = require("better-sqlite3");
+const { nodeFileTrace } = require("next/dist/compiled/@vercel/nft");
 const { DESKTOP_SCHEMA_VERSION } = require("../desktop/database.cjs");
 
 const packagingDirectory = dirname(fileURLToPath(import.meta.url));
@@ -186,7 +187,8 @@ async function main() {
   // The custom server bundle is ESM, while Next's public subpath shims are
   // extensionless CommonJS imports. Node ESM requires the explicit `.js`, and
   // standalone tracing omits headers.js because the custom server sits outside
-  // Next's route traces. Keep this packaging-only compatibility shim narrow.
+  // Next's route traces. Trace the shim's dependency closure as well: copying
+  // headers.js alone omits request/cookies, headers, and draft-mode on Webpack.
   const serverBundlePath = join(stageRoot, "campfire-server.bundle.mjs");
   const originalBundle = readFileSync(serverBundlePath, "utf8");
   const rewrittenBundle = originalBundle
@@ -203,6 +205,19 @@ async function main() {
     throw new Error(`Next headers entry shim is missing: ${nextHeadersSource}`);
   }
   cpSync(nextHeadersSource, nextHeadersDestination);
+  const headersTrace = await nodeFileTrace([nextHeadersSource], {
+    base: projectRoot,
+    processCwd: projectRoot,
+  });
+  for (const tracedPath of headersTrace.fileList) {
+    const source = resolve(projectRoot, tracedPath);
+    const destination = resolve(stageRoot, tracedPath);
+    assertInside(join(projectRoot, "node_modules"), source);
+    assertInside(join(stageRoot, "node_modules"), destination);
+    mkdirSync(dirname(destination), { recursive: true });
+    cpSync(source, destination, { dereference: true });
+  }
+  run(process.execPath, ["-e", "require(process.argv[1])", nextHeadersDestination]);
 
   // `next()` custom-server startup loads config-utils, which dynamically asks
   // for this compiled runtime. The minimal standalone server does not, so NFT

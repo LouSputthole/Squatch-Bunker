@@ -134,6 +134,14 @@ if (requireStage || existsSync(stagedServerRoot)) {
   assert(existsSync(bootstrapPath), "Staged desktop server bootstrap is missing");
   assert(existsSync(bundlePath), "Staged desktop server bundle is missing");
   assert(existsSync(headersShimPath), "Staged next/headers.js compatibility shim is missing");
+  // Existence alone passed even when the shim's request/cookies dependency was
+  // absent from the standalone trace. Exercise the real runtime import.
+  const headersProbe = spawnSync(process.execPath, ["-e", "require(process.argv[1])", headersShimPath], {
+    cwd: stagedServerRoot,
+    stdio: "inherit",
+    windowsHide: true,
+  });
+  assert(headersProbe.status === 0, "Staged next/headers runtime dependencies are incomplete");
   assert(existsSync(webpackRuntimePath), "Staged Next compiled webpack runtime is missing");
   assert(existsSync(babelRuntimePath), "Staged Next compiled Babel runtime is missing");
   assert(existsSync(sqliteNativePath), "Staged Electron-native better-sqlite3 binary is missing");
