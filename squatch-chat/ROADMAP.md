@@ -1,15 +1,15 @@
 # Campfire product and engineering roadmap
 
-Updated: 2026-10-08
+Updated: 2026-11-01
 
 Campfire’s direction is **Discord-shaped community infrastructure with a warmer, more intentional social layer**. The goal is not to copy every Discord surface at once. The sequence is: make the current product trustworthy for small communities, prove operations, scale media, then deepen both parity and Campfire’s own identity.
 
-## Handoff — where things stand (2026-10-08)
+## Handoff — where things stand (2026-11-01)
 
-- **Open PRs:** #16 (polish pass) and #17 (completion wave, built on top of #16) both target `main`, CI is green, and every review thread is resolved. Merging #17 lands both, and GitHub then marks #16 as merged. If you merge #16 first, run `gh pr update-branch 17` and wait for CI before merging #17, because branch protection requires an up-to-date branch. Neither PR changes the schema or adds migrations.
-- **Verified on the branch:** about 680 tests, lint, TypeScript, production build, `release:check`, `db:check`, and the dependency audit gate. Both PRs also had code and security reviews.
+- **Merged:** #16 (polish) and #17 (completion) merged on October 12. #18 added the separate Dead Giveaway server on October 21. Current reviewed base is `b3e51ac747e11f1a4d3cde65bdc4bd33c76b360a`; its CI and all three release-gate jobs passed. The published Campfire release is still `v0.0.3`.
+- **Launch stabilization:** fresh November audit found new Next.js critical advisories and an Electron high advisory. This branch updates Next.js to 16.4.3, Electron to 43.8.6, and compatible transitive dependencies; the audit now includes the shipped Electron runtime even though npm marks it dev-only. Desktop startup now waits for healthy database-backed JSON, rejecting error pages and redirects. See the [dated verification record](./docs/releases/launch-readiness-2026-11-01.md) for results and remaining gates.
 - **Not done (machine/infra):** the `0.1.0-beta.1` desktop build. Run `npm run desktop:stage && npm run desktop:verify -- --require-stage && npm run desktop:dist`, smoke-test the portable and installer builds (persistence, LAN toggle, no orphaned server process), record SHA-256 checksums, and attach them to a **draft** GitHub release only. Publishing a release arms the auto-updater for installed 0.0.x users, and the beta tag stays unpublished until the evidence gates in [the release notes](./docs/releases/0.1.0-beta.1.md#evidence-gates-before-tagging) are met.
-- **Needs people/infra:** a two-person real-microphone voice playtest (including Fireside Stage), public HTTPS + TURN staging, code signing, and a browser matrix. Four stale merged branches still need deleting: `agent/public-staging-verifier`, `codex/campfire-five-features-20260712`, `feat/hosted-postgres`, and `release/0.1.0-beta.1`. A scratch Neon project (`flat-leaf-31484496`) also needs deleting.
+- **Needs people/infra:** a two-person real-microphone voice playtest (including Fireside Stage), public HTTPS + TURN staging, code signing, and a browser matrix. No deployed public origin was identified in this review. Historical branch and scratch-database cleanup must be revalidated separately; it is not a launch blocker.
 - **Next build-out:** the rest of Ranger Desk (assignment, evidence, escalation, appeals), then Trail Boards and Gathering Seasons. See [Next five build-outs](#next-five-build-outs).
 
 Status notation:

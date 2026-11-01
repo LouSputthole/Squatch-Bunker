@@ -53,6 +53,7 @@ for (const sourcePath of [
   "desktop/main.cjs",
   "desktop/database.cjs",
   "desktop/legacy-state.cjs",
+  "desktop/health.cjs",
   "desktop/package-lock.json",
   "packaging/stage-desktop.mjs",
   "packaging/verify-desktop.mjs",
@@ -62,7 +63,7 @@ for (const sourcePath of [
   assert(existsSync(join(projectRoot, sourcePath)), `Missing ${sourcePath}`);
 }
 
-for (const sourcePath of ["desktop/main.cjs", "desktop/database.cjs", "desktop/legacy-state.cjs", "packaging/stage-desktop.mjs", "packaging/verify-desktop.mjs"]) {
+for (const sourcePath of ["desktop/main.cjs", "desktop/database.cjs", "desktop/legacy-state.cjs", "desktop/health.cjs", "packaging/stage-desktop.mjs", "packaging/verify-desktop.mjs"]) {
   const result = spawnSync(process.execPath, ["--check", join(projectRoot, sourcePath)], {
     cwd: projectRoot,
     stdio: "inherit",
@@ -98,6 +99,7 @@ assert(
   "Desktop legacy-state importer must be packaged with the Electron main process",
 );
 const stagedServerRoot = join(projectRoot, "desktop", ".stage", "server");
+assert(builder.files?.includes("health.cjs"), "Desktop health probe must be packaged with the launcher");
 if (requireStage || existsSync(stagedServerRoot)) {
   const bootstrapPath = join(stagedServerRoot, "campfire-server.mjs");
   const bundlePath = join(stagedServerRoot, "campfire-server.bundle.mjs");
@@ -132,6 +134,14 @@ if (requireStage || existsSync(stagedServerRoot)) {
   assert(existsSync(bootstrapPath), "Staged desktop server bootstrap is missing");
   assert(existsSync(bundlePath), "Staged desktop server bundle is missing");
   assert(existsSync(headersShimPath), "Staged next/headers.js compatibility shim is missing");
+  // Existence alone passed even when the shim's request/cookies dependency was
+  // absent from the standalone trace. Exercise the real runtime import.
+  const headersProbe = spawnSync(process.execPath, ["-e", "require(process.argv[1])", headersShimPath], {
+    cwd: stagedServerRoot,
+    stdio: "inherit",
+    windowsHide: true,
+  });
+  assert(headersProbe.status === 0, "Staged next/headers runtime dependencies are incomplete");
   assert(existsSync(webpackRuntimePath), "Staged Next compiled webpack runtime is missing");
   assert(existsSync(babelRuntimePath), "Staged Next compiled Babel runtime is missing");
   assert(existsSync(sqliteNativePath), "Staged Electron-native better-sqlite3 binary is missing");

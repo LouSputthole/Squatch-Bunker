@@ -21,4 +21,9 @@ function runNode(script, args = []) {
 
 // Generate both provider-specific clients before Next.js resolves server code.
 runNode(join(root, "scripts", "generate-prisma.mjs"));
-runNode(join(root, "node_modules", "next", "dist", "bin", "next"), ["build"]);
+// Keep Prisma generation when callers select a supported Next build option,
+// e.g. `npm run build -- --webpack` on hosts with a Turbopack worker failure.
+runNode(join(root, "node_modules", "next", "dist", "bin", "next"), [
+  "build",
+  ...process.argv.slice(2),
+]);

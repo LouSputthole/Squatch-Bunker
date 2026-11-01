@@ -28,14 +28,17 @@ if (!(failLevel in SEVERITY_RANK)) {
 
 const lock = JSON.parse(readFileSync(new URL("../package-lock.json", import.meta.url), "utf8"));
 
-// version -> is this copy reachable outside dev-only paths?
+// Electron is declared as a build dependency, but its runtime ships in every
+// desktop artifact. npm's dev flag must not exempt it from the release gate.
+const shippedDesktopRuntimes = new Set(["electron"]);
+// version -> is this copy shipped in a web or desktop release?
 const installed = new Map();
 for (const [path, entry] of Object.entries(lock.packages ?? {})) {
   if (!path || !entry.version) continue;
   const name = path.slice(path.lastIndexOf("node_modules/") + "node_modules/".length);
   if (!installed.has(name)) installed.set(name, new Map());
   const versions = installed.get(name);
-  const isProd = !entry.dev;
+  const isProd = !entry.dev || shippedDesktopRuntimes.has(name);
   versions.set(entry.version, (versions.get(entry.version) ?? false) || isProd);
 }
 
@@ -81,7 +84,7 @@ for (const f of findings) {
   );
 }
 
-// The gate covers dependencies that ship in production; dev-only toolchain
+// The gate covers dependencies that ship in web AND desktop releases; dev-only toolchain
 // findings are reported above for review but do not fail the build unless
 // --include-dev is passed. Accepted dev advisories must be recorded with an
 // owner and expiry in the release evidence (Release Checklist §2).

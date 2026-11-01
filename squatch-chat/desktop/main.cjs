@@ -15,13 +15,13 @@ const {
 const { spawn } = require("node:child_process");
 const { randomBytes } = require("node:crypto");
 const fs = require("node:fs");
-const http = require("node:http");
 const https = require("node:https");
 const net = require("node:net");
 const os = require("node:os");
 const path = require("node:path");
 const { upgradeDesktopDatabase } = require("./database.cjs");
 const { importLegacyDesktopState } = require("./legacy-state.cjs");
+const { isServerHealthy } = require("./health.cjs");
 
 const APP_NAME = "Campfire";
 const STARTUP_TIMEOUT_MS = 45_000;
@@ -208,24 +208,13 @@ function lanUrl() {
   return pick && serverPort ? `http://${pick}:${serverPort}` : null;
 }
 
-function requestServer(url) {
-  return new Promise((resolve) => {
-    const request = http.get(url, (response) => {
-      response.resume();
-      resolve(true);
-    });
-    request.setTimeout(1_000, () => request.destroy());
-    request.once("error", () => resolve(false));
-  });
-}
-
 async function waitForServer(url) {
   const deadline = Date.now() + STARTUP_TIMEOUT_MS;
   while (Date.now() < deadline) {
     if (!serverProcess || serverProcess.exitCode !== null) {
       throw new Error("Campfire server exited during startup");
     }
-    if (await requestServer(url)) return;
+    if (await isServerHealthy(url)) return;
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
   throw new Error(`Campfire server did not start within ${STARTUP_TIMEOUT_MS / 1000} seconds`);
